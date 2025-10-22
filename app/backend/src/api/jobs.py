@@ -28,6 +28,7 @@ def _serialize_job(job: Job) -> dict[str, str | None]:
         "queue": job.queue,
         "download_url": generate_presigned_url(job.result_key) if job.result_key else None,
         "created_at": job.created_at.isoformat() if job.created_at else None,
+        "message": job.message,
     }
 
 
@@ -48,13 +49,27 @@ def job_status(
 
     if result.successful():
         payload = result.result or {}
-        job.status = "done"
-        job.result_key = payload.get("zip_s3_key")
+        status = payload.get("status") or job.status or "completed"
+        job.status = status
+        zip_key = payload.get("zip_s3_key")
+        job.result_key = zip_key or None
+        if payload.get("message"):
+            job.message = payload["message"]
     elif result.failed():
         job.status = "error"
         job.error_message = str(result.result)
+        job.message = job.message or job.error_message
     else:
-        job.status = result.state.lower()
+        state = result.state.lower()
+        normalized = (
+            "queued"
+            if state in {"pending"}
+            else "running"
+            if state in {"started", "received"}
+            else state
+        )
+        if job.status not in {"completed", "skipped", "error"}:
+            job.status = normalized
 
     session.add(job)
     session.commit()

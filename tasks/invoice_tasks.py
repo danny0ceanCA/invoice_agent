@@ -33,11 +33,13 @@ def process_invoice(
     except ValueError:
         parsed_invoice_date = datetime.strptime(invoice_date, "%Y-%m-%d")
 
+    job_id = process_invoice.request.id if hasattr(process_invoice, "request") else None
     agent = InvoiceAgent(
         vendor_id=vendor_id,
         invoice_date=parsed_invoice_date,
         service_month=service_month,
         invoice_code=invoice_code,
+        job_id=job_id,
     )
     try:
         result = agent.run(Path(upload_path))

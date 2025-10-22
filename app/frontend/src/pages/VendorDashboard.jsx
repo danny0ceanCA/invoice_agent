@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { uploadInvoice } from "../api/invoices";
 import { listJobs } from "../api/jobs";
 import JobStatusCard from "./JobStatusCard";
@@ -8,17 +8,21 @@ export default function VendorDashboard() {
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState(null);
 
-  useEffect(() => {
-    async function fetchJobs() {
-      try {
-        const recentJobs = await listJobs();
-        setJobs(recentJobs);
-      } catch (err) {
-        setError("Unable to load jobs");
-      }
+  const fetchJobs = useCallback(async () => {
+    setError(null);
+    try {
+      const recentJobs = await listJobs();
+      setJobs(recentJobs);
+    } catch (err) {
+      setError("Unable to load jobs");
     }
-    fetchJobs();
   }, []);
+
+  useEffect(() => {
+    fetchJobs();
+    const timer = setInterval(fetchJobs, 5000);
+    return () => clearInterval(timer);
+  }, [fetchJobs]);
 
   async function handleUpload(event) {
     const file = event.target.files?.[0];
@@ -34,11 +38,8 @@ export default function VendorDashboard() {
         service_month: new Date().toLocaleString("default", { month: "long", year: "numeric" }),
         invoice_code: `INV-${Date.now()}`,
       };
-      const response = await uploadInvoice(file, payload);
-      setJobs((previous) => [
-        { id: response.job_id, filename: file.name, status: "queued" },
-        ...previous,
-      ]);
+      await uploadInvoice(file, payload);
+      await fetchJobs();
     } catch (err) {
       setError("Upload failed. Please try again.");
     } finally {
