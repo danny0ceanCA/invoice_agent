@@ -26,6 +26,7 @@ def generate_invoice_pdf(
     invoice_date: str,
     service_month: str,
     invoice_code: str | None = None,
+    invoice_number: str | None = None,
 ) -> Path:
     """Render a student-level invoice PDF and return the file path."""
 
@@ -40,8 +41,9 @@ def generate_invoice_pdf(
     pdf_canvas.drawString(50, height - 90, f"Student: {student}")
     pdf_canvas.drawString(50, height - 110, f"Service Month: {service_month}")
     pdf_canvas.drawString(50, height - 130, f"Invoice Date: {invoice_date}")
-    if invoice_code:
-        pdf_canvas.drawString(50, height - 150, f"Invoice #: {invoice_code}")
+    label = invoice_number or invoice_code
+    if label:
+        pdf_canvas.drawString(50, height - 150, f"Invoice #: {label}")
 
     y_position = height - 190
     headers = [

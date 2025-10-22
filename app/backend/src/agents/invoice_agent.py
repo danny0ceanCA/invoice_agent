@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.backend.src.db import session_scope
 from app.backend.src.models.invoice import Invoice
+from app.backend.src.models.job import Job
 from app.backend.src.models.line_item import InvoiceLineItem
 from app.backend.src.services.metrics import invoice_jobs_total
 from app.backend.src.services.pdf_generation import generate_invoice_pdf
@@ -23,6 +25,16 @@ LOGGER = structlog.get_logger(__name__)
 REQUIRED_COLUMNS = ["Client", "Schedule Date", "Hours", "Employee", "Service Code"]
 
 
+def generate_invoice_number(student_name: str, service_month: datetime) -> str:
+    """Return a human-friendly invoice number for a student and month."""
+
+    parts = re.split(r"\s+", student_name.strip())
+    last_name = parts[-1].capitalize() if parts else "Unknown"
+    month_token = service_month.strftime("%b").upper()
+    year_token = service_month.strftime("%Y")
+    return f"{last_name}-{month_token}{year_token}"
+
+
 class InvoiceAgent:
     """Automates transformation of uploaded spreadsheets into invoices."""
 
@@ -30,21 +42,27 @@ class InvoiceAgent:
         self,
         vendor_id: int,
         invoice_date: datetime,
-        service_month: str,
+        service_month: str | datetime,
         invoice_code: str | None = None,
         *,
+        job_id: str | None = None,
         rates: dict[str, float] | None = None,
     ) -> None:
         self.vendor_id = vendor_id
         self.invoice_date = invoice_date
-        self.service_month = service_month
+        self.service_month_display, self.service_month_date = self._normalize_service_month(
+            service_month, invoice_date
+        )
         self.invoice_code = invoice_code or ""
+        self.job_id = job_id
         self.rates = rates or {
             "HHA-SCUSD": 55,
             "LVN-SCUSD": 70,
             "RN-SCUSD": 85,
         }
-        self.logger = LOGGER.bind(vendor_id=vendor_id, service_month=service_month)
+        self.logger = LOGGER.bind(
+            vendor_id=vendor_id, service_month=self.service_month_display, job_id=job_id
+        )
 
     def run(self, file_path: Path) -> dict[str, Any]:
         """Execute the end-to-end invoice generation pipeline."""
@@ -62,12 +80,25 @@ class InvoiceAgent:
             raise ValueError(f"Missing required columns: {missing}")
 
         invoices: list[Invoice] = []
+        duplicates: list[str] = []
         pdf_paths: list[Path] = []
         self.logger.info("invoice_agent_start", upload=str(file_path))
         try:
             with session_scope() as session:
                 for student, student_frame in dataframe.groupby("Client"):
-                    invoice, pdf_path = self._process_student(session, student, student_frame)
+                    invoice_number = generate_invoice_number(student, self.service_month_date)
+                    if self._invoice_exists(session, invoice_number):
+                        duplicates.append(invoice_number)
+                        self.logger.warning(
+                            "duplicate_invoice_skipped",
+                            student=student,
+                            invoice_number=invoice_number,
+                        )
+                        continue
+
+                    invoice, pdf_path = self._process_student(
+                        session, student, student_frame, invoice_number
+                    )
                     invoices.append(invoice)
                     pdf_paths.append(pdf_path)
         except Exception as exc:
@@ -76,19 +107,31 @@ class InvoiceAgent:
             raise
 
         zip_key = self._bundle_invoices(pdf_paths)
-        invoice_jobs_total.labels(status="succeeded").inc()
+        status = "completed" if invoices else "skipped"
+        message = self._compose_job_message(len(invoices), duplicates)
+        metric_label = "succeeded" if invoices else "skipped"
+        invoice_jobs_total.labels(status=metric_label).inc()
+        self._update_job_record(status=status, message=message, zip_key=zip_key)
         self.logger.info(
             "invoice_agent_complete",
             invoice_count=len(invoices),
             zip_key=zip_key,
+            skipped=len(duplicates),
         )
         return {
             "invoice_ids": [invoice.id for invoice in invoices],
             "zip_s3_key": zip_key,
+            "duplicates": duplicates,
+            "status": status,
+            "message": message,
         }
 
     def _process_student(
-        self, session: Session, student: str, student_frame: pd.DataFrame
+        self,
+        session: Session,
+        student: str,
+        student_frame: pd.DataFrame,
+        invoice_number: str,
     ) -> tuple[Invoice, Path]:
         frame = student_frame.copy()
         frame["Rate"] = frame["Service Code"].map(self.rates).fillna(0)
@@ -101,18 +144,20 @@ class InvoiceAgent:
             frame,
             totals,
             self.invoice_date.strftime("%Y-%m-%d"),
-            self.service_month,
+            self.service_month_display,
             invoice_code,
+            invoice_number,
         )
         pdf_key = upload_file(pdf_path, content_type="application/pdf")
 
         invoice = Invoice(
             vendor_id=self.vendor_id,
             student_name=student,
+            invoice_number=invoice_number,
             total_hours=float(totals.get("Hours", 0)),
             total_cost=float(totals.get("Cost", 0)),
             invoice_date=self.invoice_date,
-            service_month=self.service_month,
+            service_month=self.service_month_display,
             invoice_code=invoice_code,
             pdf_s3_key=pdf_key,
             status="generated",
@@ -136,6 +181,17 @@ class InvoiceAgent:
         session.flush()
         return invoice, pdf_path
 
+    def _invoice_exists(self, session: Session, invoice_number: str) -> bool:
+        """Return True when an invoice number already exists for this vendor."""
+
+        return (
+            session.query(Invoice)
+            .filter(Invoice.vendor_id == self.vendor_id)
+            .filter(Invoice.invoice_number == invoice_number)
+            .first()
+            is not None
+        )
+
     def _bundle_invoices(self, pdf_paths: list[Path]) -> str:
         """Create a ZIP archive from generated PDFs and upload it to storage."""
 
@@ -158,5 +214,64 @@ class InvoiceAgent:
             pdf_path.unlink(missing_ok=True)
         return key
 
+    @staticmethod
+    def _normalize_service_month(
+        service_month: str | datetime, invoice_date: datetime
+    ) -> tuple[str, datetime]:
+        """Return a presentation label and canonical datetime for the service month."""
 
-__all__ = ["InvoiceAgent"]
+        if isinstance(service_month, datetime):
+            normalized = service_month.replace(day=1)
+            return normalized.strftime("%B %Y"), normalized
+
+        candidate = str(service_month or "").strip()
+        for fmt in ("%B %Y", "%b %Y"):
+            try:
+                parsed = datetime.strptime(candidate, fmt)
+                return parsed.strftime("%B %Y"), parsed.replace(day=1)
+            except ValueError:
+                continue
+
+        try:
+            parsed_iso = datetime.fromisoformat(candidate)
+            normalized = parsed_iso.replace(day=1)
+            return normalized.strftime("%B %Y"), normalized
+        except ValueError:
+            fallback = invoice_date.replace(day=1)
+            label = candidate or fallback.strftime("%B %Y")
+            return label, fallback
+
+    def _compose_job_message(self, generated_count: int, duplicates: list[str]) -> str:
+        """Build a concise message summarizing job outcomes for the dashboard."""
+
+        if generated_count and duplicates:
+            skipped_numbers = ", ".join(duplicates)
+            return (
+                f"Generated {generated_count} invoice(s). Skipped duplicates: {skipped_numbers}."
+            )
+        if generated_count:
+            return f"Generated {generated_count} invoice(s)."
+        if duplicates:
+            skipped_numbers = ", ".join(duplicates)
+            return f"Skipped duplicate invoice(s): {skipped_numbers}."
+        return "No invoices were generated."
+
+    def _update_job_record(self, status: str, message: str, zip_key: str) -> None:
+        """Persist job metadata after invoice processing completes."""
+
+        if not self.job_id:
+            return
+
+        with session_scope() as session:
+            job: Job | None = session.get(Job, self.job_id)
+            if job is None:
+                self.logger.warning("job_record_missing", job_id=self.job_id)
+                return
+
+            job.status = status
+            job.message = message or None
+            job.result_key = zip_key or None
+            session.add(job)
+
+
+__all__ = ["InvoiceAgent", "generate_invoice_number"]

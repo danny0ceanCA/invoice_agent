@@ -1,21 +1,13 @@
+import axios from "axios";
+
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
-export async function getJobStatus(id) {
-  const response = await fetch(`${API_BASE}/api/jobs/${id}`, {
-    headers: { "X-User-Id": "1" },
-  });
-  if (!response.ok) {
-    throw new Error(`Failed to fetch job ${id}`);
-  }
-  return response.json();
-}
+const client = axios.create({
+  baseURL: API_BASE,
+  headers: { "X-User-Id": "1" },
+});
 
 export async function listJobs() {
-  const response = await fetch(`${API_BASE}/api/jobs`, {
-    headers: { "X-User-Id": "1" },
-  });
-  if (!response.ok) {
-    throw new Error("Failed to fetch jobs");
-  }
-  return response.json();
+  const response = await client.get("/api/jobs");
+  return response.data;
 }
