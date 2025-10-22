@@ -6,3 +6,6 @@ rq
 redis
 reportlab
 pandas
+httpx
+pydantic-settings
+python-multipart

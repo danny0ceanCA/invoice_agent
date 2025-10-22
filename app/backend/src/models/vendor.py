@@ -21,3 +21,4 @@ class Vendor(Base):
     datasets: Mapped[list["Dataset"]] = relationship("Dataset", back_populates="vendor")
     uploads: Mapped[list["Upload"]] = relationship("Upload", back_populates="vendor")
     invoices: Mapped[list["Invoice"]] = relationship("Invoice", back_populates="vendor")
+    jobs: Mapped[list["Job"]] = relationship("Job", back_populates="vendor")
