@@ -2,7 +2,7 @@
 
 from fastapi import FastAPI
 
-from .api import admin, analytics, auth, health, invoices, uploads
+from .api import admin, analytics, auth, health, invoices, jobs, uploads
 from .core.logging import configure_logging
 
 
@@ -15,6 +15,7 @@ def create_app() -> FastAPI:
     app.include_router(auth.router, prefix="/api")
     app.include_router(uploads.router, prefix="/api")
     app.include_router(invoices.router, prefix="/api")
+    app.include_router(jobs.router, prefix="/api")
     app.include_router(analytics.router, prefix="/api")
     app.include_router(admin.router, prefix="/api")
 

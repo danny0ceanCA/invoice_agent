@@ -24,4 +24,3 @@ class Upload(Base):
 
     vendor: Mapped["Vendor"] = relationship("Vendor", back_populates="uploads")
     dataset: Mapped["Dataset"] = relationship("Dataset", back_populates="uploads")
-    invoices: Mapped[list["Invoice"]] = relationship("Invoice", back_populates="upload")
