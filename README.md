@@ -45,6 +45,17 @@ README.md                 # Project overview
 4. Run tests with `pytest` (backend) and `npm test` / `npm run test:e2e` (frontend) once the
    corresponding suites are implemented.
 
+## Development seed data
+
+- Run `python seed_dev_data.py` to create the demo vendor and user in your local database.
+  The script prints the `X-User-Id` header value required when calling protected endpoints
+  such as `/api/jobs` or `/api/invoices/generate`.
+- If the API server is already running you can also call `POST /api/admin/seed` to seed the
+  same records and receive the header value in the JSON response.
+
+After seeding, include the returned `X-User-Id` header in your automation or API clients so the
+requests are authenticated against the demo user.
+
 ## Next Steps
 
 - Implement Auth0 JWT validation middleware.
