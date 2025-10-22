@@ -20,5 +20,6 @@ class User(Base):
     vendor_id: Mapped[int | None] = mapped_column(ForeignKey("vendors.id"), nullable=True)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    vendor: Mapped["Vendor" | None] = relationship("Vendor", back_populates="users")
+    vendor: Mapped["Vendor | None"] = relationship("Vendor", back_populates="users")
     approvals: Mapped[list["Approval"]] = relationship("Approval", back_populates="reviewer")
+    jobs: Mapped[list["Job"]] = relationship("Job", back_populates="user")

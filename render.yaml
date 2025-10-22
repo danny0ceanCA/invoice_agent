@@ -1,39 +1,44 @@
 services:
   - type: web
-    name: invoice-agent-backend
+    name: invoice-api
     env: python
-    plan: starter
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app.backend.src.main:app --host 0.0.0.0 --port 8000
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "gunicorn app.backend.src.main:app -k uvicorn.workers.UvicornWorker --workers=4"
     envVars:
       - key: DATABASE_URL
         fromDatabase:
-          name: invoice-agent-postgres
+          name: postgres
           property: connectionString
       - key: REDIS_URL
         fromService:
+          name: redis
           type: redis
-          name: invoice-agent-redis
           property: connectionString
-    healthCheckPath: /api/health
-
+  - type: worker
+    name: invoice-worker-small
+    env: python
+    startCommand: "celery -A invoice_agent.tasks.worker.celery worker -Q small --concurrency=4"
+    autoscale: true
+  - type: worker
+    name: invoice-worker-medium
+    env: python
+    startCommand: "celery -A invoice_agent.tasks.worker.celery worker -Q medium --concurrency=2"
+    autoscale: true
+  - type: worker
+    name: invoice-worker-large
+    env: python
+    startCommand: "celery -A invoice_agent.tasks.worker.celery worker -Q large --concurrency=1"
+    autoscale: true
+  - type: redis
+    name: redis
+    plan: standard
+  - type: pserv
+    name: postgres
+    plan: standard
   - type: static
-    name: invoice-agent-frontend
-    buildCommand: npm install && npm run build
+    name: invoice-frontend
+    buildCommand: "npm install && npm run build"
     publishPath: dist
     envVars:
       - key: VITE_API_BASE_URL
-        value: https://invoice-agent-backend.onrender.com
-
-  - type: worker
-    name: invoice-agent-rq-worker
-    env: python
-    plan: starter
-    buildCommand: pip install -r requirements.txt
-    startCommand: rq worker --url $REDIS_URL default
-
-postgres:
-  - name: invoice-agent-postgres
-
-redis:
-  - name: invoice-agent-redis
+        value: https://invoice-api.onrender.com

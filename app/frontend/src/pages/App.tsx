@@ -1,25 +1,37 @@
 import { useState } from "react";
-
-import { AdminLanding } from "./admin/AdminLanding";
-import { DistrictLanding } from "./district/DistrictLanding";
-import { VendorLanding } from "./vendor/VendorLanding";
+import VendorDashboard from "./VendorDashboard.jsx";
 
 const tabs = [
-  { key: "vendor", label: "Vendor", component: <VendorLanding /> },
-  { key: "district", label: "District", component: <DistrictLanding /> },
-  { key: "admin", label: "Admin", component: <AdminLanding /> },
+  { key: "vendor", label: "Vendor", component: <VendorDashboard /> },
+  {
+    key: "district",
+    label: "District",
+    component: (
+      <div className="text-slate-600">
+        District analytics and approvals are coming soon.
+      </div>
+    ),
+  },
+  {
+    key: "admin",
+    label: "Admin",
+    component: (
+      <div className="text-slate-600">
+        Administrative tooling for dataset profiles will land shortly.
+      </div>
+    ),
+  },
 ];
 
 export function App() {
   const [active, setActive] = useState("vendor");
-
   const activeTab = tabs.find((tab) => tab.key === active) ?? tabs[0];
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
       <header className="border-b bg-white">
         <div className="mx-auto flex max-w-4xl items-center justify-between px-6 py-4">
-          <h1 className="text-xl font-semibold">ASCS x SCUSD Invoice Agent</h1>
+          <h1 className="text-xl font-semibold">ASCS Invoice Automation</h1>
           <nav className="flex gap-2">
             {tabs.map((tab) => (
               <button

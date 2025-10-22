@@ -15,7 +15,7 @@ class Upload(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     vendor_id: Mapped[int] = mapped_column(ForeignKey("vendors.id"), nullable=False, index=True)
-    dataset_id: Mapped[int] = mapped_column(ForeignKey("datasets.id"), nullable=False)
+    dataset_id: Mapped[int] = mapped_column(ForeignKey("dataset_profiles.id"), nullable=False)
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
     month: Mapped[str] = mapped_column(String(7), nullable=False, index=True)
     row_count: Mapped[int | None] = mapped_column(Integer)
@@ -23,5 +23,5 @@ class Upload(Base):
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     vendor: Mapped["Vendor"] = relationship("Vendor", back_populates="uploads")
-    dataset: Mapped["Dataset"] = relationship("Dataset", back_populates="uploads")
+    dataset: Mapped["DatasetProfile"] = relationship("DatasetProfile", back_populates="uploads")
     invoices: Mapped[list["Invoice"]] = relationship("Invoice", back_populates="upload")
