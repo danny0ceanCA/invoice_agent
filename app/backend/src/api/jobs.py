@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.backend.src.core.security import get_current_user
-from app.backend.src.db import get_session
+from app.backend.src.db import get_session_dependency
 from app.backend.src.models import Job, User
 from app.backend.src.services.s3 import generate_presigned_url
 try:
@@ -35,7 +35,7 @@ def _serialize_job(job: Job) -> dict[str, str | None]:
 @router.get("/{job_id}")
 def job_status(
     job_id: str,
-    session: Session = Depends(get_session),
+    session: Session = Depends(get_session_dependency),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, str | None]:
     """Return the status of a background job if it belongs to the current user."""
@@ -78,7 +78,7 @@ def job_status(
 
 @router.get("")
 def list_jobs(
-    session: Session = Depends(get_session),
+    session: Session = Depends(get_session_dependency),
     current_user: User = Depends(get_current_user),
 ) -> list[dict[str, str | None]]:
     """Return the most recent jobs for the authenticated user."""

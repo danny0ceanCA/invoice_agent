@@ -36,6 +36,11 @@ class Settings(BaseSettings):
 
     model_config = {"case_sensitive": False}
 
+    def get(self, key: str, default: object | None = None) -> object | None:
+        """Dictionary-style access to configuration values."""
+
+        return self.model_dump(by_alias=True).get(key, default)
+
     @property
     def broker_url(self) -> str:
         """Return the Celery broker URL, defaulting to Redis."""
@@ -51,6 +56,12 @@ class Settings(BaseSettings):
         if self.redis_url.endswith("/0"):
             return f"{self.redis_url[:-2]}/1"
         return self.redis_url
+
+    @property
+    def redis_enabled(self) -> bool:
+        """Return ``True`` when Redis integrations should be used."""
+
+        return str(self.get("REDIS_ENABLED", "true")).lower() == "true"
 
 
 @lru_cache()

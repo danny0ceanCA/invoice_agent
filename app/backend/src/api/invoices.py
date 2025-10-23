@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from app.backend.src.core.security import get_current_user
-from app.backend.src.db import get_session
+from app.backend.src.db import get_session_dependency
 from app.backend.src.models import Job, User
 try:
     from invoice_agent.tasks.invoice_tasks import process_invoice
@@ -34,7 +34,7 @@ async def generate_invoices(
     invoice_date: str = Form(...),
     service_month: str = Form(...),
     invoice_code: str | None = Form(None),
-    session: Session = Depends(get_session),
+    session: Session = Depends(get_session_dependency),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, str]:
     """Trigger the invoice processing pipeline for a vendor upload."""
