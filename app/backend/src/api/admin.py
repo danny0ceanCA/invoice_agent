@@ -3,14 +3,14 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.backend.src.db import get_session
+from app.backend.src.db import get_session_dependency
 from app.backend.src.services.seed import seed_development_user
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
 @router.post("/seed")
-def load_seed_data(session: Session = Depends(get_session)) -> dict[str, object]:
+def load_seed_data(session: Session = Depends(get_session_dependency)) -> dict[str, object]:
     """Create (or return) a demo vendor and user for local development."""
 
     result = seed_development_user(session)

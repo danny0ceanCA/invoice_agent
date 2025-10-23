@@ -7,7 +7,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.backend.src.db import get_session
+from app.backend.src.db import get_session_dependency
 
 router = APIRouter(tags=["health"])
 
@@ -20,7 +20,7 @@ def liveness() -> dict[str, str]:
 
 
 @router.get("/health/ready")
-def readiness(session: Session = Depends(get_session)) -> dict[str, str]:
+def readiness(session: Session = Depends(get_session_dependency)) -> dict[str, str]:
     """Return readiness information, ensuring the database connection is healthy."""
 
     session.execute(text("SELECT 1"))

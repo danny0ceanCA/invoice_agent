@@ -2,23 +2,37 @@
 
 from __future__ import annotations
 
-from collections.abc import Generator, Iterator
+from collections.abc import Iterator
 from contextlib import contextmanager
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, scoped_session, sessionmaker
+from sqlalchemy.orm import Session
 
-from app.backend.src.core.config import get_settings
+from .session import SessionLocal, engine as _engine
 
-_settings = get_settings()
-_engine = create_engine(
-    _settings.database_url,
-    pool_pre_ping=True,
-    future=True,
-)
-_SessionFactory = scoped_session(
-    sessionmaker(bind=_engine, autocommit=False, autoflush=False, expire_on_commit=False)
-)
+# Safe session manager for FastAPI + SQLAlchemy
+# Prevents premature close() during active transactions
+
+
+@contextmanager
+def get_session() -> Iterator[Session]:
+    """Context manager yielding a SQLAlchemy session."""
+
+    db = SessionLocal()
+    try:
+        yield db
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        if db.is_active:
+            db.close()
+
+
+def get_session_dependency() -> Iterator[Session]:
+    """FastAPI dependency wrapping :func:`get_session`."""
+
+    with get_session() as session:
+        yield session
 
 
 def get_engine():
@@ -27,21 +41,11 @@ def get_engine():
     return _engine
 
 
-def get_session() -> Generator[Session, None, None]:
-    """FastAPI dependency yielding a SQLAlchemy session."""
-
-    session = _SessionFactory()
-    try:
-        yield session
-    finally:
-        session.close()
-
-
 @contextmanager
 def session_scope() -> Iterator[Session]:
     """Provide a transactional scope for background workers."""
 
-    session = _SessionFactory()
+    session = SessionLocal()
     try:
         yield session
         session.commit()
@@ -49,7 +53,13 @@ def session_scope() -> Iterator[Session]:
         session.rollback()
         raise
     finally:
-        session.close()
+        if session.is_active:
+            session.close()
 
 
-__all__ = ["get_engine", "get_session", "session_scope"]
+__all__ = [
+    "get_engine",
+    "get_session",
+    "get_session_dependency",
+    "session_scope",
+]

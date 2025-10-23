@@ -5,13 +5,13 @@ from __future__ import annotations
 from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.backend.src.db import get_session
+from app.backend.src.db import get_session_dependency
 from app.backend.src.models import User
 
 
 def get_current_user(
     user_id: int = Header(alias="X-User-Id"),
-    session: Session = Depends(get_session),
+    session: Session = Depends(get_session_dependency),
 ) -> User:
     """Resolve the authenticated user from the request headers."""
 
