@@ -1,20 +1,24 @@
 """Security helpers for Auth0 integration."""
 
-from fastapi import Depends
+from __future__ import annotations
+
+from fastapi import Depends, Header, HTTPException, status
+from sqlalchemy.orm import Session
+
+from app.backend.src.db import get_session_dependency
+from app.backend.src.models import User
 
 
-def auth_dependency() -> dict:
-    """Placeholder dependency representing the authenticated user."""
+def get_current_user(
+    user_id: int = Header(alias="X-User-Id"),
+    session: Session = Depends(get_session_dependency),
+) -> User:
+    """Resolve the authenticated user from the request headers."""
 
-    return {"sub": "auth0|placeholder"}
+    user = session.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user")
+    return user
 
 
-def require_role(required_role: str):
-    """Return a dependency that would enforce RBAC."""
-
-    def dependency(user: dict = Depends(auth_dependency)) -> dict:
-        if user.get("role") != required_role:
-            raise PermissionError("RBAC enforcement not yet implemented")
-        return user
-
-    return dependency
+__all__ = ["get_current_user"]

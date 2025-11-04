@@ -18,6 +18,7 @@ class Vendor(Base):
     contact_email: Mapped[str] = mapped_column(String(255), nullable=False)
 
     users: Mapped[list["User"]] = relationship("User", back_populates="vendor")
-    datasets: Mapped[list["Dataset"]] = relationship("Dataset", back_populates="vendor")
+    datasets: Mapped[list["DatasetProfile"]] = relationship("DatasetProfile", back_populates="vendor")
     uploads: Mapped[list["Upload"]] = relationship("Upload", back_populates="vendor")
     invoices: Mapped[list["Invoice"]] = relationship("Invoice", back_populates="vendor")
+    jobs: Mapped[list["Job"]] = relationship("Job", back_populates="vendor")

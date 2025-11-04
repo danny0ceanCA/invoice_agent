@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import ForeignKey, Integer, Numeric, String
+from sqlalchemy import Float, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
@@ -18,10 +18,12 @@ class InvoiceLineItem(Base):
     student: Mapped[str] = mapped_column(String(255), nullable=False)
     clinician: Mapped[str] = mapped_column(String(255), nullable=False)
     service_code: Mapped[str] = mapped_column(String(50), nullable=False)
-    site: Mapped[str | None] = mapped_column(String(255))
-    hours: Mapped[Numeric] = mapped_column(Numeric(scale=2), nullable=False)
-    rate: Mapped[Numeric] = mapped_column(Numeric(scale=2), nullable=False)
-    cost: Mapped[Numeric] = mapped_column(Numeric(scale=2), nullable=False)
-    service_date: Mapped[str] = mapped_column(String(10), nullable=False)
+    hours: Mapped[float] = mapped_column(Float, nullable=False)
+    rate: Mapped[float] = mapped_column(Float, nullable=False)
+    cost: Mapped[float] = mapped_column(Float, nullable=False)
+    service_date: Mapped[str] = mapped_column(String(32), nullable=False)
 
     invoice: Mapped["Invoice"] = relationship("Invoice", back_populates="line_items")
+
+
+__all__ = ["InvoiceLineItem"]
