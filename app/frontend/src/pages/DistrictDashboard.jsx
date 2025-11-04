@@ -60,6 +60,7 @@ const vendorProfiles = [
           status: "Approved",
           processedOn: "Feb 2, 2024",
           pdfUrl: "/invoices/harbor-education/january-2024.pdf",
+          timesheetCsvUrl: "/timesheets/harbor-education/january-2024.csv",
           students: [
             { id: "maya-chen", name: "Maya Chen", service: "RN", amount: "$3,041" },
             { id: "jordan-miles", name: "Jordan Miles", service: "RN", amount: "$2,996" },
@@ -73,6 +74,7 @@ const vendorProfiles = [
           status: "Approved",
           processedOn: "Mar 4, 2024",
           pdfUrl: "/invoices/harbor-education/february-2024.pdf",
+          timesheetCsvUrl: "/timesheets/harbor-education/february-2024.csv",
           students: [
             { id: "maya-chen", name: "Maya Chen", service: "RN", amount: "$3,041" },
             { id: "jordan-miles", name: "Jordan Miles", service: "RN", amount: "$2,996" },
@@ -86,6 +88,7 @@ const vendorProfiles = [
           status: "In Review",
           processedOn: "Apr 8, 2024",
           pdfUrl: "/invoices/harbor-education/march-2024.pdf",
+          timesheetCsvUrl: "/timesheets/harbor-education/march-2024.csv",
           students: [
             { id: "maya-chen", name: "Maya Chen", service: "RN", amount: "$3,105" },
             { id: "jordan-miles", name: "Jordan Miles", service: "RN", amount: "$3,020" },
@@ -99,6 +102,7 @@ const vendorProfiles = [
           status: "Pending Submission",
           processedOn: "Due May 5, 2024",
           pdfUrl: "/invoices/harbor-education/april-2024-draft.pdf",
+          timesheetCsvUrl: "/timesheets/harbor-education/april-2024-draft.csv",
           students: [
             { id: "maya-chen", name: "Maya Chen", service: "RN", amount: "$3,120" },
             { id: "jordan-miles", name: "Jordan Miles", service: "RN", amount: "$3,055" },
@@ -113,6 +117,7 @@ const vendorProfiles = [
           status: "Approved",
           processedOn: "Nov 6, 2023",
           pdfUrl: "/invoices/harbor-education/october-2023.pdf",
+          timesheetCsvUrl: "/timesheets/harbor-education/october-2023.csv",
           students: [
             { id: "maya-chen", name: "Maya Chen", service: "RN", amount: "$2,940" },
             { id: "amir-patel", name: "Amir Patel", service: "SLP", amount: "$3,115" },
@@ -124,6 +129,7 @@ const vendorProfiles = [
           status: "Approved",
           processedOn: "Dec 7, 2023",
           pdfUrl: "/invoices/harbor-education/november-2023.pdf",
+          timesheetCsvUrl: "/timesheets/harbor-education/november-2023.csv",
           students: [
             { id: "maya-chen", name: "Maya Chen", service: "RN", amount: "$2,940" },
             { id: "riley-watts", name: "Riley Watts", service: "SLP", amount: "$3,045" },
@@ -135,6 +141,7 @@ const vendorProfiles = [
           status: "Approved",
           processedOn: "Jan 5, 2024",
           pdfUrl: "/invoices/harbor-education/december-2023.pdf",
+          timesheetCsvUrl: "/timesheets/harbor-education/december-2023.csv",
           students: [
             { id: "maya-chen", name: "Maya Chen", service: "RN", amount: "$3,005" },
             { id: "jordan-miles", name: "Jordan Miles", service: "RN", amount: "$2,960" },
@@ -170,6 +177,7 @@ const vendorProfiles = [
           status: "Approved",
           processedOn: "Feb 1, 2024",
           pdfUrl: "/invoices/lumen-learning/january-2024.pdf",
+          timesheetCsvUrl: "/timesheets/lumen-learning/january-2024.csv",
           students: [
             { id: "elliot-ramirez", name: "Elliot Ramirez", service: "OTR", amount: "$2,880" },
             { id: "tessa-nguyen", name: "Tessa Nguyen", service: "OTR", amount: "$2,760" },
@@ -182,6 +190,7 @@ const vendorProfiles = [
           status: "Needs Revision",
           processedOn: "Action Required",
           pdfUrl: "/invoices/lumen-learning/february-2024-draft.pdf",
+          timesheetCsvUrl: "/timesheets/lumen-learning/february-2024-draft.csv",
           students: [
             { id: "elliot-ramirez", name: "Elliot Ramirez", service: "OTR", amount: "$2,880" },
             { id: "tessa-nguyen", name: "Tessa Nguyen", service: "OTR", amount: "$2,760" },
@@ -195,6 +204,7 @@ const vendorProfiles = [
           status: "Pending Submission",
           processedOn: "Due Apr 28, 2024",
           pdfUrl: "/invoices/lumen-learning/march-2024-draft.pdf",
+          timesheetCsvUrl: "/timesheets/lumen-learning/march-2024-draft.csv",
           students: [
             { id: "elliot-ramirez", name: "Elliot Ramirez", service: "OTR", amount: "$2,940" },
             { id: "tessa-nguyen", name: "Tessa Nguyen", service: "OTR", amount: "$2,820" },
@@ -210,6 +220,7 @@ const vendorProfiles = [
           status: "Approved",
           processedOn: "Dec 2, 2023",
           pdfUrl: "/invoices/lumen-learning/november-2023.pdf",
+          timesheetCsvUrl: "/timesheets/lumen-learning/november-2023.csv",
           students: [
             { id: "elliot-ramirez", name: "Elliot Ramirez", service: "OTR", amount: "$2,760" },
             { id: "ian-barnes", name: "Ian Barnes", service: "COTA", amount: "$2,280" },
@@ -221,6 +232,7 @@ const vendorProfiles = [
           status: "Approved",
           processedOn: "Jan 3, 2024",
           pdfUrl: "/invoices/lumen-learning/december-2023.pdf",
+          timesheetCsvUrl: "/timesheets/lumen-learning/december-2023.csv",
           students: [
             { id: "elliot-ramirez", name: "Elliot Ramirez", service: "OTR", amount: "$2,820" },
             { id: "tessa-nguyen", name: "Tessa Nguyen", service: "OTR", amount: "$2,700" },
@@ -256,6 +268,7 @@ const vendorProfiles = [
           status: "Approved",
           processedOn: "Mar 3, 2024",
           pdfUrl: "/invoices/northstar-analytics/february-2024.pdf",
+          timesheetCsvUrl: "/timesheets/northstar-analytics/february-2024.csv",
           students: [
             { id: "data-warehouse", name: "Data Warehouse Support", service: "Data Strategy", amount: "$8,960" },
             { id: "kpi-dashboard", name: "KPI Dashboard Refresh", service: "Analytics", amount: "$7,420" },
@@ -267,6 +280,7 @@ const vendorProfiles = [
           status: "In Review",
           processedOn: "Apr 9, 2024",
           pdfUrl: "/invoices/northstar-analytics/march-2024.pdf",
+          timesheetCsvUrl: "/timesheets/northstar-analytics/march-2024.csv",
           students: [
             { id: "data-warehouse", name: "Data Warehouse Support", service: "Data Strategy", amount: "$8,960" },
             { id: "attendance-dashboard", name: "Attendance Dashboard Updates", service: "Analytics", amount: "$7,540" },
@@ -279,6 +293,7 @@ const vendorProfiles = [
           status: "Pending Submission",
           processedOn: "Due May 10, 2024",
           pdfUrl: "/invoices/northstar-analytics/april-2024-draft.pdf",
+          timesheetCsvUrl: "/timesheets/northstar-analytics/april-2024-draft.csv",
           students: [
             { id: "data-warehouse", name: "Data Warehouse Support", service: "Data Strategy", amount: "$8,960" },
             { id: "attendance-dashboard", name: "Attendance Dashboard Updates", service: "Analytics", amount: "$7,540" },
@@ -292,6 +307,7 @@ const vendorProfiles = [
           status: "Approved",
           processedOn: "Jan 4, 2024",
           pdfUrl: "/invoices/northstar-analytics/december-2023.pdf",
+          timesheetCsvUrl: "/timesheets/northstar-analytics/december-2023.csv",
           students: [
             { id: "data-warehouse", name: "Data Warehouse Support", service: "Data Strategy", amount: "$8,760" },
             { id: "attendance-dashboard", name: "Attendance Dashboard Updates", service: "Analytics", amount: "$7,320" },
@@ -327,9 +343,23 @@ export default function DistrictDashboard() {
       return null;
     }
 
+    const invoicePdfBase = invoiceRecord.pdfUrl ?? "";
+    const invoiceTimesheetBase = invoiceRecord.timesheetCsvUrl ?? "";
+
+    const studentsWithSamples = invoiceRecord.students?.map((entry) => ({
+      ...entry,
+      pdfUrl:
+        entry.pdfUrl ??
+        (invoicePdfBase ? `${invoicePdfBase.replace(/\.pdf$/, "")}/${entry.id}.pdf` : null),
+      timesheetUrl:
+        entry.timesheetUrl ??
+        (invoiceTimesheetBase ? `${invoiceTimesheetBase.replace(/\.csv$/, "")}/${entry.id}.csv` : null),
+    }));
+
     return {
       ...invoiceRecord,
       year: selectedInvoiceKey.year,
+      students: studentsWithSamples ?? [],
     };
   }, [selectedInvoiceKey, selectedVendor]);
 
@@ -466,19 +496,6 @@ export default function DistrictDashboard() {
                       Download PDF Invoice
                     </a>
                   </div>
-                  <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
-                    <span className="inline-flex items-center rounded-full bg-slate-900 px-3 py-1 text-sm font-semibold text-white">
-                      Total {activeInvoiceDetails.total}
-                    </span>
-                    <a
-                      href={activeInvoiceDetails.pdfUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center rounded-full bg-amber-500 px-3 py-1.5 text-sm font-semibold text-white shadow-sm transition hover:bg-amber-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
-                    >
-                      Download PDF Invoice
-                    </a>
-                  </div>
                 </div>
 
                 <div className="space-y-3">
@@ -487,10 +504,16 @@ export default function DistrictDashboard() {
                     <ul className="space-y-3">
                       {activeInvoiceDetails.students.map((entry) => {
                         const invoicePdfBase = activeInvoiceDetails.pdfUrl ?? "";
+                        const invoiceTimesheetBase = activeInvoiceDetails.timesheetCsvUrl ?? "";
                         const studentInvoiceUrl = entry.pdfUrl
                           ? entry.pdfUrl
                           : invoicePdfBase
                           ? `${invoicePdfBase.replace(/\.pdf$/, "")}/${entry.id}.pdf`
+                          : null;
+                        const studentTimesheetUrl = entry.timesheetUrl
+                          ? entry.timesheetUrl
+                          : invoiceTimesheetBase
+                          ? `${invoiceTimesheetBase.replace(/\.csv$/, "")}/${entry.id}.csv`
                           : null;
 
                         return (
@@ -505,7 +528,7 @@ export default function DistrictDashboard() {
                                 </span>
                                 {entry.service ? <span>, Service: {entry.service}</span> : null}
                               </p>
-                              <div className="flex items-center gap-3 sm:ml-6 sm:self-start">
+                              <div className="flex flex-wrap items-center gap-2 sm:ml-6 sm:self-start">
                                 {entry.amount ? (
                                   <span className="font-semibold text-slate-900">{entry.amount}</span>
                                 ) : null}
@@ -517,6 +540,16 @@ export default function DistrictDashboard() {
                                     className="inline-flex items-center rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700 transition hover:bg-amber-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
                                   >
                                     PDF Invoice
+                                  </a>
+                                ) : null}
+                                {studentTimesheetUrl ? (
+                                  <a
+                                    href={studentTimesheetUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700 transition hover:bg-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
+                                  >
+                                    Timesheet CSV
                                   </a>
                                 ) : null}
                               </div>
