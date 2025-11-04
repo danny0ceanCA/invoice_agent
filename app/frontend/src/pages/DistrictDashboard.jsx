@@ -61,10 +61,10 @@ const vendorProfiles = [
           processedOn: "Feb 2, 2024",
           pdfUrl: "/invoices/harbor-education/january-2024.pdf",
           students: [
-            { id: "maya-chen", name: "Maya Chen", nurse: "Lisa Gomez, RN", rate: "$92/hr" },
-            { id: "jordan-miles", name: "Jordan Miles", nurse: "Lisa Gomez, RN", rate: "$92/hr" },
-            { id: "amir-patel", name: "Amir Patel", nurse: "Courtney Blake, SLP", rate: "$88/hr" },
-            { id: "riley-watts", name: "Riley Watts", nurse: "Courtney Blake, SLP", rate: "$88/hr" },
+            { id: "maya-chen", name: "Maya Chen", service: "RN", amount: "$3,041" },
+            { id: "jordan-miles", name: "Jordan Miles", service: "RN", amount: "$2,996" },
+            { id: "amir-patel", name: "Amir Patel", service: "SLP", amount: "$3,210" },
+            { id: "riley-watts", name: "Riley Watts", service: "SLP", amount: "$2,870" },
           ],
         },
         {
@@ -74,10 +74,10 @@ const vendorProfiles = [
           processedOn: "Mar 4, 2024",
           pdfUrl: "/invoices/harbor-education/february-2024.pdf",
           students: [
-            { id: "maya-chen", name: "Maya Chen", nurse: "Lisa Gomez, RN", rate: "$92/hr" },
-            { id: "jordan-miles", name: "Jordan Miles", nurse: "Lisa Gomez, RN", rate: "$92/hr" },
-            { id: "sophia-cabrera", name: "Sophia Cabrera", nurse: "Courtney Blake, SLP", rate: "$90/hr" },
-            { id: "leo-kim", name: "Leo Kim", nurse: "Courtney Blake, SLP", rate: "$90/hr" },
+            { id: "maya-chen", name: "Maya Chen", service: "RN", amount: "$3,041" },
+            { id: "jordan-miles", name: "Jordan Miles", service: "RN", amount: "$2,996" },
+            { id: "sophia-cabrera", name: "Sophia Cabrera", service: "SLP", amount: "$3,155" },
+            { id: "leo-kim", name: "Leo Kim", service: "SLP", amount: "$2,890" },
           ],
         },
         {
@@ -87,10 +87,10 @@ const vendorProfiles = [
           processedOn: "Apr 8, 2024",
           pdfUrl: "/invoices/harbor-education/march-2024.pdf",
           students: [
-            { id: "maya-chen", name: "Maya Chen", nurse: "Lisa Gomez, RN", rate: "$94/hr" },
-            { id: "jordan-miles", name: "Jordan Miles", nurse: "Lisa Gomez, RN", rate: "$94/hr" },
-            { id: "amir-patel", name: "Amir Patel", nurse: "Courtney Blake, SLP", rate: "$90/hr" },
-            { id: "riley-watts", name: "Riley Watts", nurse: "Courtney Blake, SLP", rate: "$90/hr" },
+            { id: "maya-chen", name: "Maya Chen", service: "RN", amount: "$3,105" },
+            { id: "jordan-miles", name: "Jordan Miles", service: "RN", amount: "$3,020" },
+            { id: "amir-patel", name: "Amir Patel", service: "SLP", amount: "$3,180" },
+            { id: "riley-watts", name: "Riley Watts", service: "SLP", amount: "$2,920" },
           ],
         },
         {
@@ -100,9 +100,9 @@ const vendorProfiles = [
           processedOn: "Due May 5, 2024",
           pdfUrl: "/invoices/harbor-education/april-2024-draft.pdf",
           students: [
-            { id: "maya-chen", name: "Maya Chen", nurse: "Lisa Gomez, RN", rate: "$94/hr" },
-            { id: "jordan-miles", name: "Jordan Miles", nurse: "Lisa Gomez, RN", rate: "$94/hr" },
-            { id: "sophia-cabrera", name: "Sophia Cabrera", nurse: "Courtney Blake, SLP", rate: "$92/hr" },
+            { id: "maya-chen", name: "Maya Chen", service: "RN", amount: "$3,120" },
+            { id: "jordan-miles", name: "Jordan Miles", service: "RN", amount: "$3,055" },
+            { id: "sophia-cabrera", name: "Sophia Cabrera", service: "SLP", amount: "$2,985" },
           ],
         },
       ],
@@ -114,8 +114,8 @@ const vendorProfiles = [
           processedOn: "Nov 6, 2023",
           pdfUrl: "/invoices/harbor-education/october-2023.pdf",
           students: [
-            { id: "maya-chen", name: "Maya Chen", nurse: "Lisa Gomez, RN", rate: "$90/hr" },
-            { id: "amir-patel", name: "Amir Patel", nurse: "Courtney Blake, SLP", rate: "$86/hr" },
+            { id: "maya-chen", name: "Maya Chen", service: "RN", amount: "$2,940" },
+            { id: "amir-patel", name: "Amir Patel", service: "SLP", amount: "$3,115" },
           ],
         },
         {
@@ -125,8 +125,8 @@ const vendorProfiles = [
           processedOn: "Dec 7, 2023",
           pdfUrl: "/invoices/harbor-education/november-2023.pdf",
           students: [
-            { id: "maya-chen", name: "Maya Chen", nurse: "Lisa Gomez, RN", rate: "$90/hr" },
-            { id: "riley-watts", name: "Riley Watts", nurse: "Courtney Blake, SLP", rate: "$86/hr" },
+            { id: "maya-chen", name: "Maya Chen", service: "RN", amount: "$2,940" },
+            { id: "riley-watts", name: "Riley Watts", service: "SLP", amount: "$3,045" },
           ],
         },
         {
@@ -136,9 +136,9 @@ const vendorProfiles = [
           processedOn: "Jan 5, 2024",
           pdfUrl: "/invoices/harbor-education/december-2023.pdf",
           students: [
-            { id: "maya-chen", name: "Maya Chen", nurse: "Lisa Gomez, RN", rate: "$90/hr" },
-            { id: "jordan-miles", name: "Jordan Miles", nurse: "Lisa Gomez, RN", rate: "$90/hr" },
-            { id: "amir-patel", name: "Amir Patel", nurse: "Courtney Blake, SLP", rate: "$88/hr" },
+            { id: "maya-chen", name: "Maya Chen", service: "RN", amount: "$3,005" },
+            { id: "jordan-miles", name: "Jordan Miles", service: "RN", amount: "$2,960" },
+            { id: "amir-patel", name: "Amir Patel", service: "SLP", amount: "$3,120" },
           ],
         },
       ],
@@ -171,9 +171,9 @@ const vendorProfiles = [
           processedOn: "Feb 1, 2024",
           pdfUrl: "/invoices/lumen-learning/january-2024.pdf",
           students: [
-            { id: "elliot-ramirez", name: "Elliot Ramirez", nurse: "Hannah Ortiz, OTR", rate: "$84/hr" },
-            { id: "tessa-nguyen", name: "Tessa Nguyen", nurse: "Hannah Ortiz, OTR", rate: "$84/hr" },
-            { id: "ian-barnes", name: "Ian Barnes", nurse: "Marcus Lee, COTA", rate: "$78/hr" },
+            { id: "elliot-ramirez", name: "Elliot Ramirez", service: "OTR", amount: "$2,880" },
+            { id: "tessa-nguyen", name: "Tessa Nguyen", service: "OTR", amount: "$2,760" },
+            { id: "ian-barnes", name: "Ian Barnes", service: "COTA", amount: "$2,410" },
           ],
         },
         {
@@ -183,10 +183,10 @@ const vendorProfiles = [
           processedOn: "Action Required",
           pdfUrl: "/invoices/lumen-learning/february-2024-draft.pdf",
           students: [
-            { id: "elliot-ramirez", name: "Elliot Ramirez", nurse: "Hannah Ortiz, OTR", rate: "$84/hr" },
-            { id: "tessa-nguyen", name: "Tessa Nguyen", nurse: "Hannah Ortiz, OTR", rate: "$84/hr" },
-            { id: "ian-barnes", name: "Ian Barnes", nurse: "Marcus Lee, COTA", rate: "$78/hr" },
-            { id: "lena-ford", name: "Lena Ford", nurse: "Marcus Lee, COTA", rate: "$78/hr" },
+            { id: "elliot-ramirez", name: "Elliot Ramirez", service: "OTR", amount: "$2,880" },
+            { id: "tessa-nguyen", name: "Tessa Nguyen", service: "OTR", amount: "$2,760" },
+            { id: "ian-barnes", name: "Ian Barnes", service: "COTA", amount: "$2,430" },
+            { id: "lena-ford", name: "Lena Ford", service: "COTA", amount: "$2,210" },
           ],
         },
         {
@@ -196,9 +196,10 @@ const vendorProfiles = [
           processedOn: "Due Apr 28, 2024",
           pdfUrl: "/invoices/lumen-learning/march-2024-draft.pdf",
           students: [
-            { id: "elliot-ramirez", name: "Elliot Ramirez", nurse: "Hannah Ortiz, OTR", rate: "$86/hr" },
-            { id: "tessa-nguyen", name: "Tessa Nguyen", nurse: "Hannah Ortiz, OTR", rate: "$86/hr" },
-            { id: "lena-ford", name: "Lena Ford", nurse: "Marcus Lee, COTA", rate: "$80/hr" },
+            { id: "elliot-ramirez", name: "Elliot Ramirez", service: "OTR", amount: "$2,940" },
+            { id: "tessa-nguyen", name: "Tessa Nguyen", service: "OTR", amount: "$2,820" },
+            { id: "ian-barnes", name: "Ian Barnes", service: "COTA", amount: "$2,320" },
+            { id: "lena-ford", name: "Lena Ford", service: "COTA", amount: "$2,280" },
           ],
         },
       ],
@@ -210,8 +211,8 @@ const vendorProfiles = [
           processedOn: "Dec 2, 2023",
           pdfUrl: "/invoices/lumen-learning/november-2023.pdf",
           students: [
-            { id: "elliot-ramirez", name: "Elliot Ramirez", nurse: "Hannah Ortiz, OTR", rate: "$82/hr" },
-            { id: "ian-barnes", name: "Ian Barnes", nurse: "Marcus Lee, COTA", rate: "$76/hr" },
+            { id: "elliot-ramirez", name: "Elliot Ramirez", service: "OTR", amount: "$2,760" },
+            { id: "ian-barnes", name: "Ian Barnes", service: "COTA", amount: "$2,280" },
           ],
         },
         {
@@ -221,9 +222,9 @@ const vendorProfiles = [
           processedOn: "Jan 3, 2024",
           pdfUrl: "/invoices/lumen-learning/december-2023.pdf",
           students: [
-            { id: "elliot-ramirez", name: "Elliot Ramirez", nurse: "Hannah Ortiz, OTR", rate: "$82/hr" },
-            { id: "tessa-nguyen", name: "Tessa Nguyen", nurse: "Hannah Ortiz, OTR", rate: "$82/hr" },
-            { id: "ian-barnes", name: "Ian Barnes", nurse: "Marcus Lee, COTA", rate: "$76/hr" },
+            { id: "elliot-ramirez", name: "Elliot Ramirez", service: "OTR", amount: "$2,820" },
+            { id: "tessa-nguyen", name: "Tessa Nguyen", service: "OTR", amount: "$2,700" },
+            { id: "ian-barnes", name: "Ian Barnes", service: "COTA", amount: "$2,320" },
           ],
         },
       ],
@@ -256,8 +257,8 @@ const vendorProfiles = [
           processedOn: "Mar 3, 2024",
           pdfUrl: "/invoices/northstar-analytics/february-2024.pdf",
           students: [
-            { id: "data-warehouse", name: "Data Warehouse Support", nurse: "Priya Nandakumar", rate: "$140/hr" },
-            { id: "kpi-dashboard", name: "KPI Dashboard Refresh", nurse: "Noah Jenkins", rate: "$136/hr" },
+            { id: "data-warehouse", name: "Data Warehouse Support", service: "Data Strategy", amount: "$8,960" },
+            { id: "kpi-dashboard", name: "KPI Dashboard Refresh", service: "Analytics", amount: "$7,420" },
           ],
         },
         {
@@ -267,9 +268,9 @@ const vendorProfiles = [
           processedOn: "Apr 9, 2024",
           pdfUrl: "/invoices/northstar-analytics/march-2024.pdf",
           students: [
-            { id: "data-warehouse", name: "Data Warehouse Support", nurse: "Priya Nandakumar", rate: "$140/hr" },
-            { id: "attendance-dashboard", name: "Attendance Dashboard Updates", nurse: "Noah Jenkins", rate: "$136/hr" },
-            { id: "professional-learning", name: "Professional Learning", nurse: "Anika Shah", rate: "$132/hr" },
+            { id: "data-warehouse", name: "Data Warehouse Support", service: "Data Strategy", amount: "$8,960" },
+            { id: "attendance-dashboard", name: "Attendance Dashboard Updates", service: "Analytics", amount: "$7,540" },
+            { id: "professional-learning", name: "Professional Learning", service: "Enablement", amount: "$5,920" },
           ],
         },
         {
@@ -279,8 +280,8 @@ const vendorProfiles = [
           processedOn: "Due May 10, 2024",
           pdfUrl: "/invoices/northstar-analytics/april-2024-draft.pdf",
           students: [
-            { id: "data-warehouse", name: "Data Warehouse Support", nurse: "Priya Nandakumar", rate: "$140/hr" },
-            { id: "attendance-dashboard", name: "Attendance Dashboard Updates", nurse: "Noah Jenkins", rate: "$136/hr" },
+            { id: "data-warehouse", name: "Data Warehouse Support", service: "Data Strategy", amount: "$8,960" },
+            { id: "attendance-dashboard", name: "Attendance Dashboard Updates", service: "Analytics", amount: "$7,540" },
           ],
         },
       ],
@@ -292,8 +293,8 @@ const vendorProfiles = [
           processedOn: "Jan 4, 2024",
           pdfUrl: "/invoices/northstar-analytics/december-2023.pdf",
           students: [
-            { id: "data-warehouse", name: "Data Warehouse Support", nurse: "Priya Nandakumar", rate: "$138/hr" },
-            { id: "attendance-dashboard", name: "Attendance Dashboard Updates", nurse: "Noah Jenkins", rate: "$134/hr" },
+            { id: "data-warehouse", name: "Data Warehouse Support", service: "Data Strategy", amount: "$8,760" },
+            { id: "attendance-dashboard", name: "Attendance Dashboard Updates", service: "Analytics", amount: "$7,320" },
           ],
         },
       ],
@@ -410,11 +411,13 @@ export default function DistrictDashboard() {
                     <button
                       key={vendor.id}
                       onClick={() => setSelectedVendorId(vendor.id)}
-                      className="flex h-full flex-col rounded-2xl border border-slate-200 bg-white p-5 text-left transition hover:border-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/70"
+                      className="flex h-full flex-col justify-center rounded-2xl border border-slate-200 bg-white p-5 text-left transition hover:border-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/70"
                       type="button"
                     >
-                      <span className="text-sm font-semibold text-slate-900">{vendor.name}</span>
-                      <p className="mt-3 text-xs font-medium text-slate-500">Contact: {vendor.manager}</p>
+                      <p className="text-sm font-semibold text-slate-900">
+                        {vendor.name}
+                        <span className="block text-xs font-medium text-slate-500 sm:inline"> - Contact: {vendor.manager}</span>
+                      </p>
                     </button>
                   ))}
                 </div>
@@ -474,10 +477,16 @@ export default function DistrictDashboard() {
                           key={entry.id}
                           className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm"
                         >
-                          <div className="flex flex-col gap-1 text-sm text-slate-600 sm:flex-row sm:items-center sm:justify-between">
-                            <span className="font-semibold text-slate-900">{entry.name}</span>
-                            <span>{entry.nurse}</span>
-                            <span className="font-medium text-slate-900">{entry.rate}</span>
+                          <div className="flex flex-col gap-1 text-sm text-slate-700 sm:flex-row sm:flex-wrap sm:items-center">
+                            <span className="font-semibold text-slate-900">
+                              Student Name: {entry.name}
+                            </span>
+                            {entry.service ? (
+                              <span className="sm:ml-3">Service: {entry.service}</span>
+                            ) : null}
+                            {entry.amount ? (
+                              <span className="font-semibold text-slate-900 sm:ml-auto">{entry.amount}</span>
+                            ) : null}
                           </div>
                         </li>
                       ))}
@@ -521,13 +530,12 @@ export default function DistrictDashboard() {
                                   year: Number(year),
                                 })
                               }
-                              className="flex h-full flex-col justify-between rounded-2xl border border-slate-200 bg-white p-5 text-left transition hover:border-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/70"
+                              className="flex h-full flex-col justify-center rounded-2xl border border-slate-200 bg-white p-5 text-left transition hover:border-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/70"
                               type="button"
                             >
-                              <div className="flex items-baseline justify-between gap-3">
-                                <span className="text-base font-semibold text-slate-900">{invoice.month}</span>
-                                <span className="text-lg font-bold text-slate-700">{invoice.total}</span>
-                              </div>
+                              <p className="text-lg font-semibold text-slate-900">
+                                {`${invoice.month} - ${invoice.total}`}
+                              </p>
                             </button>
                           ))}
                         </div>
