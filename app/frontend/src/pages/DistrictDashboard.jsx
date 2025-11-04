@@ -322,31 +322,7 @@ export default function DistrictDashboard() {
     setSelectedInvoiceKey(null);
   }, [activeKey, selectedVendorId]);
 
-  const selectedInvoiceDetails = useMemo(() => {
-    if (!selectedVendor || !selectedInvoiceKey) {
-      return null;
-    }
-
-    const invoiceRecord =
-      selectedVendor.invoices[selectedInvoiceKey.year]?.find(
-        (invoice) => invoice.month === selectedInvoiceKey.month
-      ) ?? null;
-
-    if (!invoiceRecord) {
-      return null;
-    }
-
-    return {
-      ...invoiceRecord,
-      year: selectedInvoiceKey.year,
-    };
-  }, [selectedInvoiceKey, selectedVendor]);
-
-  useEffect(() => {
-    setSelectedInvoiceKey(null);
-  }, [activeKey, selectedVendorId]);
-
-  const selectedInvoiceDetails = useMemo(() => {
+  const activeInvoiceDetails = useMemo(() => {
     if (!selectedVendor || !selectedInvoiceKey) {
       return null;
     }
@@ -458,7 +434,7 @@ export default function DistrictDashboard() {
                   ))}
                 </div>
               </div>
-            ) : selectedInvoiceDetails ? (
+              ) : activeInvoiceDetails ? (
               <div className="space-y-6">
                 <div className="flex items-center justify-between">
                   <button
@@ -482,22 +458,19 @@ export default function DistrictDashboard() {
                   <div>
                     <p className="text-xs uppercase tracking-widest text-amber-500">{selectedVendor.name}</p>
                     <h4 className="mt-1 text-2xl font-semibold text-slate-900">
-                      {selectedInvoiceDetails.month} {selectedInvoiceDetails.year}
+                      {activeInvoiceDetails.month} {activeInvoiceDetails.year}
                     </h4>
                     <p className="mt-1 text-sm text-slate-500">
-                      Status: {selectedInvoiceDetails.status} · Processed {selectedInvoiceDetails.processedOn}
-                    </p>
-                    <p className="mt-4 text-xs text-slate-500">
-                      Account manager: <span className="font-medium text-slate-900">{selectedVendor.manager}</span> · {selectedVendor.managerTitle}
+                      Status: {activeInvoiceDetails.status} · Processed {activeInvoiceDetails.processedOn}
                     </p>
                     <p className="text-xs text-slate-500">{selectedVendor.email} • {selectedVendor.phone}</p>
                   </div>
                   <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
                     <span className="inline-flex items-center rounded-full bg-slate-900 px-3 py-1 text-sm font-semibold text-white">
-                      Total {selectedInvoiceDetails.total}
+                      Total {activeInvoiceDetails.total}
                     </span>
                     <a
-                      href={selectedInvoiceDetails.pdfUrl}
+                      href={activeInvoiceDetails.pdfUrl}
                       target="_blank"
                       rel="noreferrer"
                       className="inline-flex items-center rounded-full bg-amber-500 px-3 py-1.5 text-sm font-semibold text-white shadow-sm transition hover:bg-amber-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
@@ -509,9 +482,9 @@ export default function DistrictDashboard() {
 
                 <div className="space-y-3">
                   <h5 className="text-sm font-semibold uppercase tracking-wider text-slate-500">Student services</h5>
-                  {selectedInvoiceDetails.students?.length ? (
+                  {activeInvoiceDetails.students?.length ? (
                     <ul className="space-y-3">
-                      {selectedInvoiceDetails.students.map((entry) => (
+                      {activeInvoiceDetails.students.map((entry) => (
                         <li
                           key={entry.id}
                           className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm"
