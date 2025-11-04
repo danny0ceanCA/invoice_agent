@@ -3,17 +3,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .api import (
-    admin,
-    analytics,
-    auth,
-    district,
-    health,
-    invoices,
-    jobs,
-    uploads,
-    vendors,
-)
+from .api import admin, analytics, auth, health, invoices, jobs, uploads
 from .core.logging import configure_logging
 
 
@@ -35,8 +25,6 @@ def create_app() -> FastAPI:
     app.include_router(uploads.router, prefix="/api")
     app.include_router(invoices.router, prefix="/api")
     app.include_router(jobs.router, prefix="/api")
-    app.include_router(vendors.router, prefix="/api")
-    app.include_router(district.router, prefix="/api")
     app.include_router(analytics.router, prefix="/api")
     app.include_router(admin.router, prefix="/api")
 
