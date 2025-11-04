@@ -472,24 +472,45 @@ export default function DistrictDashboard() {
                   <h5 className="text-sm font-semibold uppercase tracking-wider text-slate-500">Student services</h5>
                   {activeInvoiceDetails.students?.length ? (
                     <ul className="space-y-3">
-                      {activeInvoiceDetails.students.map((entry) => (
-                        <li
-                          key={entry.id}
-                          className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm"
-                        >
-                          <div className="flex flex-col gap-1 text-sm text-slate-700 sm:flex-row sm:flex-wrap sm:items-center">
-                            <span className="font-semibold text-slate-900">
-                              Student Name: {entry.name}
-                            </span>
-                            {entry.service ? (
-                              <span className="sm:ml-3">Service: {entry.service}</span>
-                            ) : null}
-                            {entry.amount ? (
-                              <span className="font-semibold text-slate-900 sm:ml-auto">{entry.amount}</span>
-                            ) : null}
-                          </div>
-                        </li>
-                      ))}
+                      {activeInvoiceDetails.students.map((entry) => {
+                        const invoicePdfBase = activeInvoiceDetails.pdfUrl ?? "";
+                        const studentInvoiceUrl = entry.pdfUrl
+                          ? entry.pdfUrl
+                          : invoicePdfBase
+                          ? `${invoicePdfBase.replace(/\.pdf$/, "")}/${entry.id}.pdf`
+                          : null;
+
+                        return (
+                          <li
+                            key={entry.id}
+                            className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm"
+                          >
+                            <div className="flex flex-col gap-2 text-sm text-slate-700 sm:flex-row sm:items-center sm:justify-between">
+                              <p className="text-sm text-slate-700">
+                                <span className="font-semibold text-slate-900">
+                                  Student Name: {entry.name}
+                                </span>
+                                {entry.service ? <span>, Service: {entry.service}</span> : null}
+                              </p>
+                              <div className="flex items-center gap-3 sm:ml-6">
+                                {entry.amount ? (
+                                  <span className="font-semibold text-slate-900">{entry.amount}</span>
+                                ) : null}
+                                {studentInvoiceUrl ? (
+                                  <a
+                                    href={studentInvoiceUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="inline-flex items-center rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700 transition hover:bg-amber-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
+                                  >
+                                    PDF Invoice
+                                  </a>
+                                ) : null}
+                              </div>
+                            </div>
+                          </li>
+                        );
+                      })}
                     </ul>
                   ) : (
                     <p className="text-sm text-slate-500">No student services were reported for this month.</p>
