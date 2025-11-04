@@ -302,15 +302,6 @@ const vendorProfiles = [
 ];
 
 
-const statusStyles = {
-  Approved: "bg-emerald-100 text-emerald-700",
-  "In Review": "bg-amber-100 text-amber-700",
-  "Pending Submission": "bg-slate-100 text-slate-600",
-  "Needs Revision": "bg-rose-100 text-rose-700",
-};
-
-
-
 export default function DistrictDashboard() {
   const [activeKey, setActiveKey] = useState(menuItems[0].key);
   const [selectedVendorId, setSelectedVendorId] = useState(null);
@@ -533,18 +524,10 @@ export default function DistrictDashboard() {
                               className="flex h-full flex-col justify-between rounded-2xl border border-slate-200 bg-white p-5 text-left transition hover:border-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/70"
                               type="button"
                             >
-                              <div className="flex items-center justify-between">
-                                <span className="text-sm font-semibold text-slate-900">{invoice.month}</span>
-                                <span
-                                  className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-                                    statusStyles[invoice.status] ?? "bg-slate-100 text-slate-600"
-                                  }`}
-                                >
-                                  {invoice.status}
-                                </span>
+                              <div className="flex items-baseline justify-between gap-3">
+                                <span className="text-base font-semibold text-slate-900">{invoice.month}</span>
+                                <span className="text-lg font-bold text-slate-700">{invoice.total}</span>
                               </div>
-                              <p className="mt-2 text-xs text-slate-500">Processed {invoice.processedOn}</p>
-                              <p className="mt-4 text-xs font-semibold text-slate-900">{invoice.total}</p>
                             </button>
                           ))}
                         </div>
