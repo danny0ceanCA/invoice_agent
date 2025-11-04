@@ -466,6 +466,19 @@ export default function DistrictDashboard() {
                       Download PDF Invoice
                     </a>
                   </div>
+                  <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
+                    <span className="inline-flex items-center rounded-full bg-slate-900 px-3 py-1 text-sm font-semibold text-white">
+                      Total {activeInvoiceDetails.total}
+                    </span>
+                    <a
+                      href={activeInvoiceDetails.pdfUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center rounded-full bg-amber-500 px-3 py-1.5 text-sm font-semibold text-white shadow-sm transition hover:bg-amber-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
+                    >
+                      Download PDF Invoice
+                    </a>
+                  </div>
                 </div>
 
                 <div className="space-y-3">
@@ -485,14 +498,14 @@ export default function DistrictDashboard() {
                             key={entry.id}
                             className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm"
                           >
-                            <div className="flex flex-col gap-2 text-sm text-slate-700 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="flex flex-col gap-2 text-sm text-slate-700 sm:flex-row sm:items-start sm:justify-between">
                               <p className="text-sm text-slate-700">
                                 <span className="font-semibold text-slate-900">
                                   Student Name: {entry.name}
                                 </span>
                                 {entry.service ? <span>, Service: {entry.service}</span> : null}
                               </p>
-                              <div className="flex items-center gap-3 sm:ml-6">
+                              <div className="flex items-center gap-3 sm:ml-6 sm:self-start">
                                 {entry.amount ? (
                                   <span className="font-semibold text-slate-900">{entry.amount}</span>
                                 ) : null}
