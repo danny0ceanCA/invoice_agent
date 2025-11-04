@@ -4,8 +4,7 @@ const menuItems = [
   {
     key: "vendors",
     label: "Vendors",
-    description:
-      "Review vendor submissions, approve new partnerships, and monitor contract health across the district.",
+    description: "",
     stats: {
       active: 12,
       pending: 3,
@@ -365,7 +364,7 @@ export default function DistrictDashboard() {
                     onClick={() => setActiveKey(item.key)}
                     className={`group flex w-full items-center justify-between rounded-xl px-4 py-3 text-left text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/70 ${
                       isActive
-                        ? "bg-white text-slate-900 shadow-lg"
+                        ? "bg-slate-200 text-slate-900 shadow-inner"
                         : "text-slate-200 hover:bg-white/10 hover:text-white"
                     }`}
                     type="button"
@@ -399,9 +398,11 @@ export default function DistrictDashboard() {
           </span>
         </header>
 
-        <p className="mt-4 text-base leading-relaxed text-slate-600">
-          {activeItem.description}
-        </p>
+        {activeItem.description ? (
+          <p className="mt-4 text-base leading-relaxed text-slate-600">
+            {activeItem.description}
+          </p>
+        ) : null}
 
         {activeItem.key === "vendors" ? (
           <div className="mt-8 space-y-6">
@@ -421,15 +422,8 @@ export default function DistrictDashboard() {
                       className="flex h-full flex-col rounded-2xl border border-slate-200 bg-white p-5 text-left transition hover:border-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/70"
                       type="button"
                     >
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-semibold text-slate-900">{vendor.name}</span>
-                        <span className="text-xs font-medium text-slate-500">{vendor.health}</span>
-                      </div>
-                      <p className="mt-1 text-xs text-slate-500">{vendor.focus}</p>
-                      <p className="mt-3 text-xs text-slate-400">
-                        {vendor.campusesServed} campuses • {vendor.teamSize} specialists
-                      </p>
-                      <p className="mt-4 text-xs text-slate-400">Contact: {vendor.manager}</p>
+                      <span className="text-sm font-semibold text-slate-900">{vendor.name}</span>
+                      <p className="mt-3 text-xs font-medium text-slate-500">Contact: {vendor.manager}</p>
                     </button>
                   ))}
                 </div>
