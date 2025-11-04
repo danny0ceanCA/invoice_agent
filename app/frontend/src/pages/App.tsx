@@ -1,16 +1,13 @@
 import { useState } from "react";
 import VendorDashboard from "./VendorDashboard.jsx";
+import DistrictDashboard from "./DistrictDashboard.jsx";
 
 const tabs = [
   { key: "vendor", label: "Vendor", component: <VendorDashboard /> },
   {
     key: "district",
     label: "District",
-    component: (
-      <div className="text-slate-600">
-        District analytics and approvals are coming soon.
-      </div>
-    ),
+    component: <DistrictDashboard />,
   },
   {
     key: "admin",
