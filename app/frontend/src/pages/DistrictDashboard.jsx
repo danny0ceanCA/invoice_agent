@@ -431,7 +431,7 @@ export default function DistrictDashboard() {
             {!selectedVendor ? (
               <div className="space-y-3">
                 <h4 className="text-sm font-semibold uppercase tracking-wider text-slate-500">
-                  Vendors Active
+                  Active Vendors
                 </h4>
                 <p className="text-xs text-slate-500">
                   Choose a partner to review their invoices this fiscal year.
