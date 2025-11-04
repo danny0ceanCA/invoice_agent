@@ -339,115 +339,123 @@ export default function DistrictDashboard() {
         </p>
 
         {activeItem.key === "vendors" ? (
-          <div className="mt-8">
-            {selectedVendor ? (
-              <div className="space-y-6">
-                <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="mt-8 flex flex-col gap-6 lg:flex-row">
+            <aside className="lg:w-80 space-y-3">
+              <h4 className="text-sm font-semibold uppercase tracking-wider text-slate-500">
+                Vendors Active
+              </h4>
+              <p className="text-xs text-slate-500">
+                Choose a partner to review their invoices this fiscal year.
+              </p>
+              {vendorProfiles.map((vendor) => {
+                const isSelected = vendor.id === selectedVendorId;
+                return (
+                  <button
+                    key={vendor.id}
+                    onClick={() => setSelectedVendorId(vendor.id)}
+                    className={`w-full rounded-2xl border px-5 py-4 text-left transition ${
+                      isSelected
+                        ? "border-amber-400 bg-amber-50 shadow-md"
+                        : "border-slate-200 bg-white hover:border-slate-300"
+                    }`}
+                    type="button"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-semibold text-slate-900">{vendor.name}</span>
+                      <span
+                        className={`text-xs font-medium ${
+                          isSelected ? "text-amber-700" : "text-slate-500"
+                        }`}
+                      >
+                        {vendor.health}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs text-slate-500">{vendor.focus}</p>
+                    <p className="mt-3 text-xs text-slate-400">
+                      {vendor.campusesServed} campuses • {vendor.teamSize} specialists
+                    </p>
+                  </button>
+                );
+              })}
+            </aside>
+
+            <div className="flex-1">
+              {selectedVendor ? (
+                <div className="space-y-5">
                   <div>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedVendorId(null)}
-                      className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-amber-300 hover:text-amber-700"
-                    >
-                      ← Back to vendors
-                    </button>
-                    <h4 className="mt-4 text-xl font-semibold text-slate-900">{selectedVendor.name}</h4>
+                    <h4 className="text-xl font-semibold text-slate-900">{selectedVendor.name}</h4>
                     <p className="text-sm text-slate-500">{fiscalYearLabel}</p>
                     <p className="mt-2 text-sm text-slate-500">
                       Select a month below to review invoice activity.
                     </p>
                   </div>
-                </div>
 
-                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                  {fiscalMonths.map(({ year, label }) => {
-                    const invoiceYearKey = year.toString();
-                    const invoiceRecord =
-                      selectedVendor.invoices[invoiceYearKey]?.find(
-                        (invoice) => invoice.month === label
-                      ) ?? null;
+                  <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                    {fiscalMonths.map(({ year, label }) => {
+                      const invoiceYearKey = year.toString();
+                      const invoiceRecord =
+                        selectedVendor.invoices[invoiceYearKey]?.find(
+                          (invoice) => invoice.month === label
+                        ) ?? null;
 
-                    return (
-                      <div
-                        key={`${selectedVendor.id}-${invoiceYearKey}-${label}`}
-                        className="flex flex-col gap-3 rounded-2xl border border-slate-100 bg-white p-5 shadow-sm"
-                      >
-                        <div className="flex items-start justify-between">
-                          <div>
-                            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-                              {label}
-                            </p>
-                            <p className="mt-1 text-sm text-slate-500">{year}</p>
+                      return (
+                        <div
+                          key={`${selectedVendor.id}-${invoiceYearKey}-${label}`}
+                          className="flex flex-col gap-3 rounded-2xl border border-slate-100 bg-white p-5 shadow-sm"
+                        >
+                          <div className="flex items-start justify-between">
+                            <div>
+                              <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                                {label}
+                              </p>
+                              <p className="mt-1 text-sm text-slate-500">{year}</p>
+                            </div>
+                            {invoiceRecord ? (
+                              <span
+                                className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                                  statusStyles[invoiceRecord.status] ??
+                                  "bg-slate-100 text-slate-600"
+                                }`}
+                              >
+                                {invoiceRecord.status}
+                              </span>
+                            ) : (
+                              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
+                                No Invoice
+                              </span>
+                            )}
                           </div>
                           {invoiceRecord ? (
-                            <span
-                              className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                                statusStyles[invoiceRecord.status] ??
-                                "bg-slate-100 text-slate-600"
-                              }`}
-                            >
-                              {invoiceRecord.status}
-                            </span>
+                            <>
+                              <p className="text-lg font-semibold text-slate-900">
+                                {invoiceRecord.total}
+                              </p>
+                              <p className="text-xs text-slate-500">{invoiceRecord.processedOn}</p>
+                              <button
+                                className="mt-auto inline-flex items-center justify-center rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:border-amber-300 hover:text-amber-700"
+                                type="button"
+                              >
+                                Open Invoice
+                              </button>
+                            </>
                           ) : (
-                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
-                              No Invoice
-                            </span>
+                            <p className="text-sm text-slate-500">
+                              No submission recorded for this month yet.
+                            </p>
                           )}
                         </div>
-                        {invoiceRecord ? (
-                          <>
-                            <p className="text-lg font-semibold text-slate-900">
-                              {invoiceRecord.total}
-                            </p>
-                            <p className="text-xs text-slate-500">{invoiceRecord.processedOn}</p>
-                            <button
-                              className="mt-auto inline-flex items-center justify-center rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:border-amber-300 hover:text-amber-700"
-                              type="button"
-                            >
-                              Open Invoice
-                            </button>
-                          </>
-                        ) : (
-                          <p className="text-sm text-slate-500">
-                            No submission recorded for this month yet.
-                          </p>
-                        )}
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                <div>
-                  <h4 className="text-sm font-semibold uppercase tracking-wider text-slate-500">
-                    Vendors Active
-                  </h4>
-                  <p className="text-xs text-slate-500">
-                    Choose a partner to review their invoices this fiscal year.
+              ) : (
+                <div className="flex h-full min-h-[320px] items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50">
+                  <p className="text-sm font-medium text-slate-500">
+                    Select a vendor to view monthly invoices.
                   </p>
                 </div>
-                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                  {vendorProfiles.map((vendor) => (
-                    <button
-                      key={vendor.id}
-                      onClick={() => setSelectedVendorId(vendor.id)}
-                      className="w-full rounded-2xl border border-slate-200 bg-white px-5 py-4 text-left transition hover:border-slate-300"
-                      type="button"
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm font-semibold text-slate-900">{vendor.name}</span>
-                        <span className="text-xs font-medium text-slate-500">{vendor.health}</span>
-                      </div>
-                      <p className="mt-1 text-xs text-slate-500">{vendor.focus}</p>
-                      <p className="mt-3 text-xs text-slate-400">
-                        {vendor.campusesServed} campuses • {vendor.teamSize} specialists
-                      </p>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         ) : (
           <div className="mt-8 rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-slate-500">
