@@ -1,508 +1,392 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { uploadInvoice } from "../api/invoices";
 import { listJobs } from "../api/jobs";
+import { fetchVendorDashboard } from "../api/vendors";
 import JobStatusCard from "./JobStatusCard";
 
-const vendorProfile = {
-  name: "Harbor Education Services",
-  tagline: "Partnering with districts to deliver bilingual speech therapy at scale.",
-  manager: {
-    name: "Alana Ruiz",
-    title: "Account Director",
-    email: "alana@harboredu.com",
-    phone: "(555) 214-0183",
-  },
-  summaryPoints: [
-    { label: "Students Served", value: "42" },
-    { label: "Average Response", value: "2.1 hrs" },
-    { label: "Fill Rate", value: "98%" },
-  ],
-  serviceSnapshot: [
-    {
-      id: "slp",
-      name: "Speech Language Pathology",
-      students: 18,
-      trend: "+6.4% YoY",
-      amount: "$48,320",
-    },
-    {
-      id: "rn",
-      name: "Registered Nursing",
-      students: 12,
-      trend: "+3.1% YoY",
-      amount: "$36,480",
-    },
-    {
-      id: "cota",
-      name: "Certified OTA",
-      students: 7,
-      trend: "Stable",
-      amount: "$21,600",
-    },
-  ],
-  tasks: [
-    {
-      id: "submit-april",
-      title: "Submit April timesheet upload",
-      due: "Due May 5, 2024",
-      status: "Action Needed",
-    },
-    {
-      id: "review-feedback",
-      title: "Review district feedback on February invoice",
-      due: "Updated Apr 12, 2024",
-      status: "In Progress",
-    },
-    {
-      id: "confirm-schedule",
-      title: "Confirm summer staffing availability",
-      due: "Requested by May 15, 2024",
-      status: "Upcoming",
-    },
-  ],
-  resources: [
-    {
-      id: "guidelines",
-      title: "District billing guidelines",
-      description: "Download the 2023-24 reference to ensure compliance with service caps.",
-      href: "#",
-    },
-    {
-      id: "calendar",
-      title: "Submission calendar",
-      description: "Key dates for monthly uploads, approval checkpoints, and payroll cutoffs.",
-      href: "#",
-    },
-    {
-      id: "support",
-      title: "Contact district finance",
-      description: "Email finance@northbridgek12.gov for billing clarifications.",
-      href: "mailto:finance@northbridgek12.gov",
-    },
-  ],
-  invoices: {
-    2024: [
-      {
-        month: "April",
-        total: "$19,120",
-        status: "Draft",
-        processedOn: "Upload pending",
-        pdfUrl: null,
-        timesheetCsvUrl: null,
-        notes: "Timesheet upload in progress.",
-        students: [
-          { id: "maya-chen", name: "Maya Chen", service: "RN", amount: "$3,120" },
-          { id: "jordan-miles", name: "Jordan Miles", service: "RN", amount: "$3,055" },
-          { id: "sophia-cabrera", name: "Sophia Cabrera", service: "SLP", amount: "$2,985" },
-        ],
-      },
-      {
-        month: "March",
-        total: "$19,120",
-        status: "In Review",
-        processedOn: "Apr 8, 2024",
-        pdfUrl: "/invoices/harbor-education/march-2024.pdf",
-        timesheetCsvUrl: "/timesheets/harbor-education/march-2024.csv",
-        notes: "Awaiting district approval on two student line items.",
-        students: [
-          { id: "maya-chen", name: "Maya Chen", service: "RN", amount: "$3,105" },
-          { id: "jordan-miles", name: "Jordan Miles", service: "RN", amount: "$3,020" },
-          { id: "amir-patel", name: "Amir Patel", service: "SLP", amount: "$3,180" },
-          { id: "riley-watts", name: "Riley Watts", service: "SLP", amount: "$2,920" },
-        ],
-      },
-      {
-        month: "February",
-        total: "$18,240",
-        status: "Approved",
-        processedOn: "Mar 4, 2024",
-        pdfUrl: "/invoices/harbor-education/february-2024.pdf",
-        timesheetCsvUrl: "/timesheets/harbor-education/february-2024.csv",
-        notes: "No action needed.",
-        students: [
-          { id: "maya-chen", name: "Maya Chen", service: "RN", amount: "$3,041" },
-          { id: "jordan-miles", name: "Jordan Miles", service: "RN", amount: "$2,996" },
-          { id: "sophia-cabrera", name: "Sophia Cabrera", service: "SLP", amount: "$3,155" },
-          { id: "leo-kim", name: "Leo Kim", service: "SLP", amount: "$2,890" },
-        ],
-      },
-      {
-        month: "January",
-        total: "$18,240",
-        status: "Approved",
-        processedOn: "Feb 2, 2024",
-        pdfUrl: "/invoices/harbor-education/january-2024.pdf",
-        timesheetCsvUrl: "/timesheets/harbor-education/january-2024.csv",
-        notes: "Invoice paid on Feb 15.",
-        students: [
-          { id: "maya-chen", name: "Maya Chen", service: "RN", amount: "$3,041" },
-          { id: "jordan-miles", name: "Jordan Miles", service: "RN", amount: "$2,996" },
-          { id: "amir-patel", name: "Amir Patel", service: "SLP", amount: "$3,210" },
-          { id: "riley-watts", name: "Riley Watts", service: "SLP", amount: "$2,870" },
-        ],
-      },
-    ],
-    2023: [
-      {
-        month: "December",
-        total: "$18,240",
-        status: "Approved",
-        processedOn: "Jan 5, 2024",
-        pdfUrl: "/invoices/harbor-education/december-2023.pdf",
-        timesheetCsvUrl: "/timesheets/harbor-education/december-2023.csv",
-        notes: "Archived in district portal.",
-        students: [
-          { id: "maya-chen", name: "Maya Chen", service: "RN", amount: "$3,005" },
-          { id: "jordan-miles", name: "Jordan Miles", service: "RN", amount: "$2,960" },
-          { id: "amir-patel", name: "Amir Patel", service: "SLP", amount: "$3,120" },
-        ],
-      },
-      {
-        month: "November",
-        total: "$17,880",
-        status: "Approved",
-        processedOn: "Dec 7, 2023",
-        pdfUrl: "/invoices/harbor-education/november-2023.pdf",
-        timesheetCsvUrl: "/timesheets/harbor-education/november-2023.csv",
-        notes: "Payment received Dec 20.",
-        students: [
-          { id: "maya-chen", name: "Maya Chen", service: "RN", amount: "$2,940" },
-          { id: "riley-watts", name: "Riley Watts", service: "SLP", amount: "$3,045" },
-        ],
-      },
-      {
-        month: "October",
-        total: "$17,880",
-        status: "Approved",
-        processedOn: "Nov 6, 2023",
-        pdfUrl: "/invoices/harbor-education/october-2023.pdf",
-        timesheetCsvUrl: "/timesheets/harbor-education/october-2023.csv",
-        notes: "Closed", 
-        students: [
-          { id: "maya-chen", name: "Maya Chen", service: "RN", amount: "$2,940" },
-          { id: "amir-patel", name: "Amir Patel", service: "SLP", amount: "$3,115" },
-        ],
-      },
-    ],
-  },
-};
+const REQUIRED_COLUMNS = [
+  "Client",
+  "Schedule Date",
+  "Hours",
+  "Employee",
+  "Service Code",
+];
+
+const currencyFormatter = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+});
+
+function formatCurrency(value) {
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    return "$0.00";
+  }
+  return currencyFormatter.format(value);
+}
+
+function formatHours(value) {
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    return "0.00 hrs";
+  }
+  return `${value.toFixed(2)} hrs`;
+}
+
+function formatDate(value) {
+  if (!value) {
+    return "—";
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+  return parsed.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
 
 export default function VendorDashboard() {
+  const [dashboard, setDashboard] = useState(null);
   const [jobs, setJobs] = useState([]);
-  const [isUploading, setIsUploading] = useState(false);
-  const [error, setError] = useState(null);
-  const invoiceYears = useMemo(
-    () => Object.keys(vendorProfile.invoices).sort((a, b) => Number(b) - Number(a)),
-    []
-  );
-  const [selectedYear, setSelectedYear] = useState(invoiceYears[0]);
-  const yearInvoices = useMemo(
-    () => vendorProfile.invoices[selectedYear] ?? [],
-    [selectedYear]
-  );
-  const [selectedMonth, setSelectedMonth] = useState(yearInvoices[0]?.month ?? null);
+  const [file, setFile] = useState(null);
+  const [fileKey, setFileKey] = useState(() => Date.now());
+  const [invoiceDate, setInvoiceDate] = useState(() => {
+    const today = new Date();
+    return today.toISOString().slice(0, 10);
+  });
+  const [serviceMonth, setServiceMonth] = useState(() => {
+    const today = new Date();
+    return today.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+  });
+  const [invoiceCode, setInvoiceCode] = useState("");
+  const [alert, setAlert] = useState(null);
+  const [loadingDashboard, setLoadingDashboard] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
-  useEffect(() => {
-    setSelectedMonth((prev) => {
-      if (yearInvoices.find((invoice) => invoice.month === prev)) {
-        return prev;
-      }
-      return yearInvoices[0]?.month ?? null;
-    });
-  }, [yearInvoices]);
+  const vendorId = dashboard?.vendor?.id ?? null;
 
-  const selectedInvoice = useMemo(
-    () => yearInvoices.find((invoice) => invoice.month === selectedMonth) ?? null,
-    [yearInvoices, selectedMonth]
-  );
-
-  const fetchJobs = useCallback(async () => {
-    setError(null);
+  const loadDashboard = useCallback(async () => {
+    setLoadingDashboard(true);
     try {
-      const recentJobs = await listJobs();
-      setJobs(recentJobs);
-    } catch (err) {
-      setError("Unable to load jobs");
+      const data = await fetchVendorDashboard();
+      setDashboard(data);
+    } catch (error) {
+      console.error("Failed to load vendor dashboard", error);
+      setAlert({ type: "error", message: "Unable to load vendor data. Please refresh." });
+    } finally {
+      setLoadingDashboard(false);
+    }
+  }, []);
+
+  const loadJobs = useCallback(async () => {
+    try {
+      const data = await listJobs();
+      setJobs(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error("Failed to load jobs", error);
     }
   }, []);
 
   useEffect(() => {
-    fetchJobs();
-    const timer = setInterval(fetchJobs, 5000);
-    return () => clearInterval(timer);
-  }, [fetchJobs]);
+    loadDashboard();
+    loadJobs();
+  }, [loadDashboard, loadJobs]);
 
-  async function handleUpload(event) {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  const handleSubmit = useCallback(
+    async (event) => {
+      event.preventDefault();
+      if (!file) {
+        setAlert({ type: "error", message: "Choose a .xlsx timesheet before uploading." });
+        return;
+      }
+      if (!vendorId) {
+        setAlert({ type: "error", message: "Vendor profile not loaded yet." });
+        return;
+      }
 
-    setIsUploading(true);
-    setError(null);
+      setSubmitting(true);
+      setAlert({ type: "info", message: "Uploading timesheet and starting invoice generation…" });
+      try {
+        const response = await uploadInvoice(file, {
+          vendor_id: vendorId,
+          invoice_date: invoiceDate,
+          service_month: serviceMonth,
+          invoice_code: invoiceCode.trim() || undefined,
+        });
+        setAlert({
+          type: "success",
+          message: `Upload received. Job ${response.job_id} is queued for processing.`,
+        });
+        setFile(null);
+        setFileKey(Date.now());
+        setInvoiceCode("");
+        await loadJobs();
+      } catch (error) {
+        console.error("Timesheet upload failed", error);
+        setAlert({ type: "error", message: "Upload failed. Please verify the file and try again." });
+      } finally {
+        setSubmitting(false);
+      }
+    },
+    [file, vendorId, invoiceDate, serviceMonth, invoiceCode, loadJobs]
+  );
 
-    try {
-      const payload = {
-        vendor_id: 1,
-        invoice_date: new Date().toISOString().split("T")[0],
-        service_month: new Date().toLocaleString("default", { month: "long", year: "numeric" }),
-        invoice_code: `INV-${Date.now()}`,
-      };
-      await uploadInvoice(file, payload);
-      await fetchJobs();
-    } catch (err) {
-      setError("Upload failed. Please try again.");
-    } finally {
-      setIsUploading(false);
-      event.target.value = "";
+  const summaryCards = useMemo(() => {
+    if (!dashboard?.summary) {
+      return [];
     }
-  }
+    const summary = dashboard.summary;
+    return [
+      {
+        label: "Students Served",
+        value: summary.students_served ?? 0,
+      },
+      {
+        label: "Total Hours",
+        value: formatHours(summary.total_hours ?? 0),
+      },
+      {
+        label: "Total Cost",
+        value: formatCurrency(summary.total_cost ?? 0),
+      },
+      {
+        label: "Invoices Generated",
+        value: summary.invoice_count ?? 0,
+      },
+    ];
+  }, [dashboard]);
+
+  const latestInvoiceDate = dashboard?.summary?.latest_invoice_date
+    ? formatDate(dashboard.summary.latest_invoice_date)
+    : null;
 
   return (
-    <div className="min-h-screen bg-slate-50 p-6">
-      <header className="mx-auto max-w-6xl">
-        <p className="text-xs font-semibold uppercase tracking-[0.3em] text-amber-500">Vendor Portal</p>
-        <div className="mt-3 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+    <div className="space-y-8">
+      <header className="space-y-2">
+        <div className="flex items-start justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-slate-900">{vendorProfile.name}</h1>
-            <p className="mt-2 max-w-2xl text-sm text-slate-600">{vendorProfile.tagline}</p>
+            <h2 className="text-xl font-semibold">Vendor Portal</h2>
+            <p className="text-sm text-slate-600">
+              Upload monthly timesheets and monitor the automation that prepares student invoices.
+            </p>
+            {latestInvoiceDate && (
+              <p className="text-xs text-slate-500">Last invoice generated on {latestInvoiceDate}.</p>
+            )}
           </div>
-          <div className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:grid-cols-3">
-            {vendorProfile.summaryPoints.map((item) => (
-              <div key={item.label} className="text-center">
-                <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{item.label}</p>
-                <p className="mt-1 text-xl font-semibold text-slate-900">{item.value}</p>
-              </div>
-            ))}
-          </div>
+          <button
+            type="button"
+            onClick={loadDashboard}
+            className="rounded-md border border-slate-300 px-3 py-1 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-100"
+            disabled={loadingDashboard}
+          >
+            {loadingDashboard ? "Refreshing…" : "Refresh data"}
+          </button>
         </div>
+        {alert && (
+          <div
+            className={`rounded-md border px-4 py-3 text-sm ${
+              alert.type === "error"
+                ? "border-red-200 bg-red-50 text-red-700"
+                : alert.type === "success"
+                ? "border-green-200 bg-green-50 text-green-700"
+                : "border-slate-200 bg-slate-50 text-slate-700"
+            }`}
+          >
+            {alert.message}
+          </div>
+        )}
       </header>
 
-      <div className="mx-auto mt-8 grid max-w-6xl gap-6 lg:grid-cols-[320px_1fr]">
-        <aside className="space-y-6">
-          <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h2 className="text-sm font-semibold text-slate-900">Account Team</h2>
-            <p className="mt-2 text-sm text-slate-600">
-              {vendorProfile.manager.name} · {vendorProfile.manager.title}
-            </p>
-            <dl className="mt-4 space-y-2 text-sm text-slate-600">
-              <div className="flex items-center justify-between">
-                <dt className="text-slate-500">Email</dt>
-                <dd>
-                  <a
-                    href={`mailto:${vendorProfile.manager.email}`}
-                    className="font-medium text-amber-600 hover:text-amber-700"
-                  >
-                    {vendorProfile.manager.email}
-                  </a>
-                </dd>
-              </div>
-              <div className="flex items-center justify-between">
-                <dt className="text-slate-500">Phone</dt>
-                <dd className="font-medium text-slate-900">{vendorProfile.manager.phone}</dd>
-              </div>
-            </dl>
-          </section>
+      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {summaryCards.length ? (
+          summaryCards.map((card) => (
+            <div key={card.label} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+              <p className="text-xs uppercase tracking-wide text-slate-500">{card.label}</p>
+              <p className="mt-2 text-lg font-semibold text-slate-900">{card.value}</p>
+            </div>
+          ))
+        ) : (
+          <div className="sm:col-span-2 lg:col-span-4 rounded-lg border border-dashed border-slate-300 p-6 text-sm text-slate-500">
+            No invoices have been generated yet. Upload a timesheet to create your first batch.
+          </div>
+        )}
+      </section>
 
-          <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h2 className="text-sm font-semibold text-slate-900">Service Snapshot</h2>
-            <ul className="mt-4 space-y-4">
-              {vendorProfile.serviceSnapshot.map((service) => (
-                <li key={service.id} className="flex items-start justify-between">
+      <section className="space-y-4">
+        <div>
+          <h3 className="text-lg font-semibold text-slate-900">Upload monthly timesheet</h3>
+          <p className="text-sm text-slate-600">
+            Use the export from your staffing system. The spreadsheet must include the following columns:
+          </p>
+          <ul className="mt-2 flex flex-wrap gap-2 text-xs text-slate-600">
+            {REQUIRED_COLUMNS.map((column) => (
+              <li key={column} className="rounded-full border border-slate-300 px-3 py-1">
+                {column}
+              </li>
+            ))}
+          </ul>
+        </div>
+        <form onSubmit={handleSubmit} className="space-y-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="flex flex-col text-sm font-medium text-slate-700">
+              Invoice date
+              <input
+                type="date"
+                value={invoiceDate}
+                onChange={(event) => setInvoiceDate(event.target.value)}
+                className="mt-1 rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none"
+                required
+              />
+            </label>
+            <label className="flex flex-col text-sm font-medium text-slate-700">
+              Month of service
+              <input
+                type="text"
+                value={serviceMonth}
+                onChange={(event) => setServiceMonth(event.target.value)}
+                placeholder="e.g. September 2024"
+                className="mt-1 rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none"
+                required
+              />
+            </label>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="flex flex-col text-sm font-medium text-slate-700">
+              Optional invoice code
+              <input
+                type="text"
+                value={invoiceCode}
+                onChange={(event) => setInvoiceCode(event.target.value)}
+                placeholder="e.g. HWH"
+                className="mt-1 rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none"
+              />
+            </label>
+            <label className="flex flex-col text-sm font-medium text-slate-700">
+              Upload Excel timesheet (.xlsx)
+              <input
+                key={fileKey}
+                type="file"
+                accept=".xlsx,.xls"
+                onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+                className="mt-1 rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none"
+                required
+              />
+            </label>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="submit"
+              disabled={submitting}
+              className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+            >
+              {submitting ? "Uploading…" : "Upload timesheet"}
+            </button>
+            <span className="text-xs text-slate-500">
+              The automation will generate student invoices, PDFs, and a ZIP archive in the background.
+            </span>
+          </div>
+        </form>
+      </section>
+
+      <section className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-slate-900">Recent jobs</h3>
+          <button
+            type="button"
+            onClick={loadJobs}
+            className="rounded-md border border-slate-300 px-3 py-1 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-100"
+          >
+            Refresh queue
+          </button>
+        </div>
+        {jobs.length ? (
+          <div className="grid gap-3 md:grid-cols-2">
+            {jobs.map((job) => (
+              <JobStatusCard key={job.id} job={job} />
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-slate-600">
+            No jobs yet. Upload a timesheet to see processing status and download links.
+          </p>
+        )}
+      </section>
+
+      <section className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-slate-900">Generated invoices</h3>
+          <p className="text-xs text-slate-500">Sorted by most recent service month.</p>
+        </div>
+        {dashboard?.invoices?.length ? (
+          <div className="space-y-4">
+            {dashboard.invoices.map((invoice) => (
+              <article key={invoice.id} className="space-y-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                <div className="flex flex-wrap items-start justify-between gap-4">
                   <div>
-                    <p className="text-sm font-semibold text-slate-900">{service.name}</p>
-                    <p className="text-xs text-slate-500">{service.students} students supported</p>
+                    <h4 className="text-base font-semibold text-slate-900">{invoice.student_name}</h4>
+                    <p className="text-sm text-slate-600">
+                      {invoice.service_month} · Invoice {invoice.invoice_number}
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      Created {formatDate(invoice.invoice_date)} · Status {invoice.status}
+                    </p>
                   </div>
                   <div className="text-right">
-                    <p className="text-sm font-semibold text-slate-900">{service.amount}</p>
-                    <p className="text-xs text-emerald-600">{service.trend}</p>
+                    <p className="text-lg font-semibold text-slate-900">{formatCurrency(invoice.total_cost)}</p>
+                    <p className="text-xs text-slate-600">{formatHours(invoice.total_hours)}</p>
+                    {invoice.pdf_url && (
+                      <a
+                        href={invoice.pdf_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-2 inline-block text-sm font-medium text-blue-600 hover:underline"
+                      >
+                        Download PDF
+                      </a>
+                    )}
                   </div>
-                </li>
-              ))}
-            </ul>
-          </section>
-
-          <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h2 className="text-sm font-semibold text-slate-900">Upcoming Actions</h2>
-            <ul className="mt-4 space-y-4">
-              {vendorProfile.tasks.map((task) => (
-                <li key={task.id} className="rounded-xl border border-slate-200 p-4">
-                  <p className="text-sm font-semibold text-slate-900">{task.title}</p>
-                  <p className="mt-1 text-xs text-slate-500">{task.due}</p>
-                  <span className="mt-3 inline-flex items-center rounded-full bg-amber-100 px-3 py-1 text-xs font-medium text-amber-700">
-                    {task.status}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </section>
-
-          <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h2 className="text-sm font-semibold text-slate-900">Helpful Resources</h2>
-            <ul className="mt-4 space-y-4">
-              {vendorProfile.resources.map((resource) => (
-                <li key={resource.id}>
-                  <h3 className="text-sm font-semibold text-slate-900">{resource.title}</h3>
-                  <p className="mt-1 text-xs text-slate-500">{resource.description}</p>
-                  <a
-                    href={resource.href}
-                    className="mt-2 inline-flex text-xs font-medium text-amber-600 hover:text-amber-700"
-                  >
-                    Open
-                  </a>
-                </li>
-              ))}
-            </ul>
-          </section>
-        </aside>
-
-        <main className="space-y-6">
-          <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div>
-                <h2 className="text-lg font-semibold text-slate-900">Upload Timesheets</h2>
-                <p className="mt-1 text-sm text-slate-600">
-                  Upload a raw Excel timesheet to kick off automated invoice generation. Status updates
-                  appear below within a few seconds of submission.
-                </p>
-              </div>
-              <label className="inline-flex cursor-pointer items-center justify-center rounded-xl border border-dashed border-amber-400 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-700 shadow-sm transition hover:border-amber-500 hover:bg-amber-100">
-                <input
-                  type="file"
-                  accept=".xlsx,.xls"
-                  onChange={handleUpload}
-                  disabled={isUploading}
-                  className="sr-only"
-                />
-                {isUploading ? "Uploading…" : "Select File"}
-              </label>
-            </div>
-            {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
-
-            <div className="mt-6 space-y-3">
-              {jobs.length === 0 ? (
-                <p className="text-sm text-slate-500">
-                  No recent uploads. Submit your latest timesheet to generate a draft invoice.
-                </p>
-              ) : (
-                jobs.map((job) => <JobStatusCard key={job.id} job={job} />)
-              )}
-            </div>
-          </section>
-
-          <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <div>
-                <h2 className="text-lg font-semibold text-slate-900">Invoice History</h2>
-                <p className="mt-1 text-sm text-slate-600">
-                  Track monthly submissions, approval status, and export supporting files for your records.
-                </p>
-              </div>
-              <div className="flex items-center gap-2">
-                {invoiceYears.map((year) => (
-                  <button
-                    key={year}
-                    onClick={() => setSelectedYear(year)}
-                    type="button"
-                    className={`rounded-full px-3 py-1 text-sm font-medium transition ${
-                      year === selectedYear
-                        ? "bg-amber-500 text-white shadow"
-                        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                    }`}
-                  >
-                    {year}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="mt-6 grid gap-6 lg:grid-cols-[220px_1fr]">
-              <div className="space-y-2">
-                {yearInvoices.map((invoice) => (
-                  <button
-                    key={`${selectedYear}-${invoice.month}`}
-                    type="button"
-                    onClick={() => setSelectedMonth(invoice.month)}
-                    className={`w-full rounded-xl border px-4 py-3 text-left transition ${
-                      invoice.month === selectedMonth
-                        ? "border-amber-400 bg-amber-50 shadow-sm"
-                        : "border-slate-200 bg-white hover:border-slate-300"
-                    }`}
-                  >
-                    <p className="text-sm font-semibold text-slate-900">{invoice.month}</p>
-                    <p className="text-xs text-slate-500">{invoice.status}</p>
-                  </button>
-                ))}
-              </div>
-
-              {selectedInvoice ? (
-                <div className="space-y-6">
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
-                    <div className="flex flex-wrap items-center justify-between gap-4">
-                      <div>
-                        <p className="text-xs uppercase tracking-wide text-slate-500">{selectedMonth}</p>
-                        <h3 className="text-2xl font-bold text-slate-900">{selectedInvoice.total}</h3>
-                        <p className="mt-2 text-sm text-slate-600">Processed on {selectedInvoice.processedOn}</p>
-                      </div>
-                      <span className="inline-flex items-center rounded-full bg-emerald-100 px-4 py-1 text-sm font-medium text-emerald-700">
-                        {selectedInvoice.status}
-                      </span>
-                    </div>
-                    <p className="mt-4 text-sm text-slate-600">{selectedInvoice.notes}</p>
-                    <div className="mt-5 flex flex-wrap gap-3">
-                      {selectedInvoice.pdfUrl ? (
-                        <a
-                          href={selectedInvoice.pdfUrl}
-                          className="inline-flex items-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-400"
-                        >
-                          Download PDF
-                        </a>
-                      ) : null}
-                      {selectedInvoice.timesheetCsvUrl ? (
-                        <a
-                          href={selectedInvoice.timesheetCsvUrl}
-                          className="inline-flex items-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-400"
-                        >
-                          Download Timesheet CSV
-                        </a>
-                      ) : null}
-                    </div>
-                  </div>
-
-                  <div className="overflow-hidden rounded-2xl border border-slate-200">
-                    <table className="min-w-full divide-y divide-slate-200">
-                      <thead className="bg-slate-100">
+                </div>
+                {invoice.line_items?.length ? (
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-slate-200 text-left text-sm">
+                      <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                         <tr>
-                          <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
-                            Student
-                          </th>
-                          <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
-                            Service
-                          </th>
-                          <th className="px-4 py-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">
-                            Amount
-                          </th>
+                          <th className="px-3 py-2">Service date</th>
+                          <th className="px-3 py-2">Clinician</th>
+                          <th className="px-3 py-2">Service code</th>
+                          <th className="px-3 py-2 text-right">Hours</th>
+                          <th className="px-3 py-2 text-right">Rate</th>
+                          <th className="px-3 py-2 text-right">Cost</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-200 bg-white">
-                        {selectedInvoice.students.map((student) => (
-                          <tr key={student.id}>
-                            <td className="px-4 py-2 text-sm font-medium text-slate-900">{student.name}</td>
-                            <td className="px-4 py-2 text-sm text-slate-600">{student.service}</td>
-                            <td className="px-4 py-2 text-right text-sm font-semibold text-slate-900">{student.amount}</td>
+                      <tbody className="divide-y divide-slate-100">
+                        {invoice.line_items.map((item) => (
+                          <tr key={item.id} className="text-slate-700">
+                            <td className="px-3 py-2">{formatDate(item.service_date)}</td>
+                            <td className="px-3 py-2">{item.clinician}</td>
+                            <td className="px-3 py-2">{item.service_code}</td>
+                            <td className="px-3 py-2 text-right">{formatHours(item.hours)}</td>
+                            <td className="px-3 py-2 text-right">{formatCurrency(item.rate)}</td>
+                            <td className="px-3 py-2 text-right">{formatCurrency(item.cost)}</td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
-                </div>
-              ) : (
-                <div className="flex items-center justify-center rounded-2xl border border-dashed border-slate-300 p-6 text-sm text-slate-500">
-                  Select a month to view invoice details.
-                </div>
-              )}
-            </div>
-          </section>
-        </main>
-      </div>
+                ) : (
+                  <p className="text-sm text-slate-600">No line items were stored for this invoice.</p>
+                )}
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-slate-600">
+            Once processing completes you will see student-level invoices here with PDF download links and detailed line
+            items.
+          </p>
+        )}
+      </section>
     </div>
   );
 }
