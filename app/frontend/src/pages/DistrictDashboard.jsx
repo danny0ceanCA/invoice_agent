@@ -342,6 +342,30 @@ export default function DistrictDashboard() {
     };
   }, [selectedInvoiceKey, selectedVendor]);
 
+  useEffect(() => {
+    setSelectedInvoiceKey(null);
+  }, [activeKey, selectedVendorId]);
+
+  const selectedInvoiceDetails = useMemo(() => {
+    if (!selectedVendor || !selectedInvoiceKey) {
+      return null;
+    }
+
+    const invoiceRecord =
+      selectedVendor.invoices[selectedInvoiceKey.year]?.find(
+        (invoice) => invoice.month === selectedInvoiceKey.month
+      ) ?? null;
+
+    if (!invoiceRecord) {
+      return null;
+    }
+
+    return {
+      ...invoiceRecord,
+      year: selectedInvoiceKey.year,
+    };
+  }, [selectedInvoiceKey, selectedVendor]);
+
   return (
     <div className="flex flex-col gap-6 lg:flex-row">
       <aside className="lg:w-72 shrink-0">
@@ -463,6 +487,10 @@ export default function DistrictDashboard() {
                     <p className="mt-1 text-sm text-slate-500">
                       Status: {selectedInvoiceDetails.status} · Processed {selectedInvoiceDetails.processedOn}
                     </p>
+                    <p className="mt-4 text-xs text-slate-500">
+                      Account manager: <span className="font-medium text-slate-900">{selectedVendor.manager}</span> · {selectedVendor.managerTitle}
+                    </p>
+                    <p className="text-xs text-slate-500">{selectedVendor.email} • {selectedVendor.phone}</p>
                   </div>
                   <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
                     <span className="inline-flex items-center rounded-full bg-slate-900 px-3 py-1 text-sm font-semibold text-white">
