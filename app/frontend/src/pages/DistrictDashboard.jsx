@@ -481,6 +481,7 @@ export default function DistrictDashboard() {
                     <p className="mt-1 text-sm text-slate-500">
                       Status: {activeInvoiceDetails.status} · Processed {activeInvoiceDetails.processedOn}
                     </p>
+                    <p className="text-xs text-slate-500">{selectedVendor.email} • {selectedVendor.phone}</p>
                   </div>
                   <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
                     <span className="inline-flex items-center rounded-full bg-slate-900 px-3 py-1 text-sm font-semibold text-white">
