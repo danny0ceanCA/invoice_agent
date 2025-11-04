@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 const menuItems = [
   {
@@ -60,24 +60,51 @@ const vendorProfiles = [
           total: "$18,240",
           status: "Approved",
           processedOn: "Feb 2, 2024",
+          pdfUrl: "/invoices/harbor-education/january-2024.pdf",
+          students: [
+            { id: "maya-chen", name: "Maya Chen", nurse: "Lisa Gomez, RN", rate: "$92/hr" },
+            { id: "jordan-miles", name: "Jordan Miles", nurse: "Lisa Gomez, RN", rate: "$92/hr" },
+            { id: "amir-patel", name: "Amir Patel", nurse: "Courtney Blake, SLP", rate: "$88/hr" },
+            { id: "riley-watts", name: "Riley Watts", nurse: "Courtney Blake, SLP", rate: "$88/hr" },
+          ],
         },
         {
           month: "February",
           total: "$18,240",
           status: "Approved",
           processedOn: "Mar 4, 2024",
+          pdfUrl: "/invoices/harbor-education/february-2024.pdf",
+          students: [
+            { id: "maya-chen", name: "Maya Chen", nurse: "Lisa Gomez, RN", rate: "$92/hr" },
+            { id: "jordan-miles", name: "Jordan Miles", nurse: "Lisa Gomez, RN", rate: "$92/hr" },
+            { id: "sophia-cabrera", name: "Sophia Cabrera", nurse: "Courtney Blake, SLP", rate: "$90/hr" },
+            { id: "leo-kim", name: "Leo Kim", nurse: "Courtney Blake, SLP", rate: "$90/hr" },
+          ],
         },
         {
           month: "March",
           total: "$19,120",
           status: "In Review",
           processedOn: "Apr 8, 2024",
+          pdfUrl: "/invoices/harbor-education/march-2024.pdf",
+          students: [
+            { id: "maya-chen", name: "Maya Chen", nurse: "Lisa Gomez, RN", rate: "$94/hr" },
+            { id: "jordan-miles", name: "Jordan Miles", nurse: "Lisa Gomez, RN", rate: "$94/hr" },
+            { id: "amir-patel", name: "Amir Patel", nurse: "Courtney Blake, SLP", rate: "$90/hr" },
+            { id: "riley-watts", name: "Riley Watts", nurse: "Courtney Blake, SLP", rate: "$90/hr" },
+          ],
         },
         {
           month: "April",
           total: "$19,120",
           status: "Pending Submission",
           processedOn: "Due May 5, 2024",
+          pdfUrl: "/invoices/harbor-education/april-2024-draft.pdf",
+          students: [
+            { id: "maya-chen", name: "Maya Chen", nurse: "Lisa Gomez, RN", rate: "$94/hr" },
+            { id: "jordan-miles", name: "Jordan Miles", nurse: "Lisa Gomez, RN", rate: "$94/hr" },
+            { id: "sophia-cabrera", name: "Sophia Cabrera", nurse: "Courtney Blake, SLP", rate: "$92/hr" },
+          ],
         },
       ],
       2023: [
@@ -86,18 +113,34 @@ const vendorProfiles = [
           total: "$17,880",
           status: "Approved",
           processedOn: "Nov 6, 2023",
+          pdfUrl: "/invoices/harbor-education/october-2023.pdf",
+          students: [
+            { id: "maya-chen", name: "Maya Chen", nurse: "Lisa Gomez, RN", rate: "$90/hr" },
+            { id: "amir-patel", name: "Amir Patel", nurse: "Courtney Blake, SLP", rate: "$86/hr" },
+          ],
         },
         {
           month: "November",
           total: "$17,880",
           status: "Approved",
           processedOn: "Dec 7, 2023",
+          pdfUrl: "/invoices/harbor-education/november-2023.pdf",
+          students: [
+            { id: "maya-chen", name: "Maya Chen", nurse: "Lisa Gomez, RN", rate: "$90/hr" },
+            { id: "riley-watts", name: "Riley Watts", nurse: "Courtney Blake, SLP", rate: "$86/hr" },
+          ],
         },
         {
           month: "December",
           total: "$18,240",
           status: "Approved",
           processedOn: "Jan 5, 2024",
+          pdfUrl: "/invoices/harbor-education/december-2023.pdf",
+          students: [
+            { id: "maya-chen", name: "Maya Chen", nurse: "Lisa Gomez, RN", rate: "$90/hr" },
+            { id: "jordan-miles", name: "Jordan Miles", nurse: "Lisa Gomez, RN", rate: "$90/hr" },
+            { id: "amir-patel", name: "Amir Patel", nurse: "Courtney Blake, SLP", rate: "$88/hr" },
+          ],
         },
       ],
     },
@@ -127,18 +170,37 @@ const vendorProfiles = [
           total: "$12,600",
           status: "Approved",
           processedOn: "Feb 1, 2024",
+          pdfUrl: "/invoices/lumen-learning/january-2024.pdf",
+          students: [
+            { id: "elliot-ramirez", name: "Elliot Ramirez", nurse: "Hannah Ortiz, OTR", rate: "$84/hr" },
+            { id: "tessa-nguyen", name: "Tessa Nguyen", nurse: "Hannah Ortiz, OTR", rate: "$84/hr" },
+            { id: "ian-barnes", name: "Ian Barnes", nurse: "Marcus Lee, COTA", rate: "$78/hr" },
+          ],
         },
         {
           month: "February",
           total: "$12,600",
           status: "Needs Revision",
           processedOn: "Action Required",
+          pdfUrl: "/invoices/lumen-learning/february-2024-draft.pdf",
+          students: [
+            { id: "elliot-ramirez", name: "Elliot Ramirez", nurse: "Hannah Ortiz, OTR", rate: "$84/hr" },
+            { id: "tessa-nguyen", name: "Tessa Nguyen", nurse: "Hannah Ortiz, OTR", rate: "$84/hr" },
+            { id: "ian-barnes", name: "Ian Barnes", nurse: "Marcus Lee, COTA", rate: "$78/hr" },
+            { id: "lena-ford", name: "Lena Ford", nurse: "Marcus Lee, COTA", rate: "$78/hr" },
+          ],
         },
         {
           month: "March",
           total: "$13,050",
           status: "Pending Submission",
           processedOn: "Due Apr 28, 2024",
+          pdfUrl: "/invoices/lumen-learning/march-2024-draft.pdf",
+          students: [
+            { id: "elliot-ramirez", name: "Elliot Ramirez", nurse: "Hannah Ortiz, OTR", rate: "$86/hr" },
+            { id: "tessa-nguyen", name: "Tessa Nguyen", nurse: "Hannah Ortiz, OTR", rate: "$86/hr" },
+            { id: "lena-ford", name: "Lena Ford", nurse: "Marcus Lee, COTA", rate: "$80/hr" },
+          ],
         },
       ],
       2023: [
@@ -147,12 +209,23 @@ const vendorProfiles = [
           total: "$11,980",
           status: "Approved",
           processedOn: "Dec 2, 2023",
+          pdfUrl: "/invoices/lumen-learning/november-2023.pdf",
+          students: [
+            { id: "elliot-ramirez", name: "Elliot Ramirez", nurse: "Hannah Ortiz, OTR", rate: "$82/hr" },
+            { id: "ian-barnes", name: "Ian Barnes", nurse: "Marcus Lee, COTA", rate: "$76/hr" },
+          ],
         },
         {
           month: "December",
           total: "$12,250",
           status: "Approved",
           processedOn: "Jan 3, 2024",
+          pdfUrl: "/invoices/lumen-learning/december-2023.pdf",
+          students: [
+            { id: "elliot-ramirez", name: "Elliot Ramirez", nurse: "Hannah Ortiz, OTR", rate: "$82/hr" },
+            { id: "tessa-nguyen", name: "Tessa Nguyen", nurse: "Hannah Ortiz, OTR", rate: "$82/hr" },
+            { id: "ian-barnes", name: "Ian Barnes", nurse: "Marcus Lee, COTA", rate: "$76/hr" },
+          ],
         },
       ],
     },
@@ -182,18 +255,34 @@ const vendorProfiles = [
           total: "$22,400",
           status: "Approved",
           processedOn: "Mar 3, 2024",
+          pdfUrl: "/invoices/northstar-analytics/february-2024.pdf",
+          students: [
+            { id: "data-warehouse", name: "Data Warehouse Support", nurse: "Priya Nandakumar", rate: "$140/hr" },
+            { id: "kpi-dashboard", name: "KPI Dashboard Refresh", nurse: "Noah Jenkins", rate: "$136/hr" },
+          ],
         },
         {
           month: "March",
           total: "$22,400",
           status: "In Review",
           processedOn: "Apr 9, 2024",
+          pdfUrl: "/invoices/northstar-analytics/march-2024.pdf",
+          students: [
+            { id: "data-warehouse", name: "Data Warehouse Support", nurse: "Priya Nandakumar", rate: "$140/hr" },
+            { id: "attendance-dashboard", name: "Attendance Dashboard Updates", nurse: "Noah Jenkins", rate: "$136/hr" },
+            { id: "professional-learning", name: "Professional Learning", nurse: "Anika Shah", rate: "$132/hr" },
+          ],
         },
         {
           month: "April",
           total: "$22,400",
           status: "Pending Submission",
           processedOn: "Due May 10, 2024",
+          pdfUrl: "/invoices/northstar-analytics/april-2024-draft.pdf",
+          students: [
+            { id: "data-warehouse", name: "Data Warehouse Support", nurse: "Priya Nandakumar", rate: "$140/hr" },
+            { id: "attendance-dashboard", name: "Attendance Dashboard Updates", nurse: "Noah Jenkins", rate: "$136/hr" },
+          ],
         },
       ],
       2023: [
@@ -202,11 +291,29 @@ const vendorProfiles = [
           total: "$21,900",
           status: "Approved",
           processedOn: "Jan 4, 2024",
+          pdfUrl: "/invoices/northstar-analytics/december-2023.pdf",
+          students: [
+            { id: "data-warehouse", name: "Data Warehouse Support", nurse: "Priya Nandakumar", rate: "$138/hr" },
+            { id: "attendance-dashboard", name: "Attendance Dashboard Updates", nurse: "Noah Jenkins", rate: "$134/hr" },
+          ],
         },
       ],
     },
   },
 ];
+
+const placeholderInvoicePreview = {
+  month: "Sample Month",
+  year: "2024",
+  total: "$18,240",
+  pdfUrl: "#",
+  students: [
+    { id: "placeholder-1", name: "Morgan Ellis", nurse: "Jamie Walker, RN", rate: "$92/hr" },
+    { id: "placeholder-2", name: "Avery Patel", nurse: "Jamie Walker, RN", rate: "$92/hr" },
+    { id: "placeholder-3", name: "Noah Alvarez", nurse: "Taylor Brooks, LPN", rate: "$88/hr" },
+    { id: "placeholder-4", name: "Isla Chen", nurse: "Taylor Brooks, LPN", rate: "$88/hr" },
+  ],
+};
 
 const statusStyles = {
   Approved: "bg-emerald-100 text-emerald-700",
@@ -265,6 +372,7 @@ const fiscalMonthsThroughCurrent = () => {
 export default function DistrictDashboard() {
   const [activeKey, setActiveKey] = useState(menuItems[0].key);
   const [selectedVendorId, setSelectedVendorId] = useState(null);
+  const [selectedInvoiceKey, setSelectedInvoiceKey] = useState(null);
   const activeItem = menuItems.find((item) => item.key === activeKey) ?? menuItems[0];
   const selectedVendor = vendorProfiles.find((vendor) => vendor.id === selectedVendorId) ?? null;
   const fiscalMonths = useMemo(() => fiscalMonthsThroughCurrent(), []);
@@ -276,6 +384,30 @@ export default function DistrictDashboard() {
     }
     return "Current Fiscal Year";
   }, [fiscalEndYear, fiscalStartYear]);
+
+  useEffect(() => {
+    setSelectedInvoiceKey(null);
+  }, [activeKey, selectedVendorId]);
+
+  const selectedInvoiceDetails = useMemo(() => {
+    if (!selectedVendor || !selectedInvoiceKey) {
+      return null;
+    }
+
+    const invoiceRecord =
+      selectedVendor.invoices[selectedInvoiceKey.year]?.find(
+        (invoice) => invoice.month === selectedInvoiceKey.month
+      ) ?? null;
+
+    if (!invoiceRecord) {
+      return null;
+    }
+
+    return {
+      ...invoiceRecord,
+      year: selectedInvoiceKey.year,
+    };
+  }, [selectedInvoiceKey, selectedVendor]);
 
   return (
     <div className="flex flex-col gap-6 lg:flex-row">
@@ -339,123 +471,256 @@ export default function DistrictDashboard() {
         </p>
 
         {activeItem.key === "vendors" ? (
-          <div className="mt-8 flex flex-col gap-6 lg:flex-row">
-            <aside className="lg:w-80 space-y-3">
-              <h4 className="text-sm font-semibold uppercase tracking-wider text-slate-500">
-                Vendors Active
-              </h4>
-              <p className="text-xs text-slate-500">
-                Choose a partner to review their invoices this fiscal year.
-              </p>
-              {vendorProfiles.map((vendor) => {
-                const isSelected = vendor.id === selectedVendorId;
-                return (
-                  <button
-                    key={vendor.id}
-                    onClick={() => setSelectedVendorId(vendor.id)}
-                    className={`w-full rounded-2xl border px-5 py-4 text-left transition ${
-                      isSelected
-                        ? "border-amber-400 bg-amber-50 shadow-md"
-                        : "border-slate-200 bg-white hover:border-slate-300"
-                    }`}
-                    type="button"
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-semibold text-slate-900">{vendor.name}</span>
-                      <span
-                        className={`text-xs font-medium ${
-                          isSelected ? "text-amber-700" : "text-slate-500"
-                        }`}
-                      >
-                        {vendor.health}
-                      </span>
-                    </div>
-                    <p className="mt-1 text-xs text-slate-500">{vendor.focus}</p>
-                    <p className="mt-3 text-xs text-slate-400">
-                      {vendor.campusesServed} campuses • {vendor.teamSize} specialists
-                    </p>
-                  </button>
-                );
-              })}
-            </aside>
-
-            <div className="flex-1">
-              {selectedVendor ? (
-                <div className="space-y-5">
+          <div className="mt-8 space-y-6">
+            {!selectedVendor ? (
+              <div className="space-y-3">
+                <h4 className="text-sm font-semibold uppercase tracking-wider text-slate-500">
+                  Vendors Active
+                </h4>
+                <p className="text-xs text-slate-500">
+                  Choose a partner to review their invoices this fiscal year.
+                </p>
+                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                  {vendorProfiles.map((vendor) => (
+                    <button
+                      key={vendor.id}
+                      onClick={() => setSelectedVendorId(vendor.id)}
+                      className="flex h-full flex-col rounded-2xl border border-slate-200 bg-white p-5 text-left transition hover:border-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/70"
+                      type="button"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-semibold text-slate-900">{vendor.name}</span>
+                        <span className="text-xs font-medium text-slate-500">{vendor.health}</span>
+                      </div>
+                      <p className="mt-1 text-xs text-slate-500">{vendor.focus}</p>
+                      <p className="mt-3 text-xs text-slate-400">
+                        {vendor.campusesServed} campuses • {vendor.teamSize} specialists
+                      </p>
+                      <p className="mt-4 text-xs text-slate-400">Contact: {vendor.manager}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                <div className="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-5 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <h4 className="text-xl font-semibold text-slate-900">{selectedVendor.name}</h4>
                     <p className="text-sm text-slate-500">{fiscalYearLabel}</p>
                     <p className="mt-2 text-sm text-slate-500">
                       Select a month below to review invoice activity.
                     </p>
+                    <p className="mt-4 text-xs text-slate-500">
+                      Account manager: <span className="font-medium text-slate-900">{selectedVendor.manager}</span> · {selectedVendor.managerTitle}
+                    </p>
+                    <p className="text-xs text-slate-500">{selectedVendor.email} • {selectedVendor.phone}</p>
                   </div>
+                  <div className="flex flex-col items-start gap-3 sm:items-end">
+                    <span className="inline-flex items-center rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-600">
+                      {selectedVendor.health}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedVendorId(null);
+                        setSelectedInvoiceKey(null);
+                      }}
+                      className="inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/70"
+                    >
+                      ← Back to vendors
+                    </button>
+                  </div>
+                </div>
 
-                  <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                    {fiscalMonths.map(({ year, label }) => {
-                      const invoiceYearKey = year.toString();
-                      const invoiceRecord =
-                        selectedVendor.invoices[invoiceYearKey]?.find(
-                          (invoice) => invoice.month === label
-                        ) ?? null;
+                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                  {fiscalMonths.map(({ year, label }) => {
+                    const invoiceYearKey = year.toString();
+                    const invoiceRecord =
+                      selectedVendor.invoices[invoiceYearKey]?.find(
+                        (invoice) => invoice.month === label
+                      ) ?? null;
 
-                      return (
-                        <div
-                          key={`${selectedVendor.id}-${invoiceYearKey}-${label}`}
-                          className="flex flex-col gap-3 rounded-2xl border border-slate-100 bg-white p-5 shadow-sm"
-                        >
-                          <div className="flex items-start justify-between">
-                            <div>
-                              <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-                                {label}
-                              </p>
-                              <p className="mt-1 text-sm text-slate-500">{year}</p>
-                            </div>
-                            {invoiceRecord ? (
-                              <span
-                                className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                                  statusStyles[invoiceRecord.status] ??
-                                  "bg-slate-100 text-slate-600"
-                                }`}
-                              >
-                                {invoiceRecord.status}
-                              </span>
-                            ) : (
-                              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
-                                No Invoice
-                              </span>
-                            )}
-                          </div>
+                    const isSelectedInvoice =
+                      invoiceRecord &&
+                      selectedInvoiceDetails &&
+                      selectedInvoiceDetails.month === invoiceRecord.month &&
+                      selectedInvoiceDetails.year === year;
+
+                    return (
+                      <button
+                        key={`${selectedVendor.id}-${label}-${year}`}
+                        onClick={() =>
+                          invoiceRecord
+                            ? setSelectedInvoiceKey({
+                                month: invoiceRecord.month,
+                                year,
+                              })
+                            : null
+                        }
+                        className={`flex h-full flex-col rounded-2xl border p-5 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/70 ${
+                          invoiceRecord
+                            ? isSelectedInvoice
+                              ? "border-amber-400 bg-amber-50 shadow"
+                              : "border-slate-200 bg-white hover:border-slate-300"
+                            : "border-dashed border-slate-300 bg-slate-50"
+                        }`}
+                        type="button"
+                        disabled={!invoiceRecord}
+                      >
+                        <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-wider">
+                          <span className="text-slate-500">{label}</span>
                           {invoiceRecord ? (
-                            <>
-                              <p className="text-lg font-semibold text-slate-900">
-                                {invoiceRecord.total}
-                              </p>
-                              <p className="text-xs text-slate-500">{invoiceRecord.processedOn}</p>
-                              <button
-                                className="mt-auto inline-flex items-center justify-center rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:border-amber-300 hover:text-amber-700"
-                                type="button"
-                              >
-                                Open Invoice
-                              </button>
-                            </>
+                            <span
+                              className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                                statusStyles[invoiceRecord.status] ?? "bg-slate-100 text-slate-500"
+                              }`}
+                            >
+                              {invoiceRecord.status}
+                            </span>
                           ) : (
-                            <p className="text-sm text-slate-500">
-                              No submission recorded for this month yet.
-                            </p>
+                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500">
+                              No Invoice
+                            </span>
                           )}
                         </div>
-                      );
-                    })}
+                        {invoiceRecord ? (
+                          <>
+                            <p className="text-lg font-semibold text-slate-900">
+                              {invoiceRecord.total}
+                            </p>
+                            <p className="text-xs text-slate-500">{invoiceRecord.processedOn}</p>
+                            <span
+                              className={`mt-auto inline-flex items-center text-xs font-semibold ${
+                                isSelectedInvoice ? "text-amber-700" : "text-slate-500"
+                              }`}
+                            >
+                              {isSelectedInvoice ? "Selected" : "View details"}
+                            </span>
+                          </>
+                        ) : (
+                          <p className="text-sm text-slate-500">
+                            No submission recorded for this month yet.
+                          </p>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {selectedInvoiceDetails ? (
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-6">
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <h5 className="text-lg font-semibold text-slate-900">
+                          {selectedInvoiceDetails.month} {selectedInvoiceDetails.year} Services
+                        </h5>
+                        <p className="text-sm text-slate-500">
+                          Students served by {selectedVendor.name}
+                        </p>
+                      </div>
+                      <a
+                        href={selectedInvoiceDetails.pdfUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center justify-center rounded-lg bg-amber-500 px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-amber-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
+                      >
+                        Download PDF Invoice
+                      </a>
+                    </div>
+
+                    {selectedInvoiceDetails.students?.length ? (
+                      <div className="mt-4 overflow-hidden rounded-xl border border-slate-200 bg-white">
+                        <table className="min-w-full divide-y divide-slate-200 text-left">
+                          <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                            <tr>
+                              <th scope="col" className="px-4 py-3">
+                                Student
+                              </th>
+                              <th scope="col" className="px-4 py-3">
+                                Nurse
+                              </th>
+                              <th scope="col" className="px-4 py-3">
+                                Rate
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-200 text-sm">
+                            {selectedInvoiceDetails.students.map((entry) => (
+                              <tr key={entry.id} className="bg-white">
+                                <td className="whitespace-nowrap px-4 py-3 font-medium text-slate-900">
+                                  {entry.name}
+                                </td>
+                                <td className="whitespace-nowrap px-4 py-3 text-slate-600">{entry.nurse}</td>
+                                <td className="whitespace-nowrap px-4 py-3 text-slate-600">{entry.rate}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <p className="mt-4 text-sm text-slate-500">
+                        No student services were reported for this month.
+                      </p>
+                    )}
+
+                    <div className="mt-6 flex items-center justify-between rounded-xl bg-slate-900 px-4 py-3 text-sm text-slate-100">
+                      <span>Total billed amount</span>
+                      <span className="text-lg font-semibold text-white">
+                        {selectedInvoiceDetails.total}
+                      </span>
+                    </div>
                   </div>
-                </div>
-              ) : (
-                <div className="flex h-full min-h-[320px] items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50">
-                  <p className="text-sm font-medium text-slate-500">
-                    Select a vendor to view monthly invoices.
-                  </p>
-                </div>
-              )}
-            </div>
+                ) : (
+                  <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-6">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <h5 className="text-lg font-semibold text-slate-900">Preview invoice layout</h5>
+                        <p className="text-sm text-slate-500">
+                          Select a month to load real student roster data. Here's a sample view for reference.
+                        </p>
+                      </div>
+                      <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">
+                        Sample Data
+                      </span>
+                    </div>
+                    <div className="mt-4 overflow-hidden rounded-xl border border-slate-200 bg-white">
+                      <table className="min-w-full divide-y divide-slate-200 text-left">
+                        <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                          <tr>
+                            <th scope="col" className="px-4 py-3">
+                              Student
+                            </th>
+                            <th scope="col" className="px-4 py-3">
+                              Nurse
+                            </th>
+                            <th scope="col" className="px-4 py-3">
+                              Rate
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-200 text-sm">
+                          {placeholderInvoicePreview.students.map((entry) => (
+                            <tr key={entry.id} className="bg-white">
+                              <td className="whitespace-nowrap px-4 py-3 font-medium text-slate-900">
+                                {entry.name}
+                              </td>
+                              <td className="whitespace-nowrap px-4 py-3 text-slate-600">{entry.nurse}</td>
+                              <td className="whitespace-nowrap px-4 py-3 text-slate-600">{entry.rate}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="mt-6 flex items-center justify-between rounded-xl bg-slate-900 px-4 py-3 text-sm text-slate-100">
+                      <span>Example total billed amount</span>
+                      <span className="text-lg font-semibold text-white">
+                        {placeholderInvoicePreview.total}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         ) : (
           <div className="mt-8 rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-slate-500">
