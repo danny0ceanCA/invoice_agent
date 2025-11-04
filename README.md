@@ -35,6 +35,17 @@ render.yaml               # Render deployment definition
 README.md                 # Project overview
 ```
 
+## User Roles
+
+The platform serves three primary user personas:
+
+- **Vendors** – Access the vendor portal to import timesheets and use vendor-specific
+  features only.
+- **District Staff** – Operate within the district module, including the district
+  console (active vendors, approvals, analytics, settings, etc.).
+- **Administrators** – Have full visibility across both vendor and district
+  experiences.
+
 ## Getting Started
 
 1. Copy `.env.example` to `.env` and supply environment values.
