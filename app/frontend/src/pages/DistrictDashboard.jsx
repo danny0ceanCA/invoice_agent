@@ -451,6 +451,20 @@ export default function DistrictDashboard() {
                     <p className="mt-1 text-sm text-slate-500">
                       Status: {activeInvoiceDetails.status} · Processed {activeInvoiceDetails.processedOn}
                     </p>
+                    <p className="text-xs text-slate-500">{selectedVendor.email} • {selectedVendor.phone}</p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
+                    <span className="inline-flex items-center rounded-full bg-slate-900 px-3 py-1 text-sm font-semibold text-white">
+                      Total {activeInvoiceDetails.total}
+                    </span>
+                    <a
+                      href={activeInvoiceDetails.pdfUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center rounded-full bg-amber-500 px-3 py-1.5 text-sm font-semibold text-white shadow-sm transition hover:bg-amber-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
+                    >
+                      Download PDF Invoice
+                    </a>
                   </div>
                   <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
                     <span className="inline-flex items-center rounded-full bg-slate-900 px-3 py-1 text-sm font-semibold text-white">
