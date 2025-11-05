@@ -12,11 +12,6 @@ const vendorProfile = {
     email: "alana@harboredu.com",
     phone: "(555) 214-0183",
   },
-  summaryPoints: [
-    { label: "Students Served", value: "42" },
-    { label: "Average Response", value: "2.1 hrs" },
-    { label: "Fill Rate", value: "98%" },
-  ],
   serviceSnapshot: [
     {
       id: "slp",
@@ -224,14 +219,6 @@ export default function VendorDashboard() {
           <div>
             <h1 className="text-3xl font-bold text-slate-900">{vendorProfile.name}</h1>
             <p className="mt-2 max-w-2xl text-sm text-slate-600">{vendorProfile.tagline}</p>
-          </div>
-          <div className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:grid-cols-3">
-            {vendorProfile.summaryPoints.map((item) => (
-              <div key={item.label} className="text-center">
-                <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{item.label}</p>
-                <p className="mt-1 text-xl font-semibold text-slate-900">{item.value}</p>
-              </div>
-            ))}
           </div>
         </div>
       </header>
