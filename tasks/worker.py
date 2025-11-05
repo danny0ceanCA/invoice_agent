@@ -8,6 +8,7 @@ from typing import Any
 
 import structlog
 from celery import Celery
+from kombu import Queue
 
 from app.backend.src.core.config import get_settings
 
@@ -108,6 +109,12 @@ celery.conf.update(include=["tasks.invoice_tasks"])
 ssl_options = _build_ssl_options()
 
 celery_conf: dict[str, object] = {
+    "task_default_queue": "small",
+    "task_queues": (
+        Queue("small"),
+        Queue("medium"),
+        Queue("large"),
+    ),
     "task_routes": {
         "tasks.small.*": {"queue": "small"},
         "tasks.medium.*": {"queue": "medium"},
