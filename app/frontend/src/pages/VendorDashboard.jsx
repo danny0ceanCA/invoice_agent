@@ -353,7 +353,7 @@ export default function VendorDashboard() {
 
             <div className="mt-6 grid gap-6 lg:grid-cols-[220px_1fr]">
               <nav
-                className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1"
+                className="flex flex-wrap gap-3"
                 aria-label="Select invoice month"
               >
                 {yearInvoices.map((invoice) => (
@@ -361,10 +361,10 @@ export default function VendorDashboard() {
                     key={`${selectedYear}-${invoice.month}`}
                     type="button"
                     onClick={() => setSelectedMonth(invoice.month)}
-                    className={`group flex w-full items-center justify-between rounded-xl border px-4 py-3 text-sm font-semibold uppercase tracking-wide transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-500 ${
+                    className={`group inline-flex items-center justify-between rounded-full px-5 py-2 text-sm font-semibold uppercase tracking-wide transition focus-visible:outline-none ${
                       invoice.month === selectedMonth
-                        ? "border-amber-400 bg-amber-50 text-amber-700 shadow-sm"
-                        : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                        ? "bg-amber-500 text-white shadow"
+                        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                     }`}
                   >
                     <span>{invoice.month}</span>
@@ -374,8 +374,8 @@ export default function VendorDashboard() {
                       xmlns="http://www.w3.org/2000/svg"
                       className={`h-4 w-4 transition ${
                         invoice.month === selectedMonth
-                          ? "text-amber-600"
-                          : "text-slate-300 group-hover:text-slate-400"
+                          ? "text-white/80"
+                          : "text-slate-400 group-hover:text-slate-500"
                       }`}
                     >
                       <path
@@ -426,25 +426,25 @@ export default function VendorDashboard() {
 
                   <div className="overflow-hidden rounded-2xl border border-slate-200">
                     <table className="min-w-full divide-y divide-slate-200">
-                      <thead className="bg-slate-100">
+                      <thead className="bg-slate-50">
                         <tr>
-                          <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                          <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
                             Student
                           </th>
-                          <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                          <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
                             Service
                           </th>
-                          <th className="px-4 py-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">
+                          <th className="px-6 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">
                             Amount
                           </th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-200 bg-white">
+                      <tbody className="divide-y divide-slate-200 bg-white text-sm">
                         {selectedInvoice.students.map((student) => (
                           <tr key={student.id}>
-                            <td className="px-4 py-2 text-sm font-medium text-slate-900">{student.name}</td>
-                            <td className="px-4 py-2 text-sm text-slate-600">{student.service}</td>
-                            <td className="px-4 py-2 text-right text-sm font-semibold text-slate-900">{student.amount}</td>
+                            <td className="whitespace-nowrap px-6 py-3 font-medium text-slate-900">{student.name}</td>
+                            <td className="whitespace-nowrap px-6 py-3 text-slate-600">{student.service}</td>
+                            <td className="whitespace-nowrap px-6 py-3 text-right font-semibold text-slate-900">{student.amount}</td>
                           </tr>
                         ))}
                       </tbody>
