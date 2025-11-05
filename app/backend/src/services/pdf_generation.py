@@ -7,6 +7,7 @@ from io import BytesIO
 from time import perf_counter
 
 import pandas as pd
+from reportlab.lib.colors import HexColor
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 
@@ -43,61 +44,197 @@ def generate_invoice_pdf(
     start = perf_counter()
     buffer = BytesIO()
     pdf_canvas = canvas.Canvas(buffer, pagesize=letter)
-    _, height = letter
+    width, height = letter
 
-    pdf_canvas.setFont("Helvetica-Bold", 16)
-    pdf_canvas.drawString(50, height - 60, "Action Supportive Care Services")
-    pdf_canvas.setFont("Helvetica", 12)
-    pdf_canvas.drawString(50, height - 90, f"Student: {student}")
-    pdf_canvas.drawString(50, height - 110, f"Service Month: {service_month}")
-    pdf_canvas.drawString(50, height - 130, f"Invoice Date: {invoice_date}")
-    label = invoice_number or invoice_code
-    if label:
-        pdf_canvas.drawString(50, height - 150, f"Invoice #: {label}")
+    margin = 50
+    header_height = 120
+    primary_color = HexColor("#0F172A")
+    accent_color = HexColor("#6366F1")
+    muted_text = HexColor("#64748B")
+    light_panel = HexColor("#F8FAFC")
+    table_header_color = HexColor("#EEF2FF")
+    border_color = HexColor("#E2E8F0")
 
-    y_position = height - 190
-    headers = [
-        "Service Date",
-        "Clinician",
-        "Service Code",
-        "Hours",
-        "Rate",
-        "Cost",
+    def draw_brand_header() -> float:
+        badge_width = 118
+        badge_height = 30
+        badge_x = width - margin - badge_width
+        badge_y = height - header_height + 38
+
+        pdf_canvas.setFillColor(primary_color)
+        pdf_canvas.rect(0, height - header_height, width, header_height, fill=1, stroke=0)
+
+        pdf_canvas.setFont("Helvetica-Bold", 18)
+        pdf_canvas.setFillColor(HexColor("#FFFFFF"))
+        pdf_canvas.drawString(margin, height - 58, "Action Supportive Care Services")
+        pdf_canvas.setFont("Helvetica", 10)
+        pdf_canvas.setFillColor(HexColor("#CBD5F5"))
+        pdf_canvas.drawString(margin, height - 78, "Comprehensive Behavioral Support Solutions")
+
+        pdf_canvas.setFillColor(accent_color)
+        pdf_canvas.roundRect(badge_x, badge_y, badge_width, badge_height, 8, fill=1, stroke=0)
+        pdf_canvas.setFont("Helvetica-Bold", 12)
+        pdf_canvas.setFillColor(HexColor("#FFFFFF"))
+        pdf_canvas.drawRightString(badge_x + badge_width - 10, badge_y + 18, "INVOICE")
+        pdf_canvas.setFont("Helvetica", 9)
+        pdf_canvas.setFillColor(HexColor("#E2E8F0"))
+        pdf_canvas.drawRightString(width - margin, height - 78, service_month)
+        pdf_canvas.drawRightString(width - margin, height - 92, f"Issue Date: {invoice_date}")
+
+        pdf_canvas.setStrokeColor(border_color)
+        pdf_canvas.setFillColor(primary_color)
+        return height - header_height - 36
+
+    def draw_invoice_summary(top: float) -> float:
+        card_height = 96
+        left_x = margin + 24
+        middle_x = margin + 220
+        right_box_width = 150
+        card_bottom = top - card_height
+
+        pdf_canvas.setFillColor(light_panel)
+        pdf_canvas.roundRect(margin, card_bottom, width - 2 * margin, card_height, 12, fill=1, stroke=0)
+
+        pdf_canvas.setFillColor(primary_color)
+        pdf_canvas.setFont("Helvetica-Bold", 11)
+        pdf_canvas.drawString(left_x, top - 28, "Bill To")
+        pdf_canvas.setFont("Helvetica", 10)
+        pdf_canvas.setFillColor(muted_text)
+        pdf_canvas.drawString(left_x, top - 45, student)
+        pdf_canvas.drawString(left_x, top - 61, "Service Month")
+        pdf_canvas.setFont("Helvetica-Bold", 10)
+        pdf_canvas.setFillColor(primary_color)
+        pdf_canvas.drawString(left_x + 90, top - 61, service_month)
+
+        pdf_canvas.setFont("Helvetica-Bold", 11)
+        pdf_canvas.drawString(middle_x, top - 28, "Invoice Details")
+        pdf_canvas.setFont("Helvetica", 10)
+        pdf_canvas.setFillColor(muted_text)
+        pdf_canvas.drawString(middle_x, top - 45, f"Invoice Date: {invoice_date}")
+        label = invoice_number or invoice_code
+        if label:
+            pdf_canvas.drawString(middle_x, top - 61, f"Invoice #: {label}")
+
+        highlight_x = width - margin - right_box_width - 20
+        pdf_canvas.setFillColor(table_header_color)
+        pdf_canvas.roundRect(
+            highlight_x,
+            card_bottom + 18,
+            right_box_width,
+            card_height - 36,
+            10,
+            fill=1,
+            stroke=0,
+        )
+        pdf_canvas.setFont("Helvetica", 9)
+        pdf_canvas.setFillColor(muted_text)
+        pdf_canvas.drawRightString(highlight_x + right_box_width - 14, card_bottom + card_height - 30, "Total Due")
+        pdf_canvas.setFont("Helvetica-Bold", 16)
+        pdf_canvas.setFillColor(accent_color)
+        pdf_canvas.drawRightString(
+            highlight_x + right_box_width - 14,
+            card_bottom + card_height - 52,
+            f"${totals['Cost']:.2f}",
+        )
+
+        pdf_canvas.setFillColor(primary_color)
+        return card_bottom - 32
+
+    def draw_table_header(top: float) -> float:
+        header_height = 26
+        pdf_canvas.setFillColor(table_header_color)
+        pdf_canvas.roundRect(
+            margin,
+            top - header_height,
+            width - 2 * margin,
+            header_height,
+            8,
+            fill=1,
+            stroke=0,
+        )
+
+        headers = [
+            "Service Date",
+            "Clinician",
+            "Service Code",
+            "Hours",
+            "Rate",
+            "Cost",
+        ]
+        columns = [
+            margin + 18,
+            margin + 175,
+            margin + 315,
+            margin + 420,
+            margin + 490,
+            width - margin - 10,
+        ]
+
+        pdf_canvas.setFillColor(primary_color)
+        pdf_canvas.setFont("Helvetica-Bold", 10)
+        for idx, header in enumerate(headers):
+            x = columns[idx]
+            if header in {"Hours", "Rate", "Cost"}:
+                pdf_canvas.drawRightString(x, top - 10, header)
+            else:
+                pdf_canvas.drawString(x, top - 10, header)
+
+        pdf_canvas.setFont("Helvetica", 10)
+        pdf_canvas.setFillColor(primary_color)
+        return top - header_height - 18
+
+    y_position = draw_brand_header()
+    y_position = draw_invoice_summary(y_position)
+    y_position = draw_table_header(y_position)
+
+    columns = [
+        margin + 18,
+        margin + 175,
+        margin + 315,
+        margin + 420,
+        margin + 490,
+        width - margin - 10,
     ]
-    columns = [50, 160, 290, 400, 470, 540]
 
-    pdf_canvas.setFont("Helvetica-Bold", 10)
-    for idx, header in enumerate(headers):
-        pdf_canvas.drawString(columns[idx], y_position, header)
-
-    pdf_canvas.setFont("Helvetica", 10)
-    y_position -= 20
-
-    for _, row in df.iterrows():
-        if y_position < 100:
+    rows = df.reset_index(drop=True)
+    row_height = 22
+    for idx, row in rows.iterrows():
+        if y_position < 110:
             pdf_canvas.showPage()
-            y_position = height - 100
-            pdf_canvas.setFont("Helvetica-Bold", 10)
-            for idx, header in enumerate(headers):
-                pdf_canvas.drawString(columns[idx], y_position, header)
-            pdf_canvas.setFont("Helvetica", 10)
-            y_position -= 20
+            y_position = draw_brand_header()
+            y_position = draw_table_header(y_position)
 
-        pdf_canvas.drawString(columns[0], y_position, str(row["Schedule Date"]))
-        pdf_canvas.drawString(columns[1], y_position, str(row["Employee"]))
-        pdf_canvas.drawString(columns[2], y_position, str(row["Service Code"]))
-        pdf_canvas.drawRightString(columns[3] + 30, y_position, f"{row['Hours']:.2f}")
-        pdf_canvas.drawRightString(columns[4] + 30, y_position, f"${row['Rate']:.2f}")
-        pdf_canvas.drawRightString(columns[5] + 30, y_position, f"${row['Cost']:.2f}")
-        y_position -= 16
+        if idx % 2 == 0:
+            pdf_canvas.setFillColor(light_panel)
+            pdf_canvas.roundRect(
+                margin,
+                y_position - row_height + 6,
+                width - 2 * margin,
+                row_height - 4,
+                6,
+                fill=1,
+                stroke=0,
+            )
 
-    pdf_canvas.setFont("Helvetica-Bold", 12)
-    pdf_canvas.drawRightString(columns[4] + 30, y_position - 20, "Total:")
-    pdf_canvas.drawRightString(
-        columns[5] + 30,
-        y_position - 20,
-        f"${totals['Cost']:.2f}",
-    )
+        pdf_canvas.setFillColor(primary_color)
+        pdf_canvas.setFont("Helvetica", 10)
+        pdf_canvas.drawString(columns[0], y_position - 10, str(row["Schedule Date"]))
+        pdf_canvas.drawString(columns[1], y_position - 10, str(row["Employee"]))
+        pdf_canvas.drawString(columns[2], y_position - 10, str(row["Service Code"]))
+        pdf_canvas.drawRightString(columns[3], y_position - 10, f"{row['Hours']:.2f}")
+        pdf_canvas.drawRightString(columns[4], y_position - 10, f"${row['Rate']:.2f}")
+        pdf_canvas.drawRightString(columns[5], y_position - 10, f"${row['Cost']:.2f}")
+        y_position -= row_height
+
+    pdf_canvas.setStrokeColor(border_color)
+    pdf_canvas.line(margin, y_position - 6, width - margin, y_position - 6)
+    pdf_canvas.setFont("Helvetica-Bold", 11)
+    pdf_canvas.setFillColor(muted_text)
+    pdf_canvas.drawRightString(columns[4], y_position - 26, "Total Due")
+    pdf_canvas.setFont("Helvetica-Bold", 14)
+    pdf_canvas.setFillColor(accent_color)
+    pdf_canvas.drawRightString(columns[5], y_position - 26, f"${totals['Cost']:.2f}")
+
     pdf_canvas.save()
 
     buffer.seek(0)
