@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import ssl
+
 from celery import Celery
 
 from app.backend.src.core.config import get_settings
@@ -15,7 +17,7 @@ celery = Celery(
 )
 
 ssl_options = {
-    "ssl_cert_reqs": "CERT_REQUIRED",
+    "ssl_cert_reqs": ssl.CERT_REQUIRED,
     "ssl_ca_certs": settings.redis_ca_cert_path,
 }
 
