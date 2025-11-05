@@ -332,9 +332,6 @@ export default function VendorDashboard() {
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
                 <h2 className="text-lg font-semibold text-slate-900">Invoice History</h2>
-                <p className="mt-1 text-sm text-slate-600">
-                  Track monthly submissions, approval status, and export supporting files for your records.
-                </p>
               </div>
               <div className="flex items-center gap-2">
                 {invoiceYears.map((year) => (
@@ -355,22 +352,43 @@ export default function VendorDashboard() {
             </div>
 
             <div className="mt-6 grid gap-6 lg:grid-cols-[220px_1fr]">
-              <div className="space-y-2">
+              <nav
+                className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1"
+                aria-label="Select invoice month"
+              >
                 {yearInvoices.map((invoice) => (
                   <button
                     key={`${selectedYear}-${invoice.month}`}
                     type="button"
                     onClick={() => setSelectedMonth(invoice.month)}
-                    className={`w-full rounded-xl border px-4 py-3 text-left transition ${
+                    className={`group flex w-full items-center justify-between rounded-xl border px-4 py-3 text-sm font-semibold uppercase tracking-wide transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-500 ${
                       invoice.month === selectedMonth
-                        ? "border-amber-400 bg-amber-50 shadow-sm"
-                        : "border-slate-200 bg-white hover:border-slate-300"
+                        ? "border-amber-400 bg-amber-50 text-amber-700 shadow-sm"
+                        : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
                     }`}
                   >
-                    <p className="text-sm font-semibold text-slate-900">{invoice.month}</p>
+                    <span>{invoice.month}</span>
+                    <svg
+                      viewBox="0 0 20 20"
+                      fill="none"
+                      xmlns="http://www.w3.org/2000/svg"
+                      className={`h-4 w-4 transition ${
+                        invoice.month === selectedMonth
+                          ? "text-amber-600"
+                          : "text-slate-300 group-hover:text-slate-400"
+                      }`}
+                    >
+                      <path
+                        d="M7.5 5l5 5-5 5"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
                   </button>
                 ))}
-              </div>
+              </nav>
 
               {selectedInvoice ? (
                 <div className="space-y-6">
