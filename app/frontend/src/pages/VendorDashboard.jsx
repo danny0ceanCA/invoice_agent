@@ -280,56 +280,56 @@ export default function VendorDashboard() {
         </nav>
       </header>
 
-      <div className="mx-auto mt-8 grid max-w-6xl gap-6 lg:grid-cols-[320px_1fr]">
-        <aside className="space-y-6">
-          <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h2 className="text-sm font-semibold text-slate-900">Account Team</h2>
-            <p className="mt-2 text-sm text-slate-600">
-              {vendorProfile.manager.name} · {vendorProfile.manager.title}
-            </p>
-            <dl className="mt-4 space-y-2 text-sm text-slate-600">
-              <div className="flex items-center justify-between">
-                <dt className="text-slate-500">Email</dt>
-                <dd>
-                  <a
-                    href={`mailto:${vendorProfile.manager.email}`}
-                    className="font-medium text-amber-600 hover:text-amber-700"
-                  >
-                    {vendorProfile.manager.email}
-                  </a>
-                </dd>
-              </div>
-              <div className="flex items-center justify-between">
-                <dt className="text-slate-500">Phone</dt>
-                <dd className="font-medium text-slate-900">{vendorProfile.manager.phone}</dd>
-              </div>
-            </dl>
-          </section>
-
-          <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h2 className="text-sm font-semibold text-slate-900">Service Snapshot</h2>
-            <ul className="mt-4 space-y-4">
-              {vendorProfile.serviceSnapshot.map((service) => (
-                <li key={service.id} className="flex items-start justify-between">
-                  <div>
-                    <p className="text-sm font-semibold text-slate-900">{service.name}</p>
-                    <p className="text-xs text-slate-500">{service.students} students supported</p>
+      <div className="mx-auto mt-8 max-w-6xl">
+        {activeTab === "portal" ? (
+          <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
+            <aside className="space-y-6">
+              <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                <h2 className="text-sm font-semibold text-slate-900">Account Team</h2>
+                <p className="mt-2 text-sm text-slate-600">
+                  {vendorProfile.manager.name} · {vendorProfile.manager.title}
+                </p>
+                <dl className="mt-4 space-y-2 text-sm text-slate-600">
+                  <div className="flex items-center justify-between">
+                    <dt className="text-slate-500">Email</dt>
+                    <dd>
+                      <a
+                        href={`mailto:${vendorProfile.manager.email}`}
+                        className="font-medium text-amber-600 hover:text-amber-700"
+                      >
+                        {vendorProfile.manager.email}
+                      </a>
+                    </dd>
                   </div>
-                  <div className="text-right">
-                    <p className="text-sm font-semibold text-slate-900">{service.amount}</p>
-                    <p className="text-xs text-emerald-600">{service.trend}</p>
+                  <div className="flex items-center justify-between">
+                    <dt className="text-slate-500">Phone</dt>
+                    <dd className="font-medium text-slate-900">{vendorProfile.manager.phone}</dd>
                   </div>
-                </li>
-              ))}
-            </ul>
-          </section>
+                </dl>
+              </section>
 
-          {/* Upcoming actions and helpful resources sections removed as per request */}
-        </aside>
+              <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                <h2 className="text-sm font-semibold text-slate-900">Service Snapshot</h2>
+                <ul className="mt-4 space-y-4">
+                  {vendorProfile.serviceSnapshot.map((service) => (
+                    <li key={service.id} className="flex items-start justify-between">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-900">{service.name}</p>
+                        <p className="text-xs text-slate-500">{service.students} students supported</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm font-semibold text-slate-900">{service.amount}</p>
+                        <p className="text-xs text-emerald-600">{service.trend}</p>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </section>
 
-        <main className="space-y-6">
-          {activeTab === "portal" ? (
-            <>
+              {/* Upcoming actions and helpful resources sections removed as per request */}
+            </aside>
+
+            <main className="space-y-6">
               <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                 <div className="space-y-4">
                   <h2 className="text-lg font-semibold text-slate-900">Welcome Back</h2>
@@ -472,42 +472,42 @@ export default function VendorDashboard() {
                   )}
                 </div>
               </section>
-            </>
-          ) : (
-            <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-              <div className="flex flex-wrap items-start justify-between gap-4">
-                <div>
-                  <h2 className="text-lg font-semibold text-slate-900">Upload Timesheets</h2>
-                  <p className="mt-1 text-sm text-slate-600">
-                    Upload a raw Excel timesheet to kick off automated invoice generation. Status
-                    updates appear below within a few seconds of submission.
-                  </p>
-                </div>
-                <label className="inline-flex cursor-pointer items-center justify-center rounded-xl border border-dashed border-amber-400 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-700 shadow-sm transition hover:border-amber-500 hover:bg-amber-100">
-                  <input
-                    type="file"
-                    accept=".xlsx,.xls"
-                    onChange={handleUpload}
-                    disabled={isUploading}
-                    className="sr-only"
-                  />
-                  {isUploading ? "Uploading…" : "Select File"}
-                </label>
+            </main>
+          </div>
+        ) : (
+          <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900">Upload Timesheets</h2>
+                <p className="mt-1 text-sm text-slate-600">
+                  Upload a raw Excel timesheet to kick off automated invoice generation. Status
+                  updates appear below within a few seconds of submission.
+                </p>
               </div>
-              {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+              <label className="inline-flex cursor-pointer items-center justify-center rounded-xl border border-dashed border-amber-400 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-700 shadow-sm transition hover:border-amber-500 hover:bg-amber-100">
+                <input
+                  type="file"
+                  accept=".xlsx,.xls"
+                  onChange={handleUpload}
+                  disabled={isUploading}
+                  className="sr-only"
+                />
+                {isUploading ? "Uploading…" : "Select File"}
+              </label>
+            </div>
+            {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
 
-              <div className="mt-6 space-y-3">
-                {jobs.length === 0 ? (
-                  <p className="text-sm text-slate-500">
-                    No recent uploads. Submit your latest timesheet to generate a draft invoice.
-                  </p>
-                ) : (
-                  jobs.map((job) => <JobStatusCard key={job.id} job={job} />)
-                )}
-              </div>
-            </section>
-          )}
-        </main>
+            <div className="mt-6 space-y-3">
+              {jobs.length === 0 ? (
+                <p className="text-sm text-slate-500">
+                  No recent uploads. Submit your latest timesheet to generate a draft invoice.
+                </p>
+              ) : (
+                jobs.map((job) => <JobStatusCard key={job.id} job={job} />)
+              )}
+            </div>
+          </section>
+        )}
       </div>
     </div>
   );
