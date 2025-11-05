@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import structlog
-from celery import Celery
+from celery import Celery, signals
 from kombu import Queue
 
 from app.backend.src.core.config import get_settings
@@ -87,11 +87,11 @@ def _verify_celery_connectivity() -> None:
         )
         raise
 
-    LOGGER.info(
-        "celery_worker_ready",
-        broker=settings.broker_url,
-        backend=settings.result_backend,
-    )
+LOGGER.info(
+    "celery_bootstrap_ready",
+    broker=settings.broker_url,
+    backend=settings.result_backend,
+)
 
 
 celery = Celery(
@@ -141,11 +141,83 @@ if settings.result_backend.startswith("rediss://"):
 
 celery.conf.update(**celery_conf)
 
-_verify_celery_connectivity()
-
 # Import task definitions so Celery registers them when the worker starts. The
 # import happens at module import time so workers launched from any entrypoint
 # automatically load the `tasks.process_invoice` task.
 from . import invoice_tasks  # noqa: F401  # isort: skip
+
+
+@signals.worker_ready.connect
+def _log_worker_configuration(sender: Any | None = None, **_: Any) -> None:
+    """Emit structured worker configuration details after startup."""
+
+    app = sender.app if sender is not None else celery
+    _verify_celery_connectivity()
+    queue_names = sorted(
+        getattr(queue, "name", str(queue)) for queue in app.conf.task_queues or []
+    )
+    if not queue_names and app.conf.task_default_queue:
+        queue_names = [app.conf.task_default_queue]
+    registered_tasks = sorted(
+        task_name for task_name in app.tasks.keys() if task_name.startswith("tasks.")
+    )
+    LOGGER.info(
+        "celery_worker_configuration",
+        default_queue=app.conf.task_default_queue,
+        queues=queue_names,
+        registered_tasks=registered_tasks,
+    )
+
+
+@signals.task_prerun.connect
+def _log_task_prerun(
+    sender: Any | None = None,
+    task_id: str | None = None,
+    task: Any | None = None,
+    args: tuple[Any, ...] = (),
+    kwargs: dict[str, Any] | None = None,
+    **_: Any,
+) -> None:
+    """Log when a task begins execution to help debug queue issues."""
+
+    kwargs = kwargs or {}
+    task_name = getattr(task, "name", "")
+    if task_name and not task_name.startswith("tasks."):
+        return
+    LOGGER.info(
+        "celery_task_prerun",
+        task_id=task_id,
+        task_name=task_name or None,
+        queue=kwargs.get("queue_name"),
+        vendor_id=args[1] if len(args) > 1 else None,
+    )
+
+
+@signals.task_postrun.connect
+def _log_task_postrun(
+    sender: Any | None = None,
+    task_id: str | None = None,
+    task: Any | None = None,
+    retval: Any | None = None,
+    state: str | None = None,
+    **_: Any,
+) -> None:
+    """Emit completion information after a task finishes."""
+
+    payload: dict[str, Any] = {
+        "task_id": task_id,
+        "task_name": getattr(task, "name", None),
+        "state": state,
+    }
+    task_name = payload["task_name"] or ""
+    if task_name and not task_name.startswith("tasks."):
+        return
+    if state == "SUCCESS":
+        if isinstance(retval, dict):
+            payload["result_keys"] = sorted(retval.keys())
+        else:
+            payload["result_repr"] = repr(retval)
+
+    LOGGER.info("celery_task_postrun", **payload)
 
 __all__ = ["celery"]
