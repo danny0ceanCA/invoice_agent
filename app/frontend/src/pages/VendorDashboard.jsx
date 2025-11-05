@@ -361,31 +361,13 @@ export default function VendorDashboard() {
                     key={`${selectedYear}-${invoice.month}`}
                     type="button"
                     onClick={() => setSelectedMonth(invoice.month)}
-                    className={`group inline-flex items-center justify-between rounded-full px-5 py-2 text-sm font-semibold uppercase tracking-wide transition focus-visible:outline-none ${
+                    className={`inline-flex items-center justify-center rounded-full px-5 py-2 text-sm font-semibold uppercase tracking-wide transition focus-visible:outline-none ${
                       invoice.month === selectedMonth
                         ? "bg-amber-500 text-white shadow"
                         : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                     }`}
                   >
                     <span>{invoice.month}</span>
-                    <svg
-                      viewBox="0 0 20 20"
-                      fill="none"
-                      xmlns="http://www.w3.org/2000/svg"
-                      className={`h-4 w-4 transition ${
-                        invoice.month === selectedMonth
-                          ? "text-white/80"
-                          : "text-slate-400 group-hover:text-slate-500"
-                      }`}
-                    >
-                      <path
-                        d="M7.5 5l5 5-5 5"
-                        stroke="currentColor"
-                        strokeWidth="1.5"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
                   </button>
                 ))}
               </nav>
