@@ -164,8 +164,8 @@ def generate_invoice_pdf(
         columns = [
             margin + 18,
             margin + 170,
-            margin + 320,
-            width - margin - 200,
+            margin + 295,
+            width - margin - 170,
             width - margin - 110,
             width - margin - 20,
         ]
@@ -190,8 +190,8 @@ def generate_invoice_pdf(
     columns = [
         margin + 18,
         margin + 170,
-        margin + 320,
-        width - margin - 200,
+        margin + 295,
+        width - margin - 170,
         width - margin - 110,
         width - margin - 20,
     ]
