@@ -29,6 +29,12 @@ celery_conf: dict[str, object] = {
     "accept_content": ["json"],
     "result_serializer": "json",
     "worker_prefetch_multiplier": 1,
+    "broker_transport_options": {
+        "global_keyprefix": "invoice-agent-broker:",
+    },
+    "result_backend_transport_options": {
+        "global_keyprefix": "invoice-agent-result:",
+    },
 }
 
 if settings.broker_url.startswith("rediss://"):
