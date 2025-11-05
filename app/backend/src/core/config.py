@@ -57,12 +57,10 @@ class Settings(BaseSettings):
 
     @property
     def result_backend(self) -> str:
-        """Return the Celery result backend, defaulting to Redis DB 1."""
+        """Return the Celery result backend, defaulting to the Redis URL."""
 
         if self.celery_result_backend:
             return self.celery_result_backend
-        if self.redis_url.endswith("/0"):
-            return f"{self.redis_url[:-2]}/1"
         return self.redis_url
 
     @property
