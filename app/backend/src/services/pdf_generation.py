@@ -163,11 +163,11 @@ def generate_invoice_pdf(
         ]
         columns = [
             margin + 18,
-            margin + 175,
-            margin + 315,
-            margin + 420,
-            margin + 490,
-            width - margin - 10,
+            margin + 170,
+            margin + 305,
+            margin + 400,
+            width - margin - 100,
+            width - margin - 20,
         ]
 
         pdf_canvas.setFillColor(primary_color)
@@ -189,11 +189,11 @@ def generate_invoice_pdf(
 
     columns = [
         margin + 18,
-        margin + 175,
-        margin + 315,
-        margin + 420,
-        margin + 490,
-        width - margin - 10,
+        margin + 170,
+        margin + 305,
+        margin + 400,
+        width - margin - 100,
+        width - margin - 20,
     ]
 
     rows = df.reset_index(drop=True)
