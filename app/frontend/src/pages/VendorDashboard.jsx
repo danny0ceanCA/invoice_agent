@@ -40,46 +40,6 @@ const vendorProfile = {
       amount: "$21,600",
     },
   ],
-  tasks: [
-    {
-      id: "submit-april",
-      title: "Submit April timesheet upload",
-      due: "Due May 5, 2024",
-      status: "Action Needed",
-    },
-    {
-      id: "review-feedback",
-      title: "Review district feedback on February invoice",
-      due: "Updated Apr 12, 2024",
-      status: "In Progress",
-    },
-    {
-      id: "confirm-schedule",
-      title: "Confirm summer staffing availability",
-      due: "Requested by May 15, 2024",
-      status: "Upcoming",
-    },
-  ],
-  resources: [
-    {
-      id: "guidelines",
-      title: "District billing guidelines",
-      description: "Download the 2023-24 reference to ensure compliance with service caps.",
-      href: "#",
-    },
-    {
-      id: "calendar",
-      title: "Submission calendar",
-      description: "Key dates for monthly uploads, approval checkpoints, and payroll cutoffs.",
-      href: "#",
-    },
-    {
-      id: "support",
-      title: "Contact district finance",
-      description: "Email finance@northbridgek12.gov for billing clarifications.",
-      href: "mailto:finance@northbridgek12.gov",
-    },
-  ],
   invoices: {
     2024: [
       {
@@ -320,38 +280,7 @@ export default function VendorDashboard() {
             </ul>
           </section>
 
-          <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h2 className="text-sm font-semibold text-slate-900">Upcoming Actions</h2>
-            <ul className="mt-4 space-y-4">
-              {vendorProfile.tasks.map((task) => (
-                <li key={task.id} className="rounded-xl border border-slate-200 p-4">
-                  <p className="text-sm font-semibold text-slate-900">{task.title}</p>
-                  <p className="mt-1 text-xs text-slate-500">{task.due}</p>
-                  <span className="mt-3 inline-flex items-center rounded-full bg-amber-100 px-3 py-1 text-xs font-medium text-amber-700">
-                    {task.status}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </section>
-
-          <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h2 className="text-sm font-semibold text-slate-900">Helpful Resources</h2>
-            <ul className="mt-4 space-y-4">
-              {vendorProfile.resources.map((resource) => (
-                <li key={resource.id}>
-                  <h3 className="text-sm font-semibold text-slate-900">{resource.title}</h3>
-                  <p className="mt-1 text-xs text-slate-500">{resource.description}</p>
-                  <a
-                    href={resource.href}
-                    className="mt-2 inline-flex text-xs font-medium text-amber-600 hover:text-amber-700"
-                  >
-                    Open
-                  </a>
-                </li>
-              ))}
-            </ul>
-          </section>
+          {/* Upcoming actions and helpful resources sections removed as per request */}
         </aside>
 
         <main className="space-y-6">
