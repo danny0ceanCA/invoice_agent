@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-from tempfile import gettempdir
+from dataclasses import dataclass
+from io import BytesIO
 from time import perf_counter
 
 import pandas as pd
@@ -11,12 +11,21 @@ from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 
 from app.backend.src.services.metrics import pdf_generation_seconds
+from app.backend.src.services.s3 import upload_bytes
 
 
-def _resolve_output_path(student: str, service_month: str) -> Path:
+@dataclass(frozen=True, slots=True)
+class InvoicePdf:
+    """Representation of a generated invoice PDF stored in S3."""
+
+    key: str
+    filename: str
+    content: bytes
+
+
+def _build_filename(student: str, service_month: str) -> str:
     safe_student = student.replace(" ", "_")
-    filename = f"Invoice_{safe_student}_{service_month}.pdf"
-    return Path(gettempdir()) / filename
+    return f"Invoice_{safe_student}_{service_month}.pdf"
 
 
 def generate_invoice_pdf(
@@ -27,12 +36,13 @@ def generate_invoice_pdf(
     service_month: str,
     invoice_code: str | None = None,
     invoice_number: str | None = None,
-) -> Path:
-    """Render a student-level invoice PDF and return the file path."""
+) -> InvoicePdf:
+    """Render a student-level invoice PDF and upload it to S3."""
 
-    output_path = _resolve_output_path(student, service_month)
+    filename = _build_filename(student, service_month)
     start = perf_counter()
-    pdf_canvas = canvas.Canvas(str(output_path), pagesize=letter)
+    buffer = BytesIO()
+    pdf_canvas = canvas.Canvas(buffer, pagesize=letter)
     _, height = letter
 
     pdf_canvas.setFont("Helvetica-Bold", 16)
@@ -90,8 +100,15 @@ def generate_invoice_pdf(
     )
     pdf_canvas.save()
 
+    buffer.seek(0)
+    pdf_bytes = buffer.read()
     pdf_generation_seconds.observe(perf_counter() - start)
-    return output_path
+    key = upload_bytes(
+        pdf_bytes,
+        filename=filename,
+        content_type="application/pdf",
+    )
+    return InvoicePdf(key=key, filename=filename, content=pdf_bytes)
 
 
-__all__ = ["generate_invoice_pdf"]
+__all__ = ["InvoicePdf", "generate_invoice_pdf"]

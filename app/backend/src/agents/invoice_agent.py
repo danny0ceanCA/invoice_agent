@@ -17,8 +17,8 @@ from app.backend.src.models.invoice import Invoice
 from app.backend.src.models.job import Job
 from app.backend.src.models.line_item import InvoiceLineItem
 from app.backend.src.services.metrics import invoice_jobs_total
-from app.backend.src.services.pdf_generation import generate_invoice_pdf
-from app.backend.src.services.s3 import upload_file
+from app.backend.src.services.pdf_generation import InvoicePdf, generate_invoice_pdf
+from app.backend.src.services.s3 import upload_bytes
 
 LOGGER = structlog.get_logger(__name__)
 
@@ -81,7 +81,7 @@ class InvoiceAgent:
 
         invoices: list[Invoice] = []
         duplicates: list[str] = []
-        pdf_paths: list[Path] = []
+        pdf_artifacts: list[InvoicePdf] = []
         self.logger.info("invoice_agent_start", upload=str(file_path))
         try:
             with session_scope() as session:
@@ -96,17 +96,17 @@ class InvoiceAgent:
                         )
                         continue
 
-                    invoice, pdf_path = self._process_student(
+                    invoice, pdf_artifact = self._process_student(
                         session, student, student_frame, invoice_number
                     )
                     invoices.append(invoice)
-                    pdf_paths.append(pdf_path)
+                    pdf_artifacts.append(pdf_artifact)
         except Exception as exc:
             invoice_jobs_total.labels(status="failed").inc()
             self.logger.error("invoice_agent_error", error=str(exc))
             raise
 
-        zip_key = self._bundle_invoices(pdf_paths)
+        zip_key = self._bundle_invoices(pdf_artifacts)
         status = "completed" if invoices else "skipped"
         message = self._compose_job_message(len(invoices), duplicates)
         metric_label = "succeeded" if invoices else "skipped"
@@ -139,7 +139,7 @@ class InvoiceAgent:
         totals = frame[["Hours", "Cost"]].sum().to_dict()
 
         invoice_code = self.invoice_code or str(uuid4())
-        pdf_path = generate_invoice_pdf(
+        pdf_artifact = generate_invoice_pdf(
             student,
             frame,
             totals,
@@ -148,7 +148,6 @@ class InvoiceAgent:
             invoice_code,
             invoice_number,
         )
-        pdf_key = upload_file(pdf_path, content_type="application/pdf")
 
         invoice = Invoice(
             vendor_id=self.vendor_id,
@@ -159,7 +158,7 @@ class InvoiceAgent:
             invoice_date=self.invoice_date,
             service_month=self.service_month_display,
             invoice_code=invoice_code,
-            pdf_s3_key=pdf_key,
+            pdf_s3_key=pdf_artifact.key,
             status="generated",
         )
         session.add(invoice)
@@ -179,7 +178,7 @@ class InvoiceAgent:
             session.add(line_item)
 
         session.flush()
-        return invoice, pdf_path
+        return invoice, pdf_artifact
 
     def _invoice_exists(self, session: Session, invoice_number: str) -> bool:
         """Return True when an invoice number already exists for this vendor."""
@@ -192,27 +191,28 @@ class InvoiceAgent:
             is not None
         )
 
-    def _bundle_invoices(self, pdf_paths: list[Path]) -> str:
+    def _bundle_invoices(self, pdf_artifacts: list[InvoicePdf]) -> str:
         """Create a ZIP archive from generated PDFs and upload it to storage."""
 
-        if not pdf_paths:
+        if not pdf_artifacts:
             return ""
 
-        from tempfile import NamedTemporaryFile
+        from io import BytesIO
         from zipfile import ZipFile
 
-        with NamedTemporaryFile(suffix=".zip", delete=False) as tmp_file:
-            with ZipFile(tmp_file.name, "w") as bundle:
-                for pdf_path in pdf_paths:
-                    if pdf_path.exists():
-                        bundle.write(pdf_path, arcname=pdf_path.name)
-            tmp_path = Path(tmp_file.name)
+        zip_buffer = BytesIO()
+        with ZipFile(zip_buffer, "w") as bundle:
+            for artifact in pdf_artifacts:
+                bundle.writestr(artifact.filename, artifact.content)
 
-        key = upload_file(tmp_path, content_type="application/zip")
-        tmp_path.unlink(missing_ok=True)
-        for pdf_path in pdf_paths:
-            pdf_path.unlink(missing_ok=True)
-        return key
+        zip_buffer.seek(0)
+        bundle_name = f"Invoices_{uuid4()}.zip"
+        zip_key = upload_bytes(
+            zip_buffer.getvalue(),
+            filename=bundle_name,
+            content_type="application/zip",
+        )
+        return zip_key
 
     @staticmethod
     def _normalize_service_month(
