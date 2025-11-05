@@ -146,14 +146,38 @@ export default function VendorDashboard() {
   const [jobs, setJobs] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState(null);
+  const fiscalMonthOrder = useMemo(
+    () => [
+      "July",
+      "August",
+      "September",
+      "October",
+      "November",
+      "December",
+      "January",
+      "February",
+      "March",
+      "April",
+      "May",
+      "June",
+    ],
+    []
+  );
   const invoiceYears = useMemo(
     () => Object.keys(vendorProfile.invoices).sort((a, b) => Number(b) - Number(a)),
     []
   );
   const [selectedYear, setSelectedYear] = useState(invoiceYears[0]);
   const yearInvoices = useMemo(
-    () => vendorProfile.invoices[selectedYear] ?? [],
-    [selectedYear]
+    () =>
+      [...(vendorProfile.invoices[selectedYear] ?? [])].sort((a, b) => {
+        const monthIndexA = fiscalMonthOrder.indexOf(a.month);
+        const monthIndexB = fiscalMonthOrder.indexOf(b.month);
+        const safeIndexA = monthIndexA === -1 ? Number.MAX_SAFE_INTEGER : monthIndexA;
+        const safeIndexB = monthIndexB === -1 ? Number.MAX_SAFE_INTEGER : monthIndexB;
+        return safeIndexA - safeIndexB;
+      }),
+    [selectedYear, fiscalMonthOrder]
   );
   const [selectedMonth, setSelectedMonth] = useState(yearInvoices[0]?.month ?? null);
 
