@@ -368,7 +368,6 @@ export default function VendorDashboard() {
                     }`}
                   >
                     <p className="text-sm font-semibold text-slate-900">{invoice.month}</p>
-                    <p className="text-xs text-slate-500">{invoice.status}</p>
                   </button>
                 ))}
               </div>
