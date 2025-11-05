@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     )
     redis_url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
     redis_enabled_flag: bool = Field(default=True, alias="REDIS_ENABLED")
+    redis_ca_cert_path: str = Field(
+        default="certs/redis_ca.pem", alias="REDIS_CA_CERT_PATH"
+    )
     celery_broker_url: str | None = Field(
         default=None, alias="CELERY_BROKER_URL"
     )
