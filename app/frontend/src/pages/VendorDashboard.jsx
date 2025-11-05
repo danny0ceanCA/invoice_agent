@@ -143,6 +143,7 @@ const vendorProfile = {
 };
 
 export default function VendorDashboard() {
+  const [activeTab, setActiveTab] = useState("portal");
   const [jobs, setJobs] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState(null);
@@ -180,6 +181,18 @@ export default function VendorDashboard() {
     [selectedYear, fiscalMonthOrder]
   );
   const [selectedMonth, setSelectedMonth] = useState(yearInvoices[0]?.month ?? null);
+
+  const totalStudentsServed = useMemo(
+    () => vendorProfile.serviceSnapshot.reduce((total, service) => total + service.students, 0),
+    []
+  );
+  const activeServiceLines = vendorProfile.serviceSnapshot.length;
+  const pendingInvoiceCount = useMemo(() => {
+    const mostRecentYear = invoiceYears[0];
+    if (!mostRecentYear) return 0;
+    const invoices = vendorProfile.invoices[mostRecentYear] ?? [];
+    return invoices.filter((invoice) => invoice.status !== "Approved").length;
+  }, [invoiceYears]);
 
   useEffect(() => {
     setSelectedMonth((prev) => {
@@ -244,6 +257,30 @@ export default function VendorDashboard() {
             <h1 className="text-3xl font-bold text-slate-900">{vendorProfile.name}</h1>
             <p className="mt-2 max-w-2xl text-sm text-slate-600">{vendorProfile.tagline}</p>
           </div>
+          <nav className="flex items-center gap-2" aria-label="Vendor navigation">
+            <button
+              type="button"
+              onClick={() => setActiveTab("portal")}
+              className={`rounded-full px-4 py-2 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2 ${
+                activeTab === "portal"
+                  ? "bg-amber-500 text-white shadow"
+                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+              }`}
+            >
+              Vendor Portal
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab("invoices")}
+              className={`rounded-full px-4 py-2 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2 ${
+                activeTab === "invoices"
+                  ? "bg-amber-500 text-white shadow"
+                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+              }`}
+            >
+              Invoices
+            </button>
+          </nav>
         </div>
       </header>
 
@@ -295,151 +332,185 @@ export default function VendorDashboard() {
         </aside>
 
         <main className="space-y-6">
-          <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div>
-                <h2 className="text-lg font-semibold text-slate-900">Upload Timesheets</h2>
-                <p className="mt-1 text-sm text-slate-600">
-                  Upload a raw Excel timesheet to kick off automated invoice generation. Status updates
-                  appear below within a few seconds of submission.
+          {activeTab === "portal" ? (
+            <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+              <div className="space-y-4">
+                <h2 className="text-lg font-semibold text-slate-900">Welcome Back</h2>
+                <p className="text-sm text-slate-600">
+                  Access key partner information, review your account contacts, and keep an eye on
+                  service delivery metrics. Switch to the Invoices tab to submit new timesheets and
+                  track billing status in real time.
                 </p>
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <p className="text-xs uppercase tracking-wide text-slate-500">Students Served</p>
+                    <p className="mt-2 text-2xl font-bold text-slate-900">{totalStudentsServed}</p>
+                    <p className="mt-2 text-xs text-slate-500">Across all active programs this school year.</p>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <p className="text-xs uppercase tracking-wide text-slate-500">Service Lines</p>
+                    <p className="mt-2 text-2xl font-bold text-slate-900">{activeServiceLines}</p>
+                    <p className="mt-2 text-xs text-slate-500">SLP, RN, and other approved offerings.</p>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <p className="text-xs uppercase tracking-wide text-slate-500">Billing Status</p>
+                    <p className="mt-2 text-2xl font-bold text-slate-900">{pendingInvoiceCount}</p>
+                    <p className="mt-2 text-xs text-slate-500">
+                      {pendingInvoiceCount === 1 ? "Invoice" : "Invoices"} awaiting district action.
+                    </p>
+                  </div>
+                </div>
               </div>
-              <label className="inline-flex cursor-pointer items-center justify-center rounded-xl border border-dashed border-amber-400 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-700 shadow-sm transition hover:border-amber-500 hover:bg-amber-100">
-                <input
-                  type="file"
-                  accept=".xlsx,.xls"
-                  onChange={handleUpload}
-                  disabled={isUploading}
-                  className="sr-only"
-                />
-                {isUploading ? "Uploading…" : "Select File"}
-              </label>
-            </div>
-            {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+            </section>
+          ) : (
+            <>
+              <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div>
+                    <h2 className="text-lg font-semibold text-slate-900">Upload Timesheets</h2>
+                    <p className="mt-1 text-sm text-slate-600">
+                      Upload a raw Excel timesheet to kick off automated invoice generation. Status
+                      updates appear below within a few seconds of submission.
+                    </p>
+                  </div>
+                  <label className="inline-flex cursor-pointer items-center justify-center rounded-xl border border-dashed border-amber-400 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-700 shadow-sm transition hover:border-amber-500 hover:bg-amber-100">
+                    <input
+                      type="file"
+                      accept=".xlsx,.xls"
+                      onChange={handleUpload}
+                      disabled={isUploading}
+                      className="sr-only"
+                    />
+                    {isUploading ? "Uploading…" : "Select File"}
+                  </label>
+                </div>
+                {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
 
-            <div className="mt-6 space-y-3">
-              {jobs.length === 0 ? (
-                <p className="text-sm text-slate-500">
-                  No recent uploads. Submit your latest timesheet to generate a draft invoice.
-                </p>
-              ) : (
-                jobs.map((job) => <JobStatusCard key={job.id} job={job} />)
-              )}
-            </div>
-          </section>
+                <div className="mt-6 space-y-3">
+                  {jobs.length === 0 ? (
+                    <p className="text-sm text-slate-500">
+                      No recent uploads. Submit your latest timesheet to generate a draft invoice.
+                    </p>
+                  ) : (
+                    jobs.map((job) => <JobStatusCard key={job.id} job={job} />)
+                  )}
+                </div>
+              </section>
 
-          <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <div>
-                <h2 className="text-lg font-semibold text-slate-900">Invoice History</h2>
-              </div>
-              <div className="flex items-center gap-2">
-                {invoiceYears.map((year) => (
-                  <button
-                    key={year}
-                    onClick={() => setSelectedYear(year)}
-                    type="button"
-                    className={`rounded-full px-3 py-1 text-sm font-medium transition ${
-                      year === selectedYear
-                        ? "bg-amber-500 text-white shadow"
-                        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                    }`}
+              <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-lg font-semibold text-slate-900">Invoice History</h2>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {invoiceYears.map((year) => (
+                      <button
+                        key={year}
+                        onClick={() => setSelectedYear(year)}
+                        type="button"
+                        className={`rounded-full px-3 py-1 text-sm font-medium transition ${
+                          year === selectedYear
+                            ? "bg-amber-500 text-white shadow"
+                            : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                        }`}
+                      >
+                        {year}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="mt-6 grid gap-6 lg:grid-cols-[220px_1fr]">
+                  <nav
+                    className="flex flex-wrap gap-3"
+                    aria-label="Select invoice month"
                   >
-                    {year}
-                  </button>
-                ))}
-              </div>
-            </div>
+                    {yearInvoices.map((invoice) => (
+                      <button
+                        key={`${selectedYear}-${invoice.month}`}
+                        type="button"
+                        onClick={() => setSelectedMonth(invoice.month)}
+                        className={`inline-flex items-center justify-center rounded-full px-5 py-2 text-sm font-semibold uppercase tracking-wide transition focus-visible:outline-none ${
+                          invoice.month === selectedMonth
+                            ? "bg-amber-500 text-white shadow"
+                            : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                        }`}
+                      >
+                        <span>{invoice.month}</span>
+                      </button>
+                    ))}
+                  </nav>
 
-            <div className="mt-6 grid gap-6 lg:grid-cols-[220px_1fr]">
-              <nav
-                className="flex flex-wrap gap-3"
-                aria-label="Select invoice month"
-              >
-                {yearInvoices.map((invoice) => (
-                  <button
-                    key={`${selectedYear}-${invoice.month}`}
-                    type="button"
-                    onClick={() => setSelectedMonth(invoice.month)}
-                    className={`inline-flex items-center justify-center rounded-full px-5 py-2 text-sm font-semibold uppercase tracking-wide transition focus-visible:outline-none ${
-                      invoice.month === selectedMonth
-                        ? "bg-amber-500 text-white shadow"
-                        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                    }`}
-                  >
-                    <span>{invoice.month}</span>
-                  </button>
-                ))}
-              </nav>
-
-              {selectedInvoice ? (
-                <div className="space-y-6">
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
-                    <div className="flex flex-wrap items-center justify-between gap-4">
-                      <div>
-                        <p className="text-xs uppercase tracking-wide text-slate-500">{selectedMonth}</p>
-                        <h3 className="text-2xl font-bold text-slate-900">{selectedInvoice.total}</h3>
-                        <p className="mt-2 text-sm text-slate-600">Processed on {selectedInvoice.processedOn}</p>
+                  {selectedInvoice ? (
+                    <div className="space-y-6">
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                        <div className="flex flex-wrap items-center justify-between gap-4">
+                          <div>
+                            <p className="text-xs uppercase tracking-wide text-slate-500">{selectedMonth}</p>
+                            <h3 className="text-2xl font-bold text-slate-900">{selectedInvoice.total}</h3>
+                            <p className="mt-2 text-sm text-slate-600">Processed on {selectedInvoice.processedOn}</p>
+                          </div>
+                          <span className="inline-flex items-center rounded-full bg-emerald-100 px-4 py-1 text-sm font-medium text-emerald-700">
+                            {selectedInvoice.status}
+                          </span>
+                        </div>
+                        <p className="mt-4 text-sm text-slate-600">{selectedInvoice.notes}</p>
+                        <div className="mt-5 flex flex-wrap gap-3">
+                          {selectedInvoice.pdfUrl ? (
+                            <a
+                              href={selectedInvoice.pdfUrl}
+                              className="inline-flex items-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-400"
+                            >
+                              Download PDF
+                            </a>
+                          ) : null}
+                          {selectedInvoice.timesheetCsvUrl ? (
+                            <a
+                              href={selectedInvoice.timesheetCsvUrl}
+                              className="inline-flex items-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-400"
+                            >
+                              Download Timesheet CSV
+                            </a>
+                          ) : null}
+                        </div>
                       </div>
-                      <span className="inline-flex items-center rounded-full bg-emerald-100 px-4 py-1 text-sm font-medium text-emerald-700">
-                        {selectedInvoice.status}
-                      </span>
-                    </div>
-                    <p className="mt-4 text-sm text-slate-600">{selectedInvoice.notes}</p>
-                    <div className="mt-5 flex flex-wrap gap-3">
-                      {selectedInvoice.pdfUrl ? (
-                        <a
-                          href={selectedInvoice.pdfUrl}
-                          className="inline-flex items-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-400"
-                        >
-                          Download PDF
-                        </a>
-                      ) : null}
-                      {selectedInvoice.timesheetCsvUrl ? (
-                        <a
-                          href={selectedInvoice.timesheetCsvUrl}
-                          className="inline-flex items-center rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-400"
-                        >
-                          Download Timesheet CSV
-                        </a>
-                      ) : null}
-                    </div>
-                  </div>
 
-                  <div className="overflow-hidden rounded-2xl border border-slate-200">
-                    <table className="min-w-full divide-y divide-slate-200">
-                      <thead className="bg-slate-50">
-                        <tr>
-                          <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
-                            Student
-                          </th>
-                          <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
-                            Service
-                          </th>
-                          <th className="px-6 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">
-                            Amount
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-200 bg-white text-sm">
-                        {selectedInvoice.students.map((student) => (
-                          <tr key={student.id}>
-                            <td className="whitespace-nowrap px-6 py-3 font-medium text-slate-900">{student.name}</td>
-                            <td className="whitespace-nowrap px-6 py-3 text-slate-600">{student.service}</td>
-                            <td className="whitespace-nowrap px-6 py-3 text-right font-semibold text-slate-900">{student.amount}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                      <div className="overflow-hidden rounded-2xl border border-slate-200">
+                        <table className="min-w-full divide-y divide-slate-200">
+                          <thead className="bg-slate-50">
+                            <tr>
+                              <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                                Student
+                              </th>
+                              <th className="px-6 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                                Service
+                              </th>
+                              <th className="px-6 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-600">
+                                Amount
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-200 bg-white text-sm">
+                            {selectedInvoice.students.map((student) => (
+                              <tr key={student.id}>
+                                <td className="whitespace-nowrap px-6 py-3 font-medium text-slate-900">{student.name}</td>
+                                <td className="whitespace-nowrap px-6 py-3 text-slate-600">{student.service}</td>
+                                <td className="whitespace-nowrap px-6 py-3 text-right font-semibold text-slate-900">{student.amount}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-center rounded-2xl border border-dashed border-slate-300 p-6 text-sm text-slate-500">
+                      Select a month to view invoice details.
+                    </div>
+                  )}
                 </div>
-              ) : (
-                <div className="flex items-center justify-center rounded-2xl border border-dashed border-slate-300 p-6 text-sm text-slate-500">
-                  Select a month to view invoice details.
-                </div>
-              )}
-            </div>
-          </section>
+              </section>
+            </>
+          )}
         </main>
       </div>
     </div>
