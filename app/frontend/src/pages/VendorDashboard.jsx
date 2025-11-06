@@ -143,7 +143,7 @@ const vendorProfile = {
   },
 };
 
-export default function VendorDashboard() {
+export default function VendorDashboard({ vendorId }) {
   const [activeTab, setActiveTab] = useState("portal");
   const [jobs, setJobs] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
@@ -241,6 +241,12 @@ export default function VendorDashboard() {
     const file = event.target.files?.[0];
     if (!file) return;
 
+    if (vendorId == null) {
+      setError("Your account is not linked to a vendor profile yet. Please contact an administrator.");
+      event.target.value = "";
+      return;
+    }
+
     setIsUploading(true);
     setError(null);
 
@@ -253,7 +259,7 @@ export default function VendorDashboard() {
 
       const token = await getAccessTokenSilently();
       const payload = {
-        vendor_id: 1,
+        vendor_id: vendorId,
         invoice_date: new Date().toISOString().split("T")[0],
         service_month: new Date().toLocaleString("default", { month: "long", year: "numeric" }),
         invoice_code: `INV-${Date.now()}`,
@@ -316,6 +322,11 @@ export default function VendorDashboard() {
       </header>
 
       <div className="mx-auto mt-8 max-w-6xl">
+        {vendorId == null ? (
+          <div className="mb-6 rounded border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+            Your district administrator still needs to link your Auth0 account to a vendor profile before you can submit invoices.
+          </div>
+        ) : null}
         {activeTab === "portal" ? (
           <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
             <aside className="space-y-6">

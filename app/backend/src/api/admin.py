@@ -8,12 +8,16 @@ from sqlalchemy.orm import Session
 from app.backend.src.db import get_session_dependency
 from app.backend.src.models.user import User
 from app.backend.src.services.seed import seed_development_user
+from app.backend.src.core.security import require_admin_user
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
 @router.post("/seed")
-def load_seed_data(session: Session = Depends(get_session_dependency)) -> dict[str, object]:
+def load_seed_data(
+    session: Session = Depends(get_session_dependency),
+    _: User = Depends(require_admin_user),
+) -> dict[str, object]:
     """Create (or return) a demo vendor and user for local development."""
 
     auth0_sub = os.environ.get("AUTH0_DEMO_SUB")
@@ -37,7 +41,10 @@ def load_seed_data(session: Session = Depends(get_session_dependency)) -> dict[s
 
 # TODO: Remove or disable this bootstrap route after promoting the first admin user.
 @router.post("/bootstrap")
-def bootstrap_admin(session: Session = Depends(get_session_dependency)) -> dict[str, object]:
+def bootstrap_admin(
+    session: Session = Depends(get_session_dependency),
+    _: User = Depends(require_admin_user),
+) -> dict[str, object]:
     """Promote the first user in the database to an admin role if none exists."""
 
     existing_admin = session.query(User).filter(User.role == "admin").first()
