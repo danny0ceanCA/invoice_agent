@@ -43,7 +43,7 @@ export async function selectUserRole(
   accessToken: string,
   role: RoleSelectionOption,
 ): Promise<CurrentUserResponse> {
-  return apiFetch<CurrentUserResponse>("/users/set-role", accessToken, {
+  return apiFetch<CurrentUserResponse>("/auth/set-role", accessToken, {
     method: "POST",
     body: JSON.stringify({ role }),
   });
