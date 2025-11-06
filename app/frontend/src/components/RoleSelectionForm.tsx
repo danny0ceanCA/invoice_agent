@@ -26,7 +26,7 @@ export function RoleSelectionForm({ onRoleSelected }: RoleSelectionFormProps) {
 
     try {
       const token = await getAccessTokenSilently();
-      const response = await fetch(`${API_BASE}/users/set-role`, {
+      const response = await fetch(`${API_BASE}/auth/set-role`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
