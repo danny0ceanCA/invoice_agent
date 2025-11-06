@@ -1,16 +1,13 @@
 import { useState } from "react";
 import { useAuth0 } from "@auth0/auth0-react";
 
+import { API_BASE } from "../api/auth";
+
 type RoleOption = "vendor" | "district";
 
 type RoleSelectionFormProps = {
   onRoleSelected: () => Promise<void> | void;
 };
-
-const API_URL = (
-  import.meta.env.VITE_API_URL ??
-  `${(import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000").replace(/\/$/, "")}/api`
-).replace(/\/$/, "");
 
 export function RoleSelectionForm({ onRoleSelected }: RoleSelectionFormProps) {
   const { getAccessTokenSilently } = useAuth0();
@@ -29,7 +26,7 @@ export function RoleSelectionForm({ onRoleSelected }: RoleSelectionFormProps) {
 
     try {
       const token = await getAccessTokenSilently();
-      const response = await fetch(`${API_URL}/users/set-role`, {
+      const response = await fetch(`${API_BASE}/users/set-role`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

@@ -1,4 +1,7 @@
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+const API_BASE = (
+  import.meta.env.VITE_API_URL ??
+  `${(import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000").replace(/\/$/, "")}/api`
+).replace(/\/$/, "");
 
 export async function uploadInvoice(file, meta, accessToken) {
   if (!accessToken) {
@@ -13,7 +16,7 @@ export async function uploadInvoice(file, meta, accessToken) {
     formData.append("invoice_code", meta.invoice_code);
   }
 
-  const response = await fetch(`${API_BASE}/api/invoices/generate`, {
+  const response = await fetch(`${API_BASE}/invoices/generate`, {
     method: "POST",
     body: formData,
     headers: {
