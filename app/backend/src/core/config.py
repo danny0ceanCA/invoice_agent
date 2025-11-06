@@ -5,7 +5,7 @@ from __future__ import annotations
 from functools import lru_cache
 
 from pydantic import Field
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -16,6 +16,10 @@ class Settings(BaseSettings):
         default="sqlite:///./invoice.db", alias="DATABASE_URL"
     )
     redis_url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
+    redis_enabled_flag: bool = Field(default=True, alias="REDIS_ENABLED")
+    redis_ca_cert_path: str = Field(
+        default="certs/redis_ca.pem", alias="REDIS_CA_CERT_PATH"
+    )
     celery_broker_url: str | None = Field(
         default=None, alias="CELERY_BROKER_URL"
     )
@@ -34,7 +38,11 @@ class Settings(BaseSettings):
         default="/tmp/invoice-agent", alias="LOCAL_STORAGE_PATH"
     )
 
-    model_config = {"case_sensitive": False}
+    model_config = SettingsConfigDict(
+        case_sensitive=False,
+        env_file=".env",
+        env_file_encoding="utf-8",
+    )
 
     def get(self, key: str, default: object | None = None) -> object | None:
         """Dictionary-style access to configuration values."""
@@ -49,19 +57,17 @@ class Settings(BaseSettings):
 
     @property
     def result_backend(self) -> str:
-        """Return the Celery result backend, defaulting to Redis DB 1."""
+        """Return the Celery result backend, defaulting to the Redis URL."""
 
         if self.celery_result_backend:
             return self.celery_result_backend
-        if self.redis_url.endswith("/0"):
-            return f"{self.redis_url[:-2]}/1"
         return self.redis_url
 
     @property
     def redis_enabled(self) -> bool:
         """Return ``True`` when Redis integrations should be used."""
 
-        return str(self.get("REDIS_ENABLED", "true")).lower() == "true"
+        return self.redis_enabled_flag
 
 
 @lru_cache()
