@@ -1,5 +1,7 @@
 """Administrative endpoints for managing datasets, users, and vendors."""
 
+import os
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
@@ -13,7 +15,8 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 def load_seed_data(session: Session = Depends(get_session_dependency)) -> dict[str, object]:
     """Create (or return) a demo vendor and user for local development."""
 
-    result = seed_development_user(session)
+    auth0_sub = os.environ.get("AUTH0_DEMO_SUB")
+    result = seed_development_user(session, auth0_sub=auth0_sub)
     session.commit()
 
     return {
@@ -27,5 +30,5 @@ def load_seed_data(session: Session = Depends(get_session_dependency)) -> dict[s
             "name": result.user.name,
             "role": result.user.role,
         },
-        "auth_header": {"X-User-Id": str(result.user.id)},
+        "auth0_sub": result.user.auth0_sub,
     }

@@ -1,12 +1,29 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
+import { Auth0Provider } from "@auth0/auth0-react";
 
 import { App } from "./pages/App";
 
 import "./styles/global.css";
 
+const domain = import.meta.env.VITE_AUTH0_DOMAIN;
+const clientId = import.meta.env.VITE_AUTH0_CLIENT_ID;
+const audience = import.meta.env.VITE_AUTH0_AUDIENCE;
+
+if (!domain || !clientId) {
+  throw new Error("Auth0 configuration is missing. Please define VITE_AUTH0_DOMAIN and VITE_AUTH0_CLIENT_ID.");
+}
+
+const authorizationParams = {
+  redirect_uri: window.location.origin,
+  scope: "openid profile email",
+  ...(audience ? { audience } : {}),
+};
+
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
-    <App />
+    <Auth0Provider domain={domain} clientId={clientId} authorizationParams={authorizationParams}>
+      <App />
+    </Auth0Provider>
   </React.StrictMode>
 );

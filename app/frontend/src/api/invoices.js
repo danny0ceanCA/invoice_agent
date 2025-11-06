@@ -1,6 +1,9 @@
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
-export async function uploadInvoice(file, meta) {
+export async function uploadInvoice(file, meta, accessToken) {
+  if (!accessToken) {
+    throw new Error("Missing access token");
+  }
   const formData = new FormData();
   formData.append("file", file);
   formData.append("vendor_id", String(meta.vendor_id));
@@ -13,7 +16,9 @@ export async function uploadInvoice(file, meta) {
   const response = await fetch(`${API_BASE}/api/invoices/generate`, {
     method: "POST",
     body: formData,
-    headers: { "X-User-Id": "1" },
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
   });
 
   if (!response.ok) {

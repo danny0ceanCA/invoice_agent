@@ -1,5 +1,7 @@
 """Seed the development database with a demo vendor and user."""
 
+import os
+
 from app.backend.src.db import get_engine, session_scope
 from app.backend.src.models.base import Base
 from app.backend.src.services.seed import seed_development_user
@@ -12,7 +14,8 @@ def main() -> None:
     Base.metadata.create_all(bind=engine)
 
     with session_scope() as session:
-        result = seed_development_user(session)
+        auth0_sub = os.environ.get("AUTH0_DEMO_SUB")
+        result = seed_development_user(session, auth0_sub=auth0_sub)
         session.flush()
 
         print("✅ Development data ready!")
@@ -26,8 +29,10 @@ def main() -> None:
             f"[id={result.user.id}, role={result.user.role}]"
         )
         print()
-        print("Use the following header when calling protected APIs:")
-        print(f"  X-User-Id: {result.user.id}")
+        if auth0_sub:
+            print(f"Linked Auth0 subject: {auth0_sub}")
+        else:
+            print("Set AUTH0_DEMO_SUB to automatically link an Auth0 subject during seeding.")
 
 
 if __name__ == "__main__":

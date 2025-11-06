@@ -33,6 +33,7 @@ def seed_development_user(
     user_email: str = DEFAULT_USER_EMAIL,
     user_name: str = DEFAULT_USER_NAME,
     user_role: str = DEFAULT_USER_ROLE,
+    auth0_sub: str | None = None,
 ) -> SeedResult:
     """Ensure a demo vendor and user exist for local development.
 
@@ -56,6 +57,7 @@ def seed_development_user(
             name=user_name,
             role=user_role,
             vendor_id=vendor.id,
+            auth0_sub=auth0_sub,
         )
         session.add(user)
         session.flush()
@@ -67,6 +69,8 @@ def seed_development_user(
             user.role = user_role
         if user.name != user_name:
             user.name = user_name
+        if auth0_sub and user.auth0_sub != auth0_sub:
+            user.auth0_sub = auth0_sub
 
     return SeedResult(
         vendor=vendor,

@@ -37,6 +37,8 @@ class Settings(BaseSettings):
     local_storage_path: str = Field(
         default="/tmp/invoice-agent", alias="LOCAL_STORAGE_PATH"
     )
+    auth0_domain: str | None = Field(default=None, alias="AUTH0_DOMAIN")
+    auth0_audience: str | None = Field(default=None, alias="AUTH0_AUDIENCE")
 
     model_config = SettingsConfigDict(
         case_sensitive=False,
