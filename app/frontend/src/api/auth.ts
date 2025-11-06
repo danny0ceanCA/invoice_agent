@@ -1,4 +1,7 @@
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+export const API_BASE = (
+  import.meta.env.VITE_API_URL ??
+  `${(import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000").replace(/\/$/, "")}/api`
+).replace(/\/$/, "");
 
 export type UserRole = "vendor" | "district" | "admin";
 export type RoleSelectionOption = Exclude<UserRole, "admin">;
@@ -14,7 +17,8 @@ export interface CurrentUserResponse {
 }
 
 async function apiFetch<T>(path: string, accessToken: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  const response = await fetch(`${API_BASE}${normalizedPath}`, {
     ...init,
     headers: {
       ...(init?.body ? { "Content-Type": "application/json" } : {}),
@@ -32,14 +36,14 @@ async function apiFetch<T>(path: string, accessToken: string, init?: RequestInit
 }
 
 export async function fetchCurrentUser(accessToken: string): Promise<CurrentUserResponse> {
-  return apiFetch<CurrentUserResponse>("/api/auth/me", accessToken);
+  return apiFetch<CurrentUserResponse>("/auth/me", accessToken);
 }
 
 export async function selectUserRole(
   accessToken: string,
   role: RoleSelectionOption,
 ): Promise<CurrentUserResponse> {
-  return apiFetch<CurrentUserResponse>("/api/users/set-role", accessToken, {
+  return apiFetch<CurrentUserResponse>("/users/set-role", accessToken, {
     method: "POST",
     body: JSON.stringify({ role }),
   });
