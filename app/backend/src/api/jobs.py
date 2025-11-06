@@ -8,7 +8,7 @@ from celery.result import AsyncResult
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.backend.src.core.security import get_current_user
+from app.backend.src.core.security import require_vendor_user
 from app.backend.src.db import get_session_dependency
 from app.backend.src.models import Job, User
 from app.backend.src.services.s3 import generate_presigned_url
@@ -36,12 +36,15 @@ def _serialize_job(job: Job) -> dict[str, str | None]:
 def job_status(
     job_id: str,
     session: Session = Depends(get_session_dependency),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_vendor_user),
 ) -> dict[str, str | None]:
     """Return the status of a background job if it belongs to the current user."""
 
     job = session.get(Job, job_id)
-    if job is None or job.user_id != current_user.id:
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if current_user.role != "admin" and job.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Job not found")
 
     result = AsyncResult(job_id, app=celery)
@@ -79,15 +82,13 @@ def job_status(
 @router.get("")
 def list_jobs(
     session: Session = Depends(get_session_dependency),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_vendor_user),
 ) -> list[dict[str, str | None]]:
     """Return the most recent jobs for the authenticated user."""
 
-    jobs = (
-        session.query(Job)
-        .filter(Job.user_id == current_user.id)
-        .order_by(Job.created_at.desc())
-        .limit(20)
-        .all()
-    )
+    query = session.query(Job).order_by(Job.created_at.desc())
+    if current_user.role != "admin":
+        query = query.filter(Job.user_id == current_user.id)
+
+    jobs = query.limit(20).all()
     return [_serialize_job(job) for job in jobs]

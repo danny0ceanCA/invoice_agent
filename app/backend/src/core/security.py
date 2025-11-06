@@ -108,15 +108,38 @@ def _resolve_user(session: Session, payload: dict[str, Any]) -> User:
     if email:
         user = session.query(User).filter(User.email == email).one_or_none()
         if user:
-            user.auth0_sub = subject
-            session.add(user)
-            session.flush()
+            if user.auth0_sub != subject:
+                user.auth0_sub = subject
+                session.add(user)
+                session.commit()
             return user
 
-    raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail="User record not found",
+    if not email:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User record not found",
+        )
+
+    display_name = (
+        payload.get("name")
+        or payload.get("nickname")
+        or email
     )
+    if isinstance(display_name, str):
+        display_name = display_name.strip()
+    if not display_name:
+        display_name = email
+
+    user = User(
+        email=email,
+        name=display_name,
+        role=None,
+        auth0_sub=subject,
+    )
+    session.add(user)
+    session.commit()
+
+    return user
 
 
 def get_current_user(
@@ -146,4 +169,50 @@ def get_current_user(
     return _resolve_user(session, payload)
 
 
-__all__ = ["get_current_user"]
+def _enforce_roles(user: User, allowed_roles: set[str], *, allow_admin: bool = True) -> User:
+    """Ensure the authenticated user has one of the allowed roles."""
+
+    role = (user.role or "").lower()
+    if not role:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User role not assigned",
+        )
+
+    normalized_allowed = {value.lower() for value in allowed_roles}
+    if role in normalized_allowed:
+        return user
+
+    if allow_admin and role == "admin":
+        return user
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Insufficient permissions",
+    )
+
+
+def require_vendor_user(user: User = Depends(get_current_user)) -> User:
+    """Dependency ensuring the caller is a vendor or admin user."""
+
+    return _enforce_roles(user, {"vendor"})
+
+
+def require_district_user(user: User = Depends(get_current_user)) -> User:
+    """Dependency ensuring the caller is a district or admin user."""
+
+    return _enforce_roles(user, {"district"})
+
+
+def require_admin_user(user: User = Depends(get_current_user)) -> User:
+    """Dependency ensuring the caller is an administrator."""
+
+    return _enforce_roles(user, {"admin"}, allow_admin=False)
+
+
+__all__ = [
+    "get_current_user",
+    "require_admin_user",
+    "require_district_user",
+    "require_vendor_user",
+]
