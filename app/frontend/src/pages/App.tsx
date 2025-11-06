@@ -1,37 +1,41 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth0 } from "@auth0/auth0-react";
 
+import { RoleSelectionForm } from "../components/RoleSelectionForm";
 import VendorDashboard from "./VendorDashboard.jsx";
 import DistrictDashboard from "./DistrictDashboard.jsx";
-import { RoleSelection } from "./RoleSelection";
 import {
   fetchCurrentUser,
-  selectUserRole,
   type CurrentUserResponse,
-  type RoleSelectionOption,
 } from "../api/auth";
 
-type TabDefinition = {
-  key: string;
-  label: string;
-  roles: ReadonlyArray<"vendor" | "district" | "admin">;
-  render: () => JSX.Element;
-};
-
-type AvailableTab = {
-  key: string;
-  label: string;
-  component: JSX.Element;
-};
+function AdminConsole() {
+  return (
+    <div className="space-y-4 text-slate-700">
+      <p className="text-base font-semibold">Admin Console</p>
+      <p className="text-sm">
+        Administrative tooling for dataset profiles will land shortly. In the meantime you can review vendor and district
+        dashboards directly.
+      </p>
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+          <p className="text-sm font-semibold text-slate-900">Vendor Workspace Overview</p>
+          <p className="mt-1 text-xs text-slate-600">Track vendor enrollments, onboarding progress, and active contracts.</p>
+        </div>
+        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+          <p className="text-sm font-semibold text-slate-900">District Insights</p>
+          <p className="mt-1 text-xs text-slate-600">Upcoming releases will surface analytics for approvals, payments, and staffing.</p>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export function App() {
   const { isAuthenticated, isLoading, loginWithRedirect, logout, user, getAccessTokenSilently } = useAuth0();
-  const [activeTab, setActiveTab] = useState<string | null>(null);
   const [profile, setProfile] = useState<CurrentUserResponse | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileError, setProfileError] = useState<string | null>(null);
-  const [roleError, setRoleError] = useState<string | null>(null);
-  const [isSavingRole, setIsSavingRole] = useState(false);
 
   const loadProfile = useCallback(async () => {
     setProfileLoading(true);
@@ -54,7 +58,6 @@ export function App() {
   useEffect(() => {
     if (!isAuthenticated) {
       setProfile(null);
-      setActiveTab(null);
       setProfileError(null);
       return;
     }
@@ -64,94 +67,27 @@ export function App() {
     });
   }, [isAuthenticated, loadProfile]);
 
-  const handleRoleSelection = useCallback(
-    async (role: RoleSelectionOption) => {
-      if (!isAuthenticated) {
-        await loginWithRedirect();
-        return;
-      }
+  const displayName = profile?.name ?? user?.name ?? user?.email ?? "Account";
 
-      setIsSavingRole(true);
-      setRoleError(null);
-      try {
-        const token = await getAccessTokenSilently();
-        await selectUserRole(token, role);
-        await loadProfile();
-      } catch (error) {
-        console.error("role_assignment_failed", error);
-        setRoleError("We couldn't save your selection. Please try again.");
-      } finally {
-        setIsSavingRole(false);
-      }
-    },
-    [getAccessTokenSilently, isAuthenticated, loadProfile, loginWithRedirect],
-  );
-
-  const tabDefinitions = useMemo<TabDefinition[]>(
-    () => [
-      {
-        key: "vendor",
-        label: "Vendor",
-        roles: ["vendor", "admin"],
-        render: () => <VendorDashboard vendorId={profile?.vendor_id ?? null} />,
-      },
-      {
-        key: "district",
-        label: "District",
-        roles: ["district", "admin"],
-        render: () => <DistrictDashboard />,
-      },
-      {
-        key: "admin",
-        label: "Admin",
-        roles: ["admin"],
-        render: () => (
-          <div className="text-slate-600">
-            Administrative tooling for dataset profiles will land shortly.
-          </div>
-        ),
-      },
-    ],
-    [profile?.vendor_id],
-  );
-
-  const availableTabs = useMemo<AvailableTab[]>(() => {
+  const dashboardContent = useMemo(() => {
     if (!profile?.role) {
-      return [];
-    }
-
-    return tabDefinitions
-      .filter((tab) => profile.role === "admin" || tab.roles.includes(profile.role))
-      .map((tab) => ({
-        key: tab.key,
-        label: tab.label,
-        component: tab.render(),
-      }));
-  }, [profile?.role, tabDefinitions]);
-
-  useEffect(() => {
-    if (!availableTabs.length) {
-      setActiveTab(null);
-      return;
-    }
-
-    setActiveTab((current) => {
-      if (current && availableTabs.some((tab) => tab.key === current)) {
-        return current;
-      }
-      return availableTabs[0]?.key ?? null;
-    });
-  }, [availableTabs]);
-
-  const activeTabDefinition = useMemo(() => {
-    if (!activeTab) {
       return null;
     }
-    return availableTabs.find((tab) => tab.key === activeTab) ?? null;
-  }, [activeTab, availableTabs]);
 
-  const displayName = profile?.name ?? user?.name ?? user?.email ?? "Account";
-  const showNavigation = isAuthenticated && !profile?.needs_role_selection && availableTabs.length > 0;
+    if (profile.role === "vendor") {
+      return <VendorDashboard vendorId={profile.vendor_id ?? null} />;
+    }
+
+    if (profile.role === "district") {
+      return <DistrictDashboard />;
+    }
+
+    if (profile.role === "admin") {
+      return <AdminConsole />;
+    }
+
+    return null;
+  }, [profile]);
 
   let mainContent: JSX.Element;
   if (isLoading) {
@@ -175,18 +111,20 @@ export function App() {
     mainContent = <div className="text-sm text-red-600">{profileError}</div>;
   } else if (profile?.needs_role_selection) {
     mainContent = (
-      <RoleSelection onSelect={handleRoleSelection} isSubmitting={isSavingRole} error={roleError} />
+      <RoleSelectionForm
+        onRoleSelected={async () => {
+          await loadProfile();
+        }}
+      />
     );
   } else if (!profile) {
     mainContent = <div className="text-sm text-slate-600">We couldn't load your profile.</div>;
-  } else if (!availableTabs.length || !activeTabDefinition) {
-    mainContent = (
-      <div className="text-sm text-slate-600">
-        Your account is active, but no dashboards are currently available for your role.
-      </div>
-    );
+  } else if (profileLoading) {
+    mainContent = <div className="text-sm text-slate-600">Loading dashboard…</div>;
+  } else if (!dashboardContent) {
+    mainContent = <div className="text-sm text-slate-600">Your account is active, but no dashboards are currently available for your role.</div>;
   } else {
-    mainContent = activeTabDefinition.component;
+    mainContent = dashboardContent;
   }
 
   return (
@@ -195,22 +133,6 @@ export function App() {
         <div className="mx-auto flex max-w-4xl items-center justify-between gap-6 px-6 py-4">
           <h1 className="text-xl font-semibold">ASCS Invoice Automation</h1>
           <div className="flex items-center gap-4">
-            {showNavigation ? (
-              <nav className="flex gap-2">
-                {availableTabs.map((tab) => (
-                  <button
-                    key={tab.key}
-                    className={`rounded px-3 py-1 text-sm font-medium transition hover:bg-slate-100 ${
-                      activeTab === tab.key ? "bg-slate-200" : ""
-                    }`}
-                    onClick={() => setActiveTab(tab.key)}
-                    type="button"
-                  >
-                    {tab.label}
-                  </button>
-                ))}
-              </nav>
-            ) : null}
             <div className="flex items-center gap-3">
               {isAuthenticated ? (
                 <>
