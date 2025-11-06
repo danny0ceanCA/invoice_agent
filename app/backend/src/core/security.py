@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Any
+from typing import Any, Iterable
 
 import httpx
 from fastapi import Depends, HTTPException, status
@@ -63,7 +63,45 @@ def _get_rsa_key(token: str, domain: str) -> dict[str, str] | None:
     return None
 
 
-def _decode_token(token: str, *, domain: str, audience: str) -> dict[str, Any]:
+def _normalize_audience_values(values: Iterable[str]) -> list[str]:
+    """Return a list of canonical audience strings with slash variants."""
+
+    normalized: list[str] = []
+    for value in values:
+        candidate = value.strip()
+        if not candidate:
+            continue
+
+        trimmed = candidate.rstrip("/")
+        for option in (
+            candidate,
+            trimmed,
+            f"{trimmed}/" if trimmed else "",
+        ):
+            if option and option not in normalized:
+                normalized.append(option)
+
+    return normalized
+
+
+def _collect_audience_values(raw_value: str | None) -> list[str]:
+    """Split the configured audience string into individual values."""
+
+    if not raw_value:
+        return []
+
+    candidates = [segment for segment in raw_value.replace("\n", " ").split() if segment]
+    expanded: list[str] = []
+    for candidate in candidates:
+        for part in candidate.split(","):
+            value = part.strip()
+            if value and value not in expanded:
+                expanded.append(value)
+
+    return expanded
+
+
+def _decode_token(token: str, *, domain: str, audiences: list[str]) -> dict[str, Any]:
     """Decode and validate an Auth0 access token."""
 
     rsa_key = _get_rsa_key(token, domain)
@@ -78,14 +116,37 @@ def _decode_token(token: str, *, domain: str, audience: str) -> dict[str, Any]:
             token,
             rsa_key,
             algorithms=ALGORITHMS,
-            audience=audience,
             issuer=f"https://{domain}/",
+            options={"verify_aud": False},
         )
     except JWTError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token",
         ) from exc
+
+    token_audiences: list[str] = []
+    audience_claim = payload.get("aud")
+    if isinstance(audience_claim, str):
+        token_audiences.append(audience_claim)
+    elif isinstance(audience_claim, (list, tuple, set)):
+        for entry in audience_claim:
+            if isinstance(entry, str):
+                token_audiences.append(entry)
+    if not token_audiences:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token missing audience",
+        )
+
+    normalized_token_audiences = set(_normalize_audience_values(token_audiences))
+    normalized_allowed_audiences = set(_normalize_audience_values(audiences))
+
+    if not normalized_token_audiences & normalized_allowed_audiences:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token audience",
+        )
 
     return payload
 
@@ -161,10 +222,17 @@ def get_current_user(
             detail="Auth0 configuration is incomplete",
         )
 
+    configured_audiences = _collect_audience_values(settings.auth0_audience)
+    if not configured_audiences:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Auth0 configuration is invalid",
+        )
+
     payload = _decode_token(
         credentials.credentials,
         domain=settings.auth0_domain,
-        audience=settings.auth0_audience,
+        audiences=configured_audiences,
     )
     return _resolve_user(session, payload)
 
