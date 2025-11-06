@@ -19,8 +19,19 @@ def main() -> None:
         session.flush()
 
         print("✅ Development data ready!")
-        vendor_status = "created" if result.vendor_created else "found"
-        user_status = "created" if result.user_created else "found"
+        if result.vendor_created:
+            vendor_status = "created"
+        elif result.vendor_updated:
+            vendor_status = "updated"
+        else:
+            vendor_status = "unchanged"
+
+        if result.user_created:
+            user_status = "created"
+        elif result.user_updated:
+            user_status = "updated"
+        else:
+            user_status = "unchanged"
         print(
             f"Vendor ({vendor_status}): {result.vendor.name} [id={result.vendor.id}]"
         )

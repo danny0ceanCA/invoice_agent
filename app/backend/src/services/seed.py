@@ -10,8 +10,8 @@ from app.backend.src.models import User, Vendor
 
 DEFAULT_VENDOR_NAME = "SCUSD Accounts Payable"
 DEFAULT_VENDOR_EMAIL = "ap@scusd.example"
-DEFAULT_USER_EMAIL = "demo.user@scusd.example"
-DEFAULT_USER_NAME = "Demo User"
+DEFAULT_USER_EMAIL = "daniel@responsivehcsolutions.com"
+DEFAULT_USER_NAME = "Daniel Ojeda"
 DEFAULT_USER_ROLE = "admin"
 
 
@@ -23,6 +23,8 @@ class SeedResult:
     user: User
     vendor_created: bool
     user_created: bool
+    vendor_updated: bool
+    user_updated: bool
 
 
 def seed_development_user(
@@ -43,14 +45,20 @@ def seed_development_user(
 
     vendor = session.query(Vendor).filter(Vendor.name == vendor_name).one_or_none()
     vendor_created = False
+    vendor_updated = False
     if vendor is None:
         vendor = Vendor(name=vendor_name, contact_email=vendor_email)
         session.add(vendor)
         session.flush()
         vendor_created = True
+    else:
+        if vendor.contact_email != vendor_email:
+            vendor.contact_email = vendor_email
+            vendor_updated = True
 
     user = session.query(User).filter(User.email == user_email).one_or_none()
     user_created = False
+    user_updated = False
     if user is None:
         user = User(
             email=user_email,
@@ -65,18 +73,24 @@ def seed_development_user(
     else:
         if user.vendor_id != vendor.id:
             user.vendor_id = vendor.id
+            user_updated = True
         if user.role != user_role:
             user.role = user_role
+            user_updated = True
         if user.name != user_name:
             user.name = user_name
+            user_updated = True
         if auth0_sub and user.auth0_sub != auth0_sub:
             user.auth0_sub = auth0_sub
+            user_updated = True
 
     return SeedResult(
         vendor=vendor,
         user=user,
         vendor_created=vendor_created,
         user_created=user_created,
+        vendor_updated=vendor_updated,
+        user_updated=user_updated,
     )
 
 
