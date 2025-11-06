@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.backend.src.db import get_session_dependency
+from app.backend.src.models.user import User
 from app.backend.src.services.seed import seed_development_user
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -31,4 +32,26 @@ def load_seed_data(session: Session = Depends(get_session_dependency)) -> dict[s
             "role": result.user.role,
         },
         "auth0_sub": result.user.auth0_sub,
+    }
+
+
+# TODO: Remove or disable this bootstrap route after promoting the first admin user.
+@router.post("/bootstrap")
+def bootstrap_admin(session: Session = Depends(get_session_dependency)) -> dict[str, object]:
+    """Promote the first user in the database to an admin role if none exists."""
+
+    existing_admin = session.query(User).filter(User.role == "admin").first()
+    if existing_admin:
+        return {"message": "Admin already exists"}
+
+    first_user = session.query(User).order_by(User.id).first()
+    if first_user is None:
+        return {"message": "No users available to promote"}
+
+    first_user.role = "admin"
+    session.commit()
+
+    return {
+        "message": "First user promoted to admin",
+        "email": first_user.email,
     }
