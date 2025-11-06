@@ -63,7 +63,7 @@ def _get_rsa_key(token: str, domain: str) -> dict[str, str] | None:
     return None
 
 
-def _decode_token(token: str, *, domain: str, audience: str) -> dict[str, Any]:
+def _decode_token(token: str, *, domain: str, audiences: list[str]) -> dict[str, Any]:
     """Decode and validate an Auth0 access token."""
 
     rsa_key = _get_rsa_key(token, domain)
@@ -73,21 +73,23 @@ def _decode_token(token: str, *, domain: str, audience: str) -> dict[str, Any]:
             detail="Unable to validate token",
         )
 
-    try:
-        payload = jwt.decode(
-            token,
-            rsa_key,
-            algorithms=ALGORITHMS,
-            audience=audience,
-            issuer=f"https://{domain}/",
-        )
-    except JWTError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token",
-        ) from exc
+    last_error: JWTError | None = None
+    for audience in audiences:
+        try:
+            return jwt.decode(
+                token,
+                rsa_key,
+                algorithms=ALGORITHMS,
+                audience=audience,
+                issuer=f"https://{domain}/",
+            )
+        except JWTError as exc:
+            last_error = exc
 
-    return payload
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid token",
+    ) from last_error
 
 
 def _resolve_user(session: Session, payload: dict[str, Any]) -> User:
@@ -161,10 +163,28 @@ def get_current_user(
             detail="Auth0 configuration is incomplete",
         )
 
+    audience_variants = []
+    configured_audience = settings.auth0_audience.strip()
+    if configured_audience:
+        normalized = configured_audience.rstrip("/")
+        for candidate in (
+            configured_audience,
+            normalized,
+            f"{normalized}/" if normalized else "",
+        ):
+            if candidate and candidate not in audience_variants:
+                audience_variants.append(candidate)
+
+    if not audience_variants:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Auth0 configuration is invalid",
+        )
+
     payload = _decode_token(
         credentials.credentials,
         domain=settings.auth0_domain,
-        audience=settings.auth0_audience,
+        audiences=audience_variants,
     )
     return _resolve_user(session, payload)
 
