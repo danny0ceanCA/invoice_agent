@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useAuth0 } from "@auth0/auth0-react";
 import { uploadInvoice } from "../api/invoices";
 import { listJobs } from "../api/jobs";
 import JobStatusCard from "./JobStatusCard";
@@ -147,6 +148,7 @@ export default function VendorDashboard() {
   const [jobs, setJobs] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState(null);
+  const { isAuthenticated, getAccessTokenSilently, loginWithRedirect } = useAuth0();
   const fiscalMonthOrder = useMemo(
     () => [
       "July",
@@ -209,20 +211,31 @@ export default function VendorDashboard() {
   );
 
   const fetchJobs = useCallback(async () => {
+    if (!isAuthenticated) {
+      return;
+    }
+
     setError(null);
     try {
-      const recentJobs = await listJobs();
+      const token = await getAccessTokenSilently();
+      const recentJobs = await listJobs(token);
       setJobs(recentJobs);
     } catch (err) {
       setError("Unable to load jobs");
     }
-  }, []);
+  }, [getAccessTokenSilently, isAuthenticated]);
 
   useEffect(() => {
+    if (!isAuthenticated) {
+      setJobs([]);
+      setError(null);
+      return;
+    }
+
     fetchJobs();
     const timer = setInterval(fetchJobs, 5000);
     return () => clearInterval(timer);
-  }, [fetchJobs]);
+  }, [fetchJobs, isAuthenticated]);
 
   async function handleUpload(event) {
     const file = event.target.files?.[0];
@@ -232,13 +245,20 @@ export default function VendorDashboard() {
     setError(null);
 
     try {
+      if (!isAuthenticated) {
+        setError("Please log in to upload invoices.");
+        await loginWithRedirect();
+        return;
+      }
+
+      const token = await getAccessTokenSilently();
       const payload = {
         vendor_id: 1,
         invoice_date: new Date().toISOString().split("T")[0],
         service_month: new Date().toLocaleString("default", { month: "long", year: "numeric" }),
         invoice_code: `INV-${Date.now()}`,
       };
-      await uploadInvoice(file, payload);
+      await uploadInvoice(file, payload, token);
       await fetchJobs();
     } catch (err) {
       setError("Upload failed. Please try again.");
@@ -246,6 +266,21 @@ export default function VendorDashboard() {
       setIsUploading(false);
       event.target.value = "";
     }
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <div className="space-y-4 text-sm text-slate-600">
+        <p>Log in to submit invoices, track processing jobs, and view your vendor dashboard.</p>
+        <button
+          type="button"
+          className="rounded bg-amber-500 px-3 py-2 text-sm font-semibold text-white shadow transition hover:bg-amber-600"
+          onClick={() => loginWithRedirect()}
+        >
+          Log in with Auth0
+        </button>
+      </div>
+    );
   }
 
   return (

@@ -14,3 +14,4 @@ sqlalchemy
 structlog
 uvicorn
 httpx
+python-jose[cryptography]

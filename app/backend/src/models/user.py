@@ -18,6 +18,9 @@ class User(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[str] = mapped_column(String(50), nullable=False)
     vendor_id: Mapped[int | None] = mapped_column(ForeignKey("vendors.id"), nullable=True)
+    auth0_sub: Mapped[str | None] = mapped_column(
+        String(255), unique=True, nullable=True, index=True
+    )
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     vendor: Mapped["Vendor | None"] = relationship("Vendor", back_populates="users")
