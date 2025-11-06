@@ -37,11 +37,14 @@ class Settings(BaseSettings):
     local_storage_path: str = Field(
         default="/tmp/invoice-agent", alias="LOCAL_STORAGE_PATH"
     )
+    auth0_domain: str | None = Field(default=None, alias="AUTH0_DOMAIN")
+    auth0_audience: str | None = Field(default=None, alias="AUTH0_AUDIENCE")
 
     model_config = SettingsConfigDict(
         case_sensitive=False,
         env_file=".env",
         env_file_encoding="utf-8",
+        extra="ignore",
     )
 
     def get(self, key: str, default: object | None = None) -> object | None:
