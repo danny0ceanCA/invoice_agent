@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useAuth0 } from "@auth0/auth0-react";
 
-import { API_BASE } from "../api/auth";
+import { selectUserRole } from "../api/auth";
 
 type RoleOption = "vendor" | "district";
 
@@ -26,19 +26,7 @@ export function RoleSelectionForm({ onRoleSelected }: RoleSelectionFormProps) {
 
     try {
       const token = await getAccessTokenSilently();
-      const response = await fetch(`${API_BASE}/auth/set-role`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ role }),
-      });
-
-      if (!response.ok) {
-        const details = await response.text();
-        throw new Error(details || `Unable to save role (status ${response.status})`);
-      }
+      await selectUserRole(token, role);
 
       setMessage("Loading dashboard…");
       await onRoleSelected();
