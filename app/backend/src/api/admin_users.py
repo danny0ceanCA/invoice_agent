@@ -77,6 +77,7 @@ def list_pending_users(
 @router.patch(
     "/users/{user_id}/approve",
     response_model=UserActionResponse,
+    dependencies=[Depends(require_admin_role)],
 )
 def approve_user(
     user_id: int,
@@ -87,12 +88,9 @@ def approve_user(
 
     user = admin_user_service.approve_user(session, user_id)
     logger.info(
-        "admin_user_approved",
-        extra={
-            "admin_email": admin_user.email,
-            "user_email": user.email,
-            "user_id": user.id,
-        },
+        "Admin %s approved %s",
+        admin_user.email,
+        user.email,
     )
     return {
         "message": "User approved successfully",
@@ -103,6 +101,7 @@ def approve_user(
 @router.delete(
     "/users/{user_id}/decline",
     response_model=UserActionResponse,
+    dependencies=[Depends(require_admin_role)],
 )
 def decline_user(
     user_id: int,
@@ -113,12 +112,9 @@ def decline_user(
 
     user = admin_user_service.decline_user(session, user_id)
     logger.info(
-        "admin_user_declined",
-        extra={
-            "admin_email": admin_user.email,
-            "user_email": user.email,
-            "user_id": user.id,
-        },
+        "Admin %s declined %s",
+        admin_user.email,
+        user.email,
     )
     return {
         "message": "User declined successfully",
