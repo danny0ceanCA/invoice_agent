@@ -16,14 +16,20 @@ if (!domain || !clientId) {
 }
 
 const authorizationParams = {
-  redirect_uri: window.location.origin,
-  scope: "openid profile email",
+  scope: "openid profile email read:profile read:email",
   ...(audience ? { audience } : {}),
 };
 
+const redirectUri = window.location.origin;
+
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
-    <Auth0Provider domain={domain} clientId={clientId} authorizationParams={authorizationParams}>
+    <Auth0Provider
+      domain={domain}
+      clientId={clientId}
+      authorizationParams={authorizationParams}
+      redirectUri={redirectUri}
+    >
       <BrowserRouter>
         <App />
       </BrowserRouter>
