@@ -1,35 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth0 } from "@auth0/auth0-react";
+import { Navigate, Route, Routes } from "react-router-dom";
+import { Toaster } from "react-hot-toast";
 
 import { RoleSelectionForm } from "../components/RoleSelectionForm";
 import VendorDashboard from "./VendorDashboard.jsx";
 import DistrictDashboard from "./DistrictDashboard.jsx";
+import AdminDashboard from "./AdminDashboard.jsx";
+import AdminUserDashboard from "./AdminUserDashboard.jsx";
 import {
   fetchCurrentUser,
   type CurrentUserResponse,
 } from "../api/auth";
-
-function AdminConsole() {
-  return (
-    <div className="space-y-4 text-slate-700">
-      <p className="text-base font-semibold">Admin Console</p>
-      <p className="text-sm">
-        Administrative tooling for dataset profiles will land shortly. In the meantime you can review vendor and district
-        dashboards directly.
-      </p>
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-          <p className="text-sm font-semibold text-slate-900">Vendor Workspace Overview</p>
-          <p className="mt-1 text-xs text-slate-600">Track vendor enrollments, onboarding progress, and active contracts.</p>
-        </div>
-        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-          <p className="text-sm font-semibold text-slate-900">District Insights</p>
-          <p className="mt-1 text-xs text-slate-600">Upcoming releases will surface analytics for approvals, payments, and staffing.</p>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 export function App() {
   const { isAuthenticated, isLoading, loginWithRedirect, logout, user, getAccessTokenSilently } = useAuth0();
@@ -69,7 +51,7 @@ export function App() {
 
   const displayName = profile?.name ?? user?.name ?? user?.email ?? "Account";
 
-  const dashboardContent = useMemo(() => {
+  const defaultDashboard = useMemo(() => {
     if (!profile?.role) {
       return null;
     }
@@ -83,11 +65,31 @@ export function App() {
     }
 
     if (profile.role === "admin") {
-      return <AdminConsole />;
+      return <AdminDashboard currentUser={profile} />;
     }
 
     return null;
   }, [profile]);
+
+  const routedDashboard = (
+    <Routes>
+      <Route
+        path="/"
+        element={
+          defaultDashboard ?? (
+            <div className="text-sm text-slate-600">
+              Your account is active, but no dashboards are currently available for your role.
+            </div>
+          )
+        }
+      />
+      <Route
+        path="/admin/users"
+        element={profile?.role === "admin" ? <AdminUserDashboard /> : <Navigate to="/" replace />} 
+      />
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  );
 
   let mainContent: JSX.Element;
   if (isLoading) {
@@ -121,14 +123,13 @@ export function App() {
     mainContent = <div className="text-sm text-slate-600">We couldn't load your profile.</div>;
   } else if (profileLoading) {
     mainContent = <div className="text-sm text-slate-600">Loading dashboard…</div>;
-  } else if (!dashboardContent) {
-    mainContent = <div className="text-sm text-slate-600">Your account is active, but no dashboards are currently available for your role.</div>;
   } else {
-    mainContent = dashboardContent;
+    mainContent = routedDashboard;
   }
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900">
+      <Toaster position="top-right" />
       <header className="border-b bg-white">
         <div className="mx-auto flex max-w-4xl items-center justify-between gap-6 px-6 py-4">
           <h1 className="text-xl font-semibold">ASCS Invoice Automation</h1>
