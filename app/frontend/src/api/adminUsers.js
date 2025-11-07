@@ -28,7 +28,17 @@ export async function listPendingUsers(token) {
 }
 
 export async function approveUser(id, token) {
-  return request(`/admin/users/${id}/approve`, token, { method: "POST" });
+  const response = await request(`/admin/users/${id}/approve`, token, { method: "PATCH" });
+
+  if (response && response.user) {
+    return {
+      ...response.user,
+      is_approved:
+        response.user.approved ?? response.user.is_approved ?? false,
+    };
+  }
+
+  return response;
 }
 
 export async function updateUserRole(id, role, token) {

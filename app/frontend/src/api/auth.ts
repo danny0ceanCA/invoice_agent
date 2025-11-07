@@ -7,6 +7,11 @@ export const API_BASE = (
 export type UserRole = "vendor" | "district" | "admin";
 export type RoleSelectionOption = Exclude<UserRole, "admin">;
 
+export interface ApiError extends Error {
+  status?: number;
+  statusText?: string;
+}
+
 export interface CurrentUserResponse {
   id: number;
   email: string;
@@ -30,7 +35,12 @@ async function apiFetch<T>(path: string, accessToken: string, init?: RequestInit
 
   if (!response.ok) {
     const message = await response.text();
-    throw new Error(message || `Request to ${path} failed with status ${response.status}`);
+    const error: ApiError = new Error(
+      message || `Request to ${path} failed with status ${response.status}`,
+    );
+    error.status = response.status;
+    error.statusText = response.statusText;
+    throw error;
   }
 
   return response.json() as Promise<T>;
