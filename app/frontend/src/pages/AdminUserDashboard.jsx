@@ -91,7 +91,7 @@ export default function AdminUserDashboard() {
     updateBusyState(userId, true);
 
     try {
-      const { user: approvedUser, message } = await approveUser(userId, token);
+      const { user: approvedUser } = await approveUser(userId, token);
 
       setUsers((current) =>
         current.map((user) => {
@@ -99,15 +99,12 @@ export default function AdminUserDashboard() {
             return user;
           }
 
-          const isApproved =
-            approvedUser?.is_approved ?? approvedUser?.approved ?? true;
-
           return {
             ...user,
             role: approvedUser?.role ?? user.role,
-            is_approved: isApproved,
-            is_active:
-              approvedUser?.is_active ?? user.is_active ?? true,
+            is_approved:
+              approvedUser?.is_approved ?? approvedUser?.approved ?? true,
+            is_active: approvedUser?.is_active ?? true,
           };
         }),
       );
@@ -116,7 +113,7 @@ export default function AdminUserDashboard() {
         current.filter((pendingUser) => pendingUser.id !== userId),
       );
 
-      toast.success(message ?? "✅ User approved successfully.");
+      toast.success("✅ User approved successfully");
     } catch (err) {
       console.error("user_approve_failed", err);
       toast.error("We couldn't approve the user. Please try again.");
@@ -174,7 +171,7 @@ export default function AdminUserDashboard() {
 
   const handleDecline = async (userId, email) => {
     const confirmed = window.confirm(
-      `Decline access for ${email}? This will deactivate the account.`,
+      "Are you sure you want to decline this user?",
     );
 
     if (!confirmed) {
@@ -349,7 +346,7 @@ export default function AdminUserDashboard() {
                       </span>
                     ) : (
                       <span className="inline-flex items-center gap-2 rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700">
-                        Pending
+                        Pending Approval
                       </span>
                     )}
                   </td>
