@@ -98,7 +98,15 @@ export default function AdminUserDashboard() {
     if (activeTab === "deactivated") {
       return users.filter((user) => user.is_active === false);
     }
-    return users;
+
+    const combinedUsers = [...users];
+    const knownUserIds = new Set(combinedUsers.map((user) => user.id));
+    pendingUsers.forEach((pendingUser) => {
+      if (!knownUserIds.has(pendingUser.id)) {
+        combinedUsers.push(pendingUser);
+      }
+    });
+    return combinedUsers;
   }, [activeTab, pendingUsers, users]);
 
   const handleApprove = async (userId) => {
@@ -371,9 +379,31 @@ export default function AdminUserDashboard() {
                           Approved
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-2 rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700">
-                          Pending Approval
-                        </span>
+                        <div className="flex flex-col gap-2">
+                          <span className="inline-flex items-center gap-2 rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700">
+                            Pending Approval
+                          </span>
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleApprove(user.id)}
+                              className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
+                              disabled={isBusy}
+                              aria-label={`Approve ${user.email}`}
+                            >
+                              Approve
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDecline(user.id, user.email)}
+                              className="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
+                              disabled={isBusy}
+                              aria-label={`Decline ${user.email}`}
+                            >
+                              Decline
+                            </button>
+                          </div>
+                        </div>
                       )}
                     </td>
                     <td className="px-4 py-3 text-sm text-slate-600">
@@ -388,37 +418,17 @@ export default function AdminUserDashboard() {
                       )}
                     </td>
                     <td className="flex flex-wrap items-center justify-end gap-2 rounded-r-lg px-4 py-3 text-sm">
-                      {!isApproved && (
-                        <div className="flex flex-wrap items-center justify-end gap-2">
-                          <button
-                            type="button"
-                            onClick={() => handleApprove(user.id)}
-                            className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
-                            disabled={isBusy}
-                            aria-label={`Approve ${user.email}`}
-                          >
-                            Approve
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDecline(user.id, user.email)}
-                            className="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
-                            disabled={isBusy}
-                            aria-label={`Decline ${user.email}`}
-                          >
-                            Decline
-                          </button>
-                        </div>
+                      {isApproved && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeactivate(user.id)}
+                          className="rounded-lg border border-red-500 px-3 py-2 text-sm font-semibold text-red-600 transition hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-offset-2"
+                          disabled={isBusy || !isActive}
+                          aria-label={`Deactivate ${user.email}`}
+                        >
+                          Deactivate
+                        </button>
                       )}
-                      <button
-                        type="button"
-                        onClick={() => handleDeactivate(user.id)}
-                        className="rounded-lg border border-red-500 px-3 py-2 text-sm font-semibold text-red-600 transition hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-offset-2"
-                        disabled={isBusy || !isActive}
-                        aria-label={`Deactivate ${user.email}`}
-                      >
-                        Deactivate
-                      </button>
                     </td>
                   </tr>
                 );
