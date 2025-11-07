@@ -35,6 +35,8 @@ export async function approveUser(id, token) {
         ...response.user,
         is_approved:
           response.user.is_approved ?? response.user.approved ?? false,
+        is_active:
+          response.user.is_active ?? response.user.active ?? true,
       }
     : null;
 
@@ -63,6 +65,8 @@ export async function declineUser(id, token) {
         ...response.user,
         is_approved:
           response.user.is_approved ?? response.user.approved ?? false,
+        is_active:
+          response.user.is_active ?? response.user.active ?? false,
       }
     : null;
 
