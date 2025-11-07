@@ -379,31 +379,9 @@ export default function AdminUserDashboard() {
                           Approved
                         </span>
                       ) : (
-                        <div className="flex flex-col gap-2">
-                          <span className="inline-flex items-center gap-2 rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700">
-                            Pending Approval
-                          </span>
-                          <div className="flex flex-wrap gap-2">
-                            <button
-                              type="button"
-                              onClick={() => handleApprove(user.id)}
-                              className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
-                              disabled={isBusy}
-                              aria-label={`Approve ${user.email}`}
-                            >
-                              Approve
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDecline(user.id, user.email)}
-                              className="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
-                              disabled={isBusy}
-                              aria-label={`Decline ${user.email}`}
-                            >
-                              Decline
-                            </button>
-                          </div>
-                        </div>
+                        <span className="inline-flex items-center gap-2 rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700">
+                          Pending Approval
+                        </span>
                       )}
                     </td>
                     <td className="px-4 py-3 text-sm text-slate-600">
@@ -418,7 +396,7 @@ export default function AdminUserDashboard() {
                       )}
                     </td>
                     <td className="flex flex-wrap items-center justify-end gap-2 rounded-r-lg px-4 py-3 text-sm">
-                      {isApproved && (
+                      {isApproved ? (
                         <button
                           type="button"
                           onClick={() => handleDeactivate(user.id)}
@@ -428,6 +406,27 @@ export default function AdminUserDashboard() {
                         >
                           Deactivate
                         </button>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => handleApprove(user.id)}
+                            className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
+                            disabled={isBusy}
+                            aria-label={`Approve ${user.email}`}
+                          >
+                            Approve
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDecline(user.id, user.email)}
+                            className="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
+                            disabled={isBusy}
+                            aria-label={`Decline ${user.email}`}
+                          >
+                            Decline
+                          </button>
+                        </>
                       )}
                     </td>
                   </tr>
