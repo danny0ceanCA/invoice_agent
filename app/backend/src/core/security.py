@@ -278,9 +278,25 @@ def require_admin_user(user: User = Depends(get_current_user)) -> User:
     return _enforce_roles(user, {"admin"}, allow_admin=False)
 
 
+def require_role(
+    roles: Iterable[str],
+    *,
+    allow_admin: bool = True,
+):
+    """Return a dependency that enforces one of the provided roles."""
+
+    normalized_roles = {value.lower() for value in roles}
+
+    def dependency(user: User = Depends(get_current_user)) -> User:
+        return _enforce_roles(user, normalized_roles, allow_admin=allow_admin)
+
+    return dependency
+
+
 __all__ = [
     "get_current_user",
     "require_admin_user",
     "require_district_user",
     "require_vendor_user",
+    "require_role",
 ]

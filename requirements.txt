@@ -6,6 +6,7 @@ pandas
 prometheus-client
 psycopg2-binary
 pydantic
+email-validator
 pydantic-settings
 python-multipart
 redis
