@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
+import { ArrowLeft } from "lucide-react";
 import { useAuth0 } from "@auth0/auth0-react";
 import toast from "react-hot-toast";
 
@@ -161,21 +163,31 @@ export default function AdminUserDashboard() {
 
   return (
     <div className="space-y-6 text-slate-700">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <Link
+            to="/"
+            className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
+            aria-label="Return to the admin console"
+          >
+            <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+            Back to Admin Console
+          </Link>
+          <button
+            type="button"
+            onClick={() => loadUsers()}
+            className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
+            aria-label="Refresh user list"
+          >
+            Refresh
+          </button>
+        </div>
         <div>
           <h2 className="text-2xl font-semibold text-slate-900">User Management</h2>
           <p className="text-sm text-slate-600">
             Approve pending accounts, assign roles, and deactivate access for your organization.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => loadUsers()}
-          className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
-          aria-label="Refresh user list"
-        >
-          Refresh
-        </button>
       </div>
 
       <div className="flex flex-wrap gap-2">
