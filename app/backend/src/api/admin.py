@@ -1,9 +1,8 @@
 """Administrative endpoints for managing datasets, users, and vendors."""
 
-import logging
 import os
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.backend.src.db import get_session_dependency
@@ -12,8 +11,6 @@ from app.backend.src.services.seed import seed_development_user
 from app.backend.src.core.security import require_admin_user
 
 router = APIRouter(prefix="/admin", tags=["admin"])
-
-logger = logging.getLogger(__name__)
 
 
 @router.post("/seed")
@@ -67,33 +64,3 @@ def bootstrap_admin(
     }
 
 
-@router.patch("/users/{user_id}/approve")
-def approve_user(
-    user_id: int,
-    session: Session = Depends(get_session_dependency),
-    admin_user: User = Depends(require_admin_user),
-) -> dict[str, object]:
-    """Approve a user account and mark it as active."""
-
-    user = session.get(User, user_id)
-    if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found",
-        )
-
-    user.is_approved = True
-    session.add(user)
-    session.commit()
-
-    logger.info("User %s approved by admin %s", user.email, admin_user.email)
-
-    return {
-        "message": "User approved successfully",
-        "user": {
-            "id": user.id,
-            "email": user.email,
-            "role": user.role,
-            "approved": user.is_approved,
-        },
-    }

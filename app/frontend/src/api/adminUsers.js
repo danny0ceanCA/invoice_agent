@@ -30,15 +30,18 @@ export async function listPendingUsers(token) {
 export async function approveUser(id, token) {
   const response = await request(`/admin/users/${id}/approve`, token, { method: "PATCH" });
 
-  if (response && response.user) {
-    return {
-      ...response.user,
-      is_approved:
-        response.user.approved ?? response.user.is_approved ?? false,
-    };
-  }
+  const normalizedUser = response?.user
+    ? {
+        ...response.user,
+        is_approved:
+          response.user.is_approved ?? response.user.approved ?? false,
+      }
+    : null;
 
-  return response;
+  return {
+    message: response?.message ?? "User approved successfully",
+    user: normalizedUser ?? response,
+  };
 }
 
 export async function updateUserRole(id, role, token) {
@@ -50,5 +53,22 @@ export async function updateUserRole(id, role, token) {
 
 export async function deactivateUser(id, token) {
   return request(`/admin/users/${id}/deactivate`, token, { method: "PATCH" });
+}
+
+export async function declineUser(id, token) {
+  const response = await request(`/admin/users/${id}/decline`, token, { method: "DELETE" });
+
+  const normalizedUser = response?.user
+    ? {
+        ...response.user,
+        is_approved:
+          response.user.is_approved ?? response.user.approved ?? false,
+      }
+    : null;
+
+  return {
+    message: response?.message ?? "User declined successfully",
+    user: normalizedUser ?? response,
+  };
 }
 

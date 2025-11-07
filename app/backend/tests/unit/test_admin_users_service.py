@@ -56,6 +56,18 @@ def test_list_pending_users_only_includes_unapproved_users(seeded_users: list[Us
     assert emails == {"vendor@example.com"}
 
 
+def test_list_pending_users_excludes_inactive_accounts(seeded_users: list[User]) -> None:
+    vendor = next(user for user in seeded_users if user.email == "vendor@example.com")
+
+    with session_scope() as session:
+        admin_users.decline_user(session, vendor.id)
+
+    with session_scope() as session:
+        pending = admin_users.list_pending_users(session)
+
+    assert all(user.email != "vendor@example.com" for user in pending)
+
+
 def test_approve_user_marks_user_as_approved(seeded_users: list[User]) -> None:
     vendor = next(user for user in seeded_users if user.email == "vendor@example.com")
 
@@ -64,6 +76,16 @@ def test_approve_user_marks_user_as_approved(seeded_users: list[User]) -> None:
 
     assert updated.is_approved is True
     assert updated.is_active is True
+
+
+def test_decline_user_marks_user_inactive(seeded_users: list[User]) -> None:
+    vendor = next(user for user in seeded_users if user.email == "vendor@example.com")
+
+    with session_scope() as session:
+        updated = admin_users.decline_user(session, vendor.id)
+
+    assert updated.is_active is False
+    assert updated.is_approved is False
 
 
 def test_update_user_role_changes_role(seeded_users: list[User]) -> None:

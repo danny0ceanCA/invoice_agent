@@ -14,6 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.backend.src.api import admin_users as admin_users_api
+from app.backend.src.core.security import get_current_user
 from app.backend.src.db import get_engine, session_scope
 from app.backend.src.main import app
 from app.backend.src.models import User
@@ -37,9 +38,9 @@ def override_admin_dependency() -> None:  # type: ignore[no-untyped-def]
                 raise RuntimeError("Admin user missing for test")
             return user
 
-    app.dependency_overrides[admin_users_api.require_admin_role] = _override
+    app.dependency_overrides[get_current_user] = _override
     yield
-    app.dependency_overrides.pop(admin_users_api.require_admin_role, None)
+    app.dependency_overrides.pop(get_current_user, None)
 
 
 @pytest.fixture()
@@ -102,11 +103,22 @@ def test_list_pending_users_endpoint_filters_results(client: TestClient, seeded_
 
 def test_approve_user_endpoint_marks_as_approved(client: TestClient, seeded_users: dict[str, User]) -> None:
     vendor_id = seeded_users["vendor"].id
-    response = client.post(f"/api/admin/users/{vendor_id}/approve")
+    response = client.patch(f"/api/admin/users/{vendor_id}/approve")
     assert response.status_code == 200
     data = response.json()
-    assert data["is_approved"] is True
-    assert data["is_active"] is True
+    assert data["message"] == "User approved successfully"
+    assert data["user"]["is_approved"] is True
+    assert data["user"]["is_active"] is True
+
+
+def test_decline_user_endpoint_marks_as_inactive(client: TestClient, seeded_users: dict[str, User]) -> None:
+    vendor_id = seeded_users["vendor"].id
+    response = client.delete(f"/api/admin/users/{vendor_id}/decline")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["message"] == "User declined successfully"
+    assert data["user"]["is_active"] is False
+    assert data["user"]["is_approved"] is False
 
 
 def test_update_user_role_endpoint_changes_role(client: TestClient, seeded_users: dict[str, User]) -> None:
@@ -138,5 +150,5 @@ def test_deactivate_user_endpoint_marks_inactive(client: TestClient, seeded_user
 
 
 def test_actions_return_not_found_for_missing_user(client: TestClient, seeded_users: dict[str, User]) -> None:
-    response = client.post("/api/admin/users/999/approve")
+    response = client.patch("/api/admin/users/999/approve")
     assert response.status_code == 404
