@@ -4,34 +4,46 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { Toaster } from "react-hot-toast";
 
 import { RoleSelectionForm } from "../components/RoleSelectionForm";
+import PendingApproval from "../components/PendingApproval.jsx";
 import VendorDashboard from "./VendorDashboard.jsx";
 import DistrictDashboard from "./DistrictDashboard.jsx";
 import AdminDashboard from "./AdminDashboard.jsx";
 import AdminUserDashboard from "./AdminUserDashboard.jsx";
 import {
   fetchCurrentUser,
+  type ApiError,
   type CurrentUserResponse,
 } from "../api/auth";
+
+const isApiError = (value: unknown): value is ApiError =>
+  typeof value === "object" && value !== null && "status" in value;
 
 export function App() {
   const { isAuthenticated, isLoading, loginWithRedirect, logout, user, getAccessTokenSilently } = useAuth0();
   const [profile, setProfile] = useState<CurrentUserResponse | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileError, setProfileError] = useState<string | null>(null);
+  const [pendingApproval, setPendingApproval] = useState(false);
 
   const loadProfile = useCallback(async () => {
     setProfileLoading(true);
     setProfileError(null);
+    setPendingApproval(false);
     try {
       const token = await getAccessTokenSilently();
       const data = await fetchCurrentUser(token);
       setProfile(data);
       return data;
-    } catch (error) {
+    } catch (error: unknown) {
       console.error("profile_fetch_failed", error);
       setProfile(null);
+      if (isApiError(error) && error.status === 403) {
+        setPendingApproval(true);
+        setProfileError(null);
+        return null;
+      }
       setProfileError("We couldn't load your workspace details. Please refresh the page or try again later.");
-      throw error;
+      return null;
     } finally {
       setProfileLoading(false);
     }
@@ -41,6 +53,7 @@ export function App() {
     if (!isAuthenticated) {
       setProfile(null);
       setProfileError(null);
+      setPendingApproval(false);
       return;
     }
 
@@ -107,6 +120,8 @@ export function App() {
         </button>
       </div>
     );
+  } else if (pendingApproval) {
+    mainContent = <PendingApproval />;
   } else if (profileLoading && !profile) {
     mainContent = <div className="text-sm text-slate-600">Loading your workspace…</div>;
   } else if (profileError) {

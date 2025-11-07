@@ -89,26 +89,36 @@ export default function AdminUserDashboard() {
     const token = await getAccessTokenSilently();
     updateBusyState(userId, true);
 
-    const previousUsers = [...users];
-    const previousPending = [...pendingUsers];
-
-    setUsers((current) =>
-      current.map((user) =>
-        user.id === userId
-          ? { ...user, is_approved: true, is_active: true }
-          : user,
-      ),
-    );
-    setPendingUsers((current) => current.filter((user) => user.id !== userId));
-
     try {
-      await approveUser(userId, token);
-      toast.success("User approved");
+      const approvedUser = await approveUser(userId, token);
+
+      setUsers((current) =>
+        current.map((user) => {
+          if (user.id !== userId) {
+            return user;
+          }
+
+          const isApproved =
+            approvedUser?.is_approved ?? approvedUser?.approved ?? true;
+
+          return {
+            ...user,
+            role: approvedUser?.role ?? user.role,
+            is_approved: isApproved,
+            is_active:
+              approvedUser?.is_active ?? user.is_active ?? true,
+          };
+        }),
+      );
+
+      setPendingUsers((current) =>
+        current.filter((pendingUser) => pendingUser.id !== userId),
+      );
+
+      toast.success("✅ User approved successfully.");
     } catch (err) {
       console.error("user_approve_failed", err);
       toast.error("We couldn't approve the user. Please try again.");
-      setUsers(previousUsers);
-      setPendingUsers(previousPending);
     } finally {
       updateBusyState(userId, false);
     }
