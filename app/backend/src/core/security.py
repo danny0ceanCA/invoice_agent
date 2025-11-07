@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+print(">>> LOADED security.py from:", __file__, flush=True)
+
 from functools import lru_cache
 from typing import Any, Iterable
-
+import sys
 import httpx
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -22,7 +24,6 @@ _scheme = HTTPBearer(auto_error=False)
 @lru_cache()
 def _fetch_jwks(domain: str) -> dict[str, Any]:
     """Fetch (and cache) the JWKS for the given Auth0 domain."""
-
     jwks_url = f"https://{domain}/.well-known/jwks.json"
     try:
         with httpx.Client(timeout=5.0) as client:
@@ -38,10 +39,9 @@ def _fetch_jwks(domain: str) -> dict[str, Any]:
 
 def _get_rsa_key(token: str, domain: str) -> dict[str, str] | None:
     """Return the RSA key that matches the token header."""
-
     try:
         unverified_header = jwt.get_unverified_header(token)
-    except JWTError as exc:  # pragma: no cover - invalid header formatting
+    except JWTError as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authorization header",
@@ -65,7 +65,6 @@ def _get_rsa_key(token: str, domain: str) -> dict[str, str] | None:
 
 def _normalize_audience_values(values: Iterable[str]) -> list[str]:
     """Return a list of canonical audience strings with slash variants."""
-
     normalized: list[str] = []
     for value in values:
         candidate = value.strip()
@@ -73,23 +72,16 @@ def _normalize_audience_values(values: Iterable[str]) -> list[str]:
             continue
 
         trimmed = candidate.rstrip("/")
-        for option in (
-            candidate,
-            trimmed,
-            f"{trimmed}/" if trimmed else "",
-        ):
+        for option in (candidate, trimmed, f"{trimmed}/" if trimmed else ""):
             if option and option not in normalized:
                 normalized.append(option)
-
     return normalized
 
 
 def _collect_audience_values(raw_value: str | None) -> list[str]:
     """Split the configured audience string into individual values."""
-
     if not raw_value:
         return []
-
     candidates = [segment for segment in raw_value.replace("\n", " ").split() if segment]
     expanded: list[str] = []
     for candidate in candidates:
@@ -97,13 +89,11 @@ def _collect_audience_values(raw_value: str | None) -> list[str]:
             value = part.strip()
             if value and value not in expanded:
                 expanded.append(value)
-
     return expanded
 
 
 def _decode_token(token: str, *, domain: str, audiences: list[str]) -> dict[str, Any]:
     """Decode and validate an Auth0 access token."""
-
     rsa_key = _get_rsa_key(token, domain)
     if not rsa_key:
         raise HTTPException(
@@ -141,19 +131,19 @@ def _decode_token(token: str, *, domain: str, audiences: list[str]) -> dict[str,
 
     normalized_token_audiences = set(_normalize_audience_values(token_audiences))
     normalized_allowed_audiences = set(_normalize_audience_values(audiences))
-
     if not normalized_token_audiences & normalized_allowed_audiences:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token audience",
         )
 
+    print("DEBUG: Decoded token successfully", file=sys.stdout, flush=True)
     return payload
 
 
 def _resolve_user(session: Session, payload: dict[str, Any]) -> User:
     """Map a verified Auth0 payload to an application user."""
-
+    print("DEBUG: Entering _resolve_user", file=sys.stdout, flush=True)
     subject = payload.get("sub")
     if not subject:
         raise HTTPException(
@@ -163,6 +153,7 @@ def _resolve_user(session: Session, payload: dict[str, Any]) -> User:
 
     user = session.query(User).filter(User.auth0_sub == subject).one_or_none()
     if user:
+        print("DEBUG: _resolve_user returning existing:", user.email, user.role, file=sys.stdout, flush=True)
         return user
 
     email = payload.get("email")
@@ -173,6 +164,7 @@ def _resolve_user(session: Session, payload: dict[str, Any]) -> User:
                 user.auth0_sub = subject
                 session.add(user)
                 session.commit()
+            print("DEBUG: _resolve_user linked email to sub:", user.email, user.role, file=sys.stdout, flush=True)
             return user
 
     if not email:
@@ -181,25 +173,14 @@ def _resolve_user(session: Session, payload: dict[str, Any]) -> User:
             detail="User record not found",
         )
 
-    display_name = (
-        payload.get("name")
-        or payload.get("nickname")
-        or email
-    )
-    if isinstance(display_name, str):
-        display_name = display_name.strip()
+    display_name = (payload.get("name") or payload.get("nickname") or email).strip()
     if not display_name:
         display_name = email
 
-    user = User(
-        email=email,
-        name=display_name,
-        role=None,
-        auth0_sub=subject,
-    )
+    user = User(email=email, name=display_name, role=None, auth0_sub=subject)
     session.add(user)
     session.commit()
-
+    print("DEBUG: _resolve_user created new user:", user.email, user.role, file=sys.stdout, flush=True)
     return user
 
 
@@ -208,7 +189,6 @@ def get_current_user(
     session: Session = Depends(get_session_dependency),
 ) -> User:
     """Resolve the authenticated user from the Auth0 bearer token."""
-
     if credentials is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -234,12 +214,35 @@ def get_current_user(
         domain=settings.auth0_domain,
         audiences=configured_audiences,
     )
-    return _resolve_user(session, payload)
+    user = _resolve_user(session, payload)
+
+    print(
+        "DEBUG-USER:",
+        user.email,
+        "| role:", user.role,
+        "| approved:", getattr(user, "is_approved", None),
+        "| active:", getattr(user, "is_active", None),
+        file=sys.stdout,
+        flush=True,
+    )
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is deactivated",
+        )
+
+    if not user.is_approved and (not user.role or user.role.lower() != "admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account pending approval",
+        )
+
+    return user
 
 
 def _enforce_roles(user: User, allowed_roles: set[str], *, allow_admin: bool = True) -> User:
     """Ensure the authenticated user has one of the allowed roles."""
-
     role = (user.role or "").lower()
     if not role:
         raise HTTPException(
@@ -250,10 +253,8 @@ def _enforce_roles(user: User, allowed_roles: set[str], *, allow_admin: bool = T
     normalized_allowed = {value.lower() for value in allowed_roles}
     if role in normalized_allowed:
         return user
-
     if allow_admin and role == "admin":
         return user
-
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="Insufficient permissions",
@@ -262,19 +263,16 @@ def _enforce_roles(user: User, allowed_roles: set[str], *, allow_admin: bool = T
 
 def require_vendor_user(user: User = Depends(get_current_user)) -> User:
     """Dependency ensuring the caller is a vendor or admin user."""
-
     return _enforce_roles(user, {"vendor"})
 
 
 def require_district_user(user: User = Depends(get_current_user)) -> User:
     """Dependency ensuring the caller is a district or admin user."""
-
     return _enforce_roles(user, {"district"})
 
 
 def require_admin_user(user: User = Depends(get_current_user)) -> User:
     """Dependency ensuring the caller is an administrator."""
-
     return _enforce_roles(user, {"admin"}, allow_admin=False)
 
 
@@ -284,7 +282,6 @@ def require_role(
     allow_admin: bool = True,
 ):
     """Return a dependency that enforces one of the provided roles."""
-
     normalized_roles = {value.lower() for value in roles}
 
     def dependency(user: User = Depends(get_current_user)) -> User:
