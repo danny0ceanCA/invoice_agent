@@ -13,6 +13,21 @@ import {
   updateUserRole,
 } from "../api/adminUsers";
 
+function normalizeUserShape(user) {
+  if (!user) {
+    return user;
+  }
+
+  const isApproved = user.is_approved ?? user.approved ?? false;
+  const isActive = user.is_active ?? user.active ?? false;
+
+  return {
+    ...user,
+    is_approved: isApproved,
+    is_active: isActive,
+  };
+}
+
 const TABS = [
   { id: "all", label: "All Users" },
   { id: "pending", label: "Pending" },
@@ -60,8 +75,8 @@ export default function AdminUserDashboard() {
         listUsers(token),
         listPendingUsers(token),
       ]);
-      setUsers(usersResponse);
-      setPendingUsers(pendingResponse);
+      setUsers(usersResponse.map((user) => normalizeUserShape(user)));
+      setPendingUsers(pendingResponse.map((user) => normalizeUserShape(user)));
     } catch (err) {
       console.error("admin_users_load_failed", err);
       setError("We couldn't load user accounts. Please try again.");
@@ -92,6 +107,7 @@ export default function AdminUserDashboard() {
 
     try {
       const { user: approvedUser } = await approveUser(userId, token);
+      const normalizedApprovedUser = normalizeUserShape(approvedUser);
 
       setUsers((current) =>
         current.map((user) => {
@@ -101,10 +117,9 @@ export default function AdminUserDashboard() {
 
           return {
             ...user,
-            role: approvedUser?.role ?? user.role,
-            is_approved:
-              approvedUser?.is_approved ?? approvedUser?.approved ?? true,
-            is_active: approvedUser?.is_active ?? true,
+            role: normalizedApprovedUser?.role ?? user.role,
+            is_approved: normalizedApprovedUser?.is_approved ?? true,
+            is_active: normalizedApprovedUser?.is_active ?? true,
           };
         }),
       );
@@ -153,10 +168,11 @@ export default function AdminUserDashboard() {
 
     try {
       const response = await deactivateUser(userId, token);
+      const normalizedUser = normalizeUserShape(response);
       setUsers((current) =>
         current.map((user) =>
           user.id === userId
-            ? { ...user, is_active: response.is_active }
+            ? { ...user, is_active: normalizedUser?.is_active ?? false }
             : user,
         ),
       );
@@ -183,6 +199,7 @@ export default function AdminUserDashboard() {
 
     try {
       const { user: declinedUser, message } = await declineUser(userId, token);
+      const normalizedDeclinedUser = normalizeUserShape(declinedUser);
 
       setUsers((current) =>
         current.map((user) => {
@@ -192,8 +209,8 @@ export default function AdminUserDashboard() {
 
           return {
             ...user,
-            is_active: declinedUser?.is_active ?? false,
-            is_approved: declinedUser?.is_approved ?? false,
+            is_active: normalizedDeclinedUser?.is_active ?? false,
+            is_approved: normalizedDeclinedUser?.is_approved ?? false,
           };
         }),
       );
@@ -309,93 +326,103 @@ export default function AdminUserDashboard() {
               </tr>
             </thead>
             <tbody>
-              {displayedUsers.map((user) => (
-                <tr key={user.id} className="rounded-lg bg-white shadow-sm">
-                  <td className="rounded-l-lg px-4 py-3 text-sm font-medium text-slate-900">{user.email}</td>
-                  <td className="px-4 py-3 text-sm text-slate-600">
-                    <label className="sr-only" htmlFor={`role-${user.id}`}>
-                      Change role for {user.email}
-                    </label>
-                    <select
-                      id={`role-${user.id}`}
-                      className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-                      value={user.role ?? ""}
-                      onChange={(event) => {
-                        const nextRole = event.target.value;
-                        if (nextRole && nextRole !== user.role) {
-                          handleRoleChange(user.id, nextRole).catch(() => {});
-                        }
-                      }}
-                      disabled={isUserBusy(user.id)}
-                      aria-label={`Change role for ${user.email}`}
-                    >
-                      <option value="" disabled>
-                        Select role
-                      </option>
-                      {ROLE_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
+              {displayedUsers.map((user) => {
+                const isApproved = Boolean(
+                  user.is_approved ?? user.approved ?? false,
+                );
+                const isActive = Boolean(
+                  user.is_active ?? user.active ?? false,
+                );
+                const isBusy = isUserBusy(user.id);
+
+                return (
+                  <tr key={user.id} className="rounded-lg bg-white shadow-sm">
+                    <td className="rounded-l-lg px-4 py-3 text-sm font-medium text-slate-900">{user.email}</td>
+                    <td className="px-4 py-3 text-sm text-slate-600">
+                      <label className="sr-only" htmlFor={`role-${user.id}`}>
+                        Change role for {user.email}
+                      </label>
+                      <select
+                        id={`role-${user.id}`}
+                        className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                        value={user.role ?? ""}
+                        onChange={(event) => {
+                          const nextRole = event.target.value;
+                          if (nextRole && nextRole !== user.role) {
+                            handleRoleChange(user.id, nextRole).catch(() => {});
+                          }
+                        }}
+                        disabled={isBusy}
+                        aria-label={`Change role for ${user.email}`}
+                      >
+                        <option value="" disabled>
+                          Select role
                         </option>
-                      ))}
-                    </select>
-                  </td>
-                  <td className="px-4 py-3 text-sm text-slate-600">
-                    {user.is_approved ? (
-                      <span className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
-                        Approved
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-2 rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700">
-                        Pending Approval
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-sm text-slate-600">
-                    {user.is_active ? (
-                      <span className="inline-flex items-center gap-2 rounded-full bg-sky-50 px-3 py-1 text-xs font-medium text-sky-700">
-                        Active
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-500">
-                        Inactive
-                      </span>
-                    )}
-                  </td>
-                  <td className="flex flex-wrap items-center justify-end gap-2 rounded-r-lg px-4 py-3 text-sm">
-                    {!user.is_approved && (
-                      <div className="flex flex-wrap items-center justify-end gap-2">
-                        <button
-                          type="button"
-                          onClick={() => handleApprove(user.id)}
-                          className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
-                          disabled={isUserBusy(user.id)}
-                          aria-label={`Approve ${user.email}`}
-                        >
-                          Approve
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDecline(user.id, user.email)}
-                          className="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
-                          disabled={isUserBusy(user.id)}
-                          aria-label={`Decline ${user.email}`}
-                        >
-                          Decline
-                        </button>
-                      </div>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => handleDeactivate(user.id)}
-                      className="rounded-lg border border-red-500 px-3 py-2 text-sm font-semibold text-red-600 transition hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-offset-2"
-                      disabled={isUserBusy(user.id) || !user.is_active}
-                      aria-label={`Deactivate ${user.email}`}
-                    >
-                      Deactivate
-                    </button>
-                  </td>
-                </tr>
-              ))}
+                        {ROLE_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="px-4 py-3 text-sm text-slate-600">
+                      {isApproved ? (
+                        <span className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
+                          Approved
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-2 rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700">
+                          Pending Approval
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-slate-600">
+                      {isActive ? (
+                        <span className="inline-flex items-center gap-2 rounded-full bg-sky-50 px-3 py-1 text-xs font-medium text-sky-700">
+                          Active
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-500">
+                          Inactive
+                        </span>
+                      )}
+                    </td>
+                    <td className="flex flex-wrap items-center justify-end gap-2 rounded-r-lg px-4 py-3 text-sm">
+                      {!isApproved && (
+                        <div className="flex flex-wrap items-center justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleApprove(user.id)}
+                            className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
+                            disabled={isBusy}
+                            aria-label={`Approve ${user.email}`}
+                          >
+                            Approve
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDecline(user.id, user.email)}
+                            className="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
+                            disabled={isBusy}
+                            aria-label={`Decline ${user.email}`}
+                          >
+                            Decline
+                          </button>
+                        </div>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => handleDeactivate(user.id)}
+                        className="rounded-lg border border-red-500 px-3 py-2 text-sm font-semibold text-red-600 transition hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-offset-2"
+                        disabled={isBusy || !isActive}
+                        aria-label={`Deactivate ${user.email}`}
+                      >
+                        Deactivate
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}
