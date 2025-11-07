@@ -21,6 +21,10 @@ ALGORITHMS = ["RS256"]
 _scheme = HTTPBearer(auto_error=False)
 
 
+# -------------------------------------------------------
+# JWKS + Token Utilities
+# -------------------------------------------------------
+
 @lru_cache()
 def _fetch_jwks(domain: str) -> dict[str, Any]:
     """Fetch (and cache) the JWKS for the given Auth0 domain."""
@@ -141,6 +145,10 @@ def _decode_token(token: str, *, domain: str, audiences: list[str]) -> dict[str,
     return payload
 
 
+# -------------------------------------------------------
+# User Resolution
+# -------------------------------------------------------
+
 def _resolve_user(session: Session, payload: dict[str, Any]) -> User:
     """Map a verified Auth0 payload to an application user."""
     print("DEBUG: Entering _resolve_user", file=sys.stdout, flush=True)
@@ -151,12 +159,15 @@ def _resolve_user(session: Session, payload: dict[str, Any]) -> User:
             detail="Token missing subject",
         )
 
+    # Try lookup by Auth0 subject
     user = session.query(User).filter(User.auth0_sub == subject).one_or_none()
     if user:
         print("DEBUG: _resolve_user returning existing:", user.email, user.role, file=sys.stdout, flush=True)
         return user
 
-    email = payload.get("email")
+    # Lookup by email (with namespaced support)
+    email = payload.get("email") or payload.get("https://invoice-api/email")
+
     if email:
         user = session.query(User).filter(User.email == email).one_or_none()
         if user:
@@ -168,21 +179,24 @@ def _resolve_user(session: Session, payload: dict[str, Any]) -> User:
             return user
 
     if not email:
+        print("DEBUG: Token missing email; cannot link user", file=sys.stdout, flush=True)
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="User record not found",
         )
 
+    # If not found, create user
     display_name = (payload.get("name") or payload.get("nickname") or email).strip()
-    if not display_name:
-        display_name = email
-
     user = User(email=email, name=display_name, role=None, auth0_sub=subject)
     session.add(user)
     session.commit()
     print("DEBUG: _resolve_user created new user:", user.email, user.role, file=sys.stdout, flush=True)
     return user
 
+
+# -------------------------------------------------------
+# Current User + Role Enforcement
+# -------------------------------------------------------
 
 def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(_scheme),
@@ -226,6 +240,7 @@ def get_current_user(
         flush=True,
     )
 
+    # Account state checks
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
