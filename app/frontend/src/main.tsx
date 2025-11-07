@@ -16,8 +16,8 @@ if (!domain || !clientId) {
 }
 
 const authorizationParams = {
-  scope: "openid profile email read:profile read:email",
   ...(audience ? { audience } : {}),
+  scope: "openid profile email read:profile read:email offline_access",
 };
 
 const redirectUri = window.location.origin;
@@ -28,6 +28,9 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
       domain={domain}
       clientId={clientId}
       authorizationParams={authorizationParams}
+      cacheLocation="localstorage"
+      useRefreshTokens={true}
+      useRefreshTokensFallback={false}
       redirectUri={redirectUri}
     >
       <BrowserRouter>
