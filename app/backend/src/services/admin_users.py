@@ -35,7 +35,7 @@ def list_pending_users(session: Session) -> list[User]:
 
     return (
         session.query(User)
-        .filter(User.is_approved.is_(False))
+        .filter(User.is_approved.is_(False), User.is_active.is_(True))
         .order_by(User.created_at.asc())
         .all()
     )
@@ -46,8 +46,19 @@ def approve_user(session: Session, user_id: int) -> User:
 
     user = _get_user_or_404(session, user_id)
     user.is_approved = True
-    if not user.is_active:
-        user.is_active = True
+    user.is_active = True
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    return user
+
+
+def decline_user(session: Session, user_id: int) -> User:
+    """Decline a pending user by deactivating their account."""
+
+    user = _get_user_or_404(session, user_id)
+    user.is_active = False
+    user.is_approved = False
     session.add(user)
     session.commit()
     session.refresh(user)
@@ -87,6 +98,7 @@ __all__ = [
     "list_users",
     "list_pending_users",
     "approve_user",
+    "decline_user",
     "update_user_role",
     "deactivate_user",
 ]

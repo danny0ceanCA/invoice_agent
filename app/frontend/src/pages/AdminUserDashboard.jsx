@@ -7,6 +7,7 @@ import toast from "react-hot-toast";
 import {
   approveUser,
   deactivateUser,
+  declineUser,
   listPendingUsers,
   listUsers,
   updateUserRole,
@@ -90,7 +91,7 @@ export default function AdminUserDashboard() {
     updateBusyState(userId, true);
 
     try {
-      const approvedUser = await approveUser(userId, token);
+      const { user: approvedUser, message } = await approveUser(userId, token);
 
       setUsers((current) =>
         current.map((user) => {
@@ -115,7 +116,7 @@ export default function AdminUserDashboard() {
         current.filter((pendingUser) => pendingUser.id !== userId),
       );
 
-      toast.success("✅ User approved successfully.");
+      toast.success(message ?? "✅ User approved successfully.");
     } catch (err) {
       console.error("user_approve_failed", err);
       toast.error("We couldn't approve the user. Please try again.");
@@ -166,6 +167,48 @@ export default function AdminUserDashboard() {
     } catch (err) {
       console.error("user_deactivate_failed", err);
       toast.error("We couldn't deactivate the user. Please try again.");
+    } finally {
+      updateBusyState(userId, false);
+    }
+  };
+
+  const handleDecline = async (userId, email) => {
+    const confirmed = window.confirm(
+      `Decline access for ${email}? This will deactivate the account.`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    const token = await getAccessTokenSilently();
+    updateBusyState(userId, true);
+
+    try {
+      const { user: declinedUser, message } = await declineUser(userId, token);
+
+      setUsers((current) =>
+        current.map((user) => {
+          if (user.id !== userId) {
+            return user;
+          }
+
+          return {
+            ...user,
+            is_active: declinedUser?.is_active ?? false,
+            is_approved: declinedUser?.is_approved ?? false,
+          };
+        }),
+      );
+
+      setPendingUsers((current) =>
+        current.filter((pendingUser) => pendingUser.id !== userId),
+      );
+
+      toast.success(message ?? "User declined successfully.");
+    } catch (err) {
+      console.error("user_decline_failed", err);
+      toast.error("We couldn't decline the user. Please try again.");
     } finally {
       updateBusyState(userId, false);
     }
@@ -323,15 +366,26 @@ export default function AdminUserDashboard() {
                   </td>
                   <td className="flex flex-wrap items-center justify-end gap-2 rounded-r-lg px-4 py-3 text-sm">
                     {!user.is_approved && (
-                      <button
-                        type="button"
-                        onClick={() => handleApprove(user.id)}
-                        className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
-                        disabled={isUserBusy(user.id)}
-                        aria-label={`Approve ${user.email}`}
-                      >
-                        Approve
-                      </button>
+                      <div className="flex flex-wrap items-center justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleApprove(user.id)}
+                          className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2"
+                          disabled={isUserBusy(user.id)}
+                          aria-label={`Approve ${user.email}`}
+                        >
+                          Approve
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDecline(user.id, user.email)}
+                          className="rounded-lg bg-red-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
+                          disabled={isUserBusy(user.id)}
+                          aria-label={`Decline ${user.email}`}
+                        >
+                          Decline
+                        </button>
+                      </div>
                     )}
                     <button
                       type="button"

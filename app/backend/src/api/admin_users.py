@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -33,9 +34,18 @@ class RoleUpdate(BaseModel):
     role: str
 
 
+class UserActionResponse(BaseModel):
+    """Response returned after an administrative action on a user."""
+
+    message: str
+    user: UserOut
+
+
 router = APIRouter(prefix="/admin", tags=["Admin Users"])
 
 require_admin_role = require_role(["admin"], allow_admin=True)
+
+logger = logging.getLogger(__name__)
 
 
 @router.get(
@@ -64,18 +74,56 @@ def list_pending_users(
     return admin_user_service.list_pending_users(session)
 
 
-@router.post(
+@router.patch(
     "/users/{user_id}/approve",
-    response_model=UserOut,
-    dependencies=[Depends(require_admin_role)],
+    response_model=UserActionResponse,
 )
 def approve_user(
     user_id: int,
     session: Annotated[Session, Depends(get_session_dependency)],
-) -> User:
+    admin_user: Annotated[User, Depends(require_admin_role)],
+) -> dict[str, User]:
     """Approve a pending user."""
 
-    return admin_user_service.approve_user(session, user_id)
+    user = admin_user_service.approve_user(session, user_id)
+    logger.info(
+        "admin_user_approved",
+        extra={
+            "admin_email": admin_user.email,
+            "user_email": user.email,
+            "user_id": user.id,
+        },
+    )
+    return {
+        "message": "User approved successfully",
+        "user": user,
+    }
+
+
+@router.delete(
+    "/users/{user_id}/decline",
+    response_model=UserActionResponse,
+)
+def decline_user(
+    user_id: int,
+    session: Annotated[Session, Depends(get_session_dependency)],
+    admin_user: Annotated[User, Depends(require_admin_role)],
+) -> dict[str, User]:
+    """Decline a pending user and deactivate their account."""
+
+    user = admin_user_service.decline_user(session, user_id)
+    logger.info(
+        "admin_user_declined",
+        extra={
+            "admin_email": admin_user.email,
+            "user_email": user.email,
+            "user_id": user.id,
+        },
+    )
+    return {
+        "message": "User declined successfully",
+        "user": user,
+    }
 
 
 @router.patch(
@@ -115,5 +163,11 @@ def deactivate_user(
     return admin_user_service.deactivate_user(session, user_id)
 
 
-__all__ = ["router", "RoleUpdate", "UserOut", "require_admin_role"]
+__all__ = [
+    "router",
+    "RoleUpdate",
+    "UserOut",
+    "UserActionResponse",
+    "require_admin_role",
+]
 
