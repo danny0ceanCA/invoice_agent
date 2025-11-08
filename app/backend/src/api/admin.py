@@ -28,7 +28,7 @@ def load_seed_data(
         "status": "seeded",
         "vendor_created": result.vendor_created,
         "user_created": result.user_created,
-        "vendor": {"id": result.vendor.id, "name": result.vendor.name},
+        "vendor": {"id": result.vendor.id, "name": result.vendor.company_name},
         "user": {
             "id": result.user.id,
             "email": result.user.email,

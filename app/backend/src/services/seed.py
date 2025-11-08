@@ -10,6 +10,9 @@ from app.backend.src.models import User, Vendor
 
 DEFAULT_VENDOR_NAME = "SCUSD Accounts Payable"
 DEFAULT_VENDOR_EMAIL = "ap@scusd.example"
+DEFAULT_VENDOR_CONTACT = "Regina Martinez"
+DEFAULT_VENDOR_PHONE = "916-555-0183"
+DEFAULT_VENDOR_REMIT_ADDRESS = "SCUSD Accounts Payable\n5735 47th Avenue\nSacramento, CA 95824"
 DEFAULT_USER_EMAIL = "daniel@responsivehcsolutions.com"
 DEFAULT_USER_NAME = "Daniel Ojeda"
 DEFAULT_USER_ROLE = "admin"
@@ -43,17 +46,36 @@ def seed_development_user(
     Existing records are updated so they remain associated.
     """
 
-    vendor = session.query(Vendor).filter(Vendor.name == vendor_name).one_or_none()
+    vendor = (
+        session.query(Vendor)
+        .filter(Vendor.company_name == vendor_name)
+        .one_or_none()
+    )
     vendor_created = False
     vendor_updated = False
     if vendor is None:
-        vendor = Vendor(name=vendor_name, contact_email=vendor_email)
+        vendor = Vendor(
+            company_name=vendor_name,
+            contact_email=vendor_email,
+            contact_name=DEFAULT_VENDOR_CONTACT,
+            phone_number=DEFAULT_VENDOR_PHONE,
+            remit_to_address=DEFAULT_VENDOR_REMIT_ADDRESS,
+        )
         session.add(vendor)
         session.flush()
         vendor_created = True
     else:
         if vendor.contact_email != vendor_email:
             vendor.contact_email = vendor_email
+            vendor_updated = True
+        if vendor.contact_name != DEFAULT_VENDOR_CONTACT:
+            vendor.contact_name = DEFAULT_VENDOR_CONTACT
+            vendor_updated = True
+        if vendor.phone_number != DEFAULT_VENDOR_PHONE:
+            vendor.phone_number = DEFAULT_VENDOR_PHONE
+            vendor_updated = True
+        if vendor.remit_to_address != DEFAULT_VENDOR_REMIT_ADDRESS:
+            vendor.remit_to_address = DEFAULT_VENDOR_REMIT_ADDRESS
             vendor_updated = True
 
     user = session.query(User).filter(User.email == user_email).one_or_none()

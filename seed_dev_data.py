@@ -33,7 +33,7 @@ def main() -> None:
         else:
             user_status = "unchanged"
         print(
-            f"Vendor ({vendor_status}): {result.vendor.name} [id={result.vendor.id}]"
+            f"Vendor ({vendor_status}): {result.vendor.company_name} [id={result.vendor.id}]"
         )
         print(
             f"User ({user_status}): {result.user.name} <{result.user.email}> "
