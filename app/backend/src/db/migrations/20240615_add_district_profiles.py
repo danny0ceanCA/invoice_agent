@@ -1,7 +1,5 @@
 """Add district organization profiles and link users."""
 
-"""Add district organization profiles and link users."""
-
 from __future__ import annotations
 
 from sqlalchemy import (

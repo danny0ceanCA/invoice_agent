@@ -160,9 +160,7 @@ export default function VendorDashboard({ vendorId }) {
   );
 
   const fetchJobs = useCallback(async () => {
-    if (!isAuthenticated) {
-      return;
-    }
+    if (!isAuthenticated) return;
 
     setError(null);
     try {
@@ -186,6 +184,10 @@ export default function VendorDashboard({ vendorId }) {
     try {
       const token = await getAccessTokenSilently();
       const profile = await fetchVendorProfile(token);
+
+      // 👇 Debug log to inspect the API data
+      console.log("Vendor profile received:", profile);
+
       setVendorProfile(profile);
       return profile;
     } catch (err) {
@@ -224,13 +226,16 @@ export default function VendorDashboard({ vendorId }) {
     setProfilePromptDismissed(false);
   }, [vendorId]);
 
+  // 🔹 Updated logic – modal opens if missing company_name or incomplete or no profile at all
   useEffect(() => {
     if (
-      vendorProfile &&
-      !vendorProfile.is_profile_complete &&
-      !profilePromptDismissed
+      !vendorProfile ||
+      !vendorProfile.company_name ||
+      !vendorProfile.is_profile_complete
     ) {
-      setShowProfileForm(true);
+      if (!profilePromptDismissed) {
+        setShowProfileForm(true);
+      }
     }
   }, [vendorProfile, profilePromptDismissed]);
 
@@ -346,26 +351,7 @@ export default function VendorDashboard({ vendorId }) {
           </div>
         </header>
 
-        {vendorId == null ? (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-            Your district administrator still needs to link your Auth0 account to a vendor
-            profile before you can submit invoices.
-          </div>
-        ) : null}
-
-        {profileError ? (
-          <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-            {profileError}
-          </div>
-        ) : null}
-
-        {vendorProfile && !vendorProfile.is_profile_complete ? (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-            Complete your vendor profile so we have the latest remit-to details on file.
-          </div>
-        ) : null}
-
-        <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
+        <section className="grid gap-6 lg:grid-cols-[320px_1fr]">
           <aside className="space-y-6">
             <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
               <h2 className="text-sm font-semibold text-slate-900">Vendor profile</h2>
@@ -378,7 +364,7 @@ export default function VendorDashboard({ vendorId }) {
                       Company
                     </p>
                     <p className="mt-1 font-medium text-slate-900">
-                      {vendorProfile.company_name}
+                      {vendorProfile.company_name || "Add company"}
                     </p>
                   </div>
                   <div>
@@ -467,7 +453,7 @@ export default function VendorDashboard({ vendorId }) {
               </div>
             </section>
           </main>
-        </div>
+        </section>
       </div>
 
       {showProfileForm ? (
