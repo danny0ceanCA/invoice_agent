@@ -400,7 +400,7 @@ export default function AdminUserDashboard() {
                         <button
                           type="button"
                           onClick={() => handleDeactivate(user.id)}
-                          className="rounded-lg border border-red-500 px-3 py-2 text-sm font-semibold text-red-600 transition hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-offset-2"
+                          className="rounded-lg border border-red-600 bg-red-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-offset-2"
                           disabled={isBusy || !isActive}
                           aria-label={`Deactivate ${user.email}`}
                         >
@@ -411,7 +411,7 @@ export default function AdminUserDashboard() {
                           <button
                             type="button"
                             onClick={() => handleApprove(user.id)}
-                            className="rounded-lg border border-emerald-600 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100 focus:outline-none focus:ring-2 focus:ring-emerald-200 focus:ring-offset-2"
+                            className="rounded-lg border border-emerald-600 bg-emerald-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-200 focus:ring-offset-2"
                             disabled={isBusy}
                             aria-label={`Approve ${user.email}`}
                           >
@@ -420,7 +420,7 @@ export default function AdminUserDashboard() {
                           <button
                             type="button"
                             onClick={() => handleDecline(user.id, user.email)}
-                            className="rounded-lg border border-red-600 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-red-200 focus:ring-offset-2"
+                            className="rounded-lg border border-red-600 bg-red-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-200 focus:ring-offset-2"
                             disabled={isBusy}
                             aria-label={`Decline ${user.email}`}
                           >
