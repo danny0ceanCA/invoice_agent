@@ -5,10 +5,6 @@ const menuItems = [
     key: "vendors",
     label: "Vendors",
     description: "",
-    stats: {
-      active: 12,
-      pending: 3,
-    },
   },
   {
     key: "approvals",
@@ -32,6 +28,131 @@ const menuItems = [
     comingSoon: true,
   },
 ];
+
+const MONTH_ORDER = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+
+const MONTH_INDEX = MONTH_ORDER.reduce((acc, month, index) => {
+  acc[month] = index;
+  return acc;
+}, {});
+
+const currencyFormatter = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  maximumFractionDigits: 0,
+});
+
+const parseCurrencyValue = (value) => {
+  if (!value || typeof value !== "string") {
+    return 0;
+  }
+
+  const numeric = Number(value.replace(/[^0-9.-]+/g, ""));
+  return Number.isFinite(numeric) ? numeric : 0;
+};
+
+const collectVendorInvoices = (profiles) => {
+  return profiles.flatMap((vendor) =>
+    Object.entries(vendor.invoices ?? {}).flatMap(([yearString, invoices]) => {
+      const year = Number(yearString);
+      return (invoices ?? []).map((invoice) => ({
+        vendorId: vendor.id,
+        vendorName: vendor.name,
+        year,
+        month: invoice.month,
+        monthIndex: MONTH_INDEX[invoice.month] ?? -1,
+        status: invoice.status ?? "",
+        total: parseCurrencyValue(invoice.total),
+      }));
+    })
+  );
+};
+
+const computeVendorMetrics = (profiles) => {
+  const invoices = collectVendorInvoices(profiles);
+
+  if (!invoices.length) {
+    return {
+      latestYear: null,
+      totalVendors: profiles.length,
+      invoicesThisYear: 0,
+      approvedCount: 0,
+      needsActionCount: 0,
+      totalSpend: 0,
+      outstandingSpend: 0,
+    };
+  }
+
+  const latestYear = invoices.reduce((max, invoice) => (invoice.year > max ? invoice.year : max), invoices[0].year);
+  const invoicesThisYear = invoices.filter((invoice) => invoice.year === latestYear);
+  const approvedInvoices = invoicesThisYear.filter((invoice) => invoice.status.toLowerCase().includes("approved"));
+  const needsActionInvoices = invoicesThisYear.filter((invoice) => !invoice.status.toLowerCase().includes("approved"));
+  const totalSpend = invoicesThisYear.reduce((sum, invoice) => sum + invoice.total, 0);
+  const outstandingSpend = needsActionInvoices.reduce((sum, invoice) => sum + invoice.total, 0);
+
+  return {
+    latestYear,
+    totalVendors: profiles.length,
+    invoicesThisYear: invoicesThisYear.length,
+    approvedCount: approvedInvoices.length,
+    needsActionCount: needsActionInvoices.length,
+    totalSpend,
+    outstandingSpend,
+  };
+};
+
+const getLatestInvoiceForVendor = (vendor) => {
+  const invoices = Object.entries(vendor.invoices ?? {}).flatMap(([yearString, entries]) => {
+    const year = Number(yearString);
+    return (entries ?? []).map((invoice) => ({
+      ...invoice,
+      year,
+      monthIndex: MONTH_INDEX[invoice.month] ?? -1,
+    }));
+  });
+
+  if (!invoices.length) {
+    return null;
+  }
+
+  return invoices.sort((a, b) => {
+    if (a.year !== b.year) {
+      return b.year - a.year;
+    }
+    return (b.monthIndex ?? -1) - (a.monthIndex ?? -1);
+  })[0];
+};
+
+const getHealthBadgeClasses = (health) => {
+  if (!health) {
+    return "bg-slate-100 text-slate-600";
+  }
+
+  const normalized = health.toLowerCase();
+  if (normalized.includes("track")) {
+    return "bg-emerald-100 text-emerald-700";
+  }
+  if (normalized.includes("monitor")) {
+    return "bg-amber-100 text-amber-700";
+  }
+  if (normalized.includes("procurement")) {
+    return "bg-sky-100 text-sky-700";
+  }
+  return "bg-slate-100 text-slate-600";
+};
 
 const vendorProfiles = [
   {
@@ -325,6 +446,7 @@ export default function DistrictDashboard() {
   const [selectedInvoiceKey, setSelectedInvoiceKey] = useState(null);
   const activeItem = menuItems.find((item) => item.key === activeKey) ?? menuItems[0];
   const selectedVendor = vendorProfiles.find((vendor) => vendor.id === selectedVendorId) ?? null;
+  const vendorMetrics = useMemo(() => computeVendorMetrics(vendorProfiles), []);
   useEffect(() => {
     setSelectedInvoiceKey(null);
   }, [activeKey, selectedVendorId]);
@@ -362,6 +484,42 @@ export default function DistrictDashboard() {
       students: studentsWithSamples ?? [],
     };
   }, [selectedInvoiceKey, selectedVendor]);
+
+  const vendorOverviewHighlights = useMemo(() => {
+    if (!selectedVendor) {
+      return [];
+    }
+
+    const baseHighlights = [
+      { label: "Focus Area", value: selectedVendor.focus },
+      { label: "Campuses", value: selectedVendor.campusesServed?.toString() ?? null },
+      { label: "Team Members", value: selectedVendor.teamSize?.toString() ?? null },
+    ];
+
+    return [...baseHighlights, ...(selectedVendor.highlights ?? [])].filter((item) => Boolean(item?.value));
+  }, [selectedVendor]);
+
+  const vendorContactSummary = useMemo(() => {
+    if (!selectedVendor) {
+      return null;
+    }
+
+    const segments = [];
+    if (selectedVendor.manager) {
+      let primaryContact = `Primary contact: ${selectedVendor.manager}`;
+      if (selectedVendor.managerTitle) {
+        primaryContact = `${primaryContact}, ${selectedVendor.managerTitle}`;
+      }
+      segments.push(primaryContact);
+    }
+
+    const contactDetails = [selectedVendor.email, selectedVendor.phone].filter(Boolean);
+    if (contactDetails.length) {
+      segments.push(contactDetails.join(" • "));
+    }
+
+    return segments.length ? segments.join(" • ") : null;
+  }, [selectedVendor]);
 
   return (
     <div className="flex flex-col gap-6 lg:flex-row">
@@ -428,6 +586,34 @@ export default function DistrictDashboard() {
 
         {activeItem.key === "vendors" ? (
           <div className="mt-8 space-y-6">
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 shadow-sm">
+                <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">Vendor Partners</p>
+                <p className="mt-2 text-2xl font-semibold text-slate-900">{vendorMetrics.totalVendors}</p>
+                <p className="mt-1 text-xs text-slate-500">
+                  Active with invoices{vendorMetrics.latestYear ? ` in ${vendorMetrics.latestYear}` : ""}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 shadow-sm">
+                <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">Invoices Reviewed</p>
+                <p className="mt-2 text-2xl font-semibold text-slate-900">{vendorMetrics.invoicesThisYear}</p>
+                <p className="mt-1 text-xs text-slate-500">{vendorMetrics.approvedCount} approved</p>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 shadow-sm">
+                <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">Needs Attention</p>
+                <p className="mt-2 text-2xl font-semibold text-slate-900">{vendorMetrics.needsActionCount}</p>
+                <p className="mt-1 text-xs text-slate-500">
+                  {currencyFormatter.format(vendorMetrics.outstandingSpend)} outstanding
+                </p>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 shadow-sm">
+                <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">Spend To Date</p>
+                <p className="mt-2 text-2xl font-semibold text-slate-900">
+                  {currencyFormatter.format(vendorMetrics.totalSpend)}
+                </p>
+                <p className="mt-1 text-xs text-slate-500">Across current-year invoices</p>
+              </div>
+            </div>
             {!selectedVendor ? (
               <div className="space-y-3">
                 <h4 className="text-sm font-semibold uppercase tracking-wider text-slate-500">
@@ -441,18 +627,63 @@ export default function DistrictDashboard() {
                     <button
                       key={vendor.id}
                       onClick={() => setSelectedVendorId(vendor.id)}
-                      className="flex h-full flex-col justify-center rounded-2xl border border-slate-200 bg-white p-5 text-left transition hover:border-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/70"
+                      className="flex h-full flex-col justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-5 text-left transition hover:border-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/70"
                       type="button"
                     >
-                      <p className="text-sm font-semibold text-slate-900">
-                        {vendor.name}
-                        <span className="block text-xs font-medium text-slate-500 sm:inline"> - Contact: {vendor.manager}</span>
-                      </p>
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-900">{vendor.name}</p>
+                          <p className="mt-1 text-xs text-slate-500">
+                            Contact: {vendor.manager}
+                            {vendor.managerTitle ? `, ${vendor.managerTitle}` : ""}
+                          </p>
+                        </div>
+                        {vendor.health ? (
+                          <span
+                            className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${getHealthBadgeClasses(
+                              vendor.health
+                            )}`}
+                          >
+                            {vendor.health}
+                          </span>
+                        ) : null}
+                      </div>
+                      {vendor.summary ? (
+                        <p className="text-xs leading-relaxed text-slate-600">{vendor.summary}</p>
+                      ) : null}
+                      <div className="grid gap-2 text-xs text-slate-500 sm:grid-cols-2">
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                          <p className="font-semibold text-slate-900">{vendor.focus}</p>
+                          <p className="text-[0.65rem] uppercase tracking-widest text-slate-500">Focus Area</p>
+                        </div>
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                          <p className="font-semibold text-slate-900">{vendor.campusesServed}</p>
+                          <p className="text-[0.65rem] uppercase tracking-widest text-slate-500">Campuses Served</p>
+                        </div>
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                          <p className="font-semibold text-slate-900">{vendor.teamSize}</p>
+                          <p className="text-[0.65rem] uppercase tracking-widest text-slate-500">Team Size</p>
+                        </div>
+                        {(() => {
+                          const latestInvoice = getLatestInvoiceForVendor(vendor);
+                          if (!latestInvoice) {
+                            return null;
+                          }
+                          return (
+                            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                              <p className="font-semibold text-slate-900">{latestInvoice.total}</p>
+                              <p className="text-[0.65rem] uppercase tracking-widest text-slate-500">
+                                Last invoice: {latestInvoice.month} {latestInvoice.year}
+                              </p>
+                            </div>
+                          );
+                        })()}
+                      </div>
                     </button>
                   ))}
                 </div>
               </div>
-              ) : activeInvoiceDetails ? (
+            ) : activeInvoiceDetails ? (
               <div className="space-y-6">
                 <div className="flex items-center justify-between">
                   <button
@@ -481,7 +712,15 @@ export default function DistrictDashboard() {
                     <p className="mt-1 text-sm text-slate-500">
                       Status: {activeInvoiceDetails.status} · Processed {activeInvoiceDetails.processedOn}
                     </p>
-                    <p className="text-xs text-slate-500">{selectedVendor.email} • {selectedVendor.phone}</p>
+                    {selectedVendor.manager ? (
+                      <p className="text-xs text-slate-500">
+                        Contact: {selectedVendor.manager}
+                        {selectedVendor.managerTitle ? `, ${selectedVendor.managerTitle}` : ""}
+                      </p>
+                    ) : null}
+                    <p className="text-xs text-slate-500">
+                      {selectedVendor.email} • {selectedVendor.phone}
+                    </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
                     <span className="inline-flex items-center rounded-full bg-slate-900 px-3 py-1 text-sm font-semibold text-white">
@@ -497,6 +736,42 @@ export default function DistrictDashboard() {
                     </a>
                   </div>
                 </div>
+
+                {vendorOverviewHighlights.length ? (
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">
+                        Partner Snapshot
+                      </p>
+                      {selectedVendor.health ? (
+                        <span
+                          className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${getHealthBadgeClasses(
+                            selectedVendor.health
+                          )}`}
+                        >
+                          {selectedVendor.health}
+                        </span>
+                      ) : null}
+                    </div>
+                    {selectedVendor.summary ? (
+                      <p className="mt-3 text-sm leading-relaxed text-slate-600">{selectedVendor.summary}</p>
+                    ) : null}
+                    <dl className="mt-4 grid gap-3 sm:grid-cols-3">
+                      {vendorOverviewHighlights.map((item) => (
+                        <div
+                          key={`${item.label}-${item.value}`}
+                          className="rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm"
+                        >
+                          <dt className="text-[0.65rem] uppercase tracking-widest text-slate-500">{item.label}</dt>
+                          <dd className="mt-1 text-sm font-semibold text-slate-900">{item.value}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                    {vendorContactSummary ? (
+                      <p className="mt-4 text-xs text-slate-500">{vendorContactSummary}</p>
+                    ) : null}
+                  </div>
+                ) : null}
 
                 <div className="space-y-3">
                   <h5 className="text-sm font-semibold uppercase tracking-wider text-slate-500">Student services</h5>
@@ -580,6 +855,42 @@ export default function DistrictDashboard() {
                     Back to vendors
                   </button>
                 </div>
+
+                {vendorOverviewHighlights.length ? (
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">
+                        Partner Snapshot
+                      </p>
+                      {selectedVendor.health ? (
+                        <span
+                          className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${getHealthBadgeClasses(
+                            selectedVendor.health
+                          )}`}
+                        >
+                          {selectedVendor.health}
+                        </span>
+                      ) : null}
+                    </div>
+                    {selectedVendor.summary ? (
+                      <p className="mt-3 text-sm leading-relaxed text-slate-600">{selectedVendor.summary}</p>
+                    ) : null}
+                    <dl className="mt-4 grid gap-3 sm:grid-cols-3">
+                      {vendorOverviewHighlights.map((item) => (
+                        <div
+                          key={`${item.label}-${item.value}`}
+                          className="rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm"
+                        >
+                          <dt className="text-[0.65rem] uppercase tracking-widest text-slate-500">{item.label}</dt>
+                          <dd className="mt-1 text-sm font-semibold text-slate-900">{item.value}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                    {vendorContactSummary ? (
+                      <p className="mt-4 text-xs text-slate-500">{vendorContactSummary}</p>
+                    ) : null}
+                  </div>
+                ) : null}
 
                 <div className="space-y-6">
                   {Object.entries(selectedVendor.invoices)
