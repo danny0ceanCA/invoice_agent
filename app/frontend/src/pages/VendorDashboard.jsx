@@ -10,6 +10,159 @@ import {
 } from "../api/vendors";
 import JobStatusCard from "./JobStatusCard";
 
+const PHONE_DIGIT_LENGTH = 10;
+const PHONE_INPUT_PATTERN = /^\(\d{3}\)-\d{3}-\d{4}$/;
+
+function stripPhoneNumber(value = "") {
+  return value.replace(/\D/g, "").slice(0, PHONE_DIGIT_LENGTH);
+}
+
+function formatPhoneNumberForDisplay(value = "") {
+  const digits = stripPhoneNumber(value);
+  if (digits.length !== PHONE_DIGIT_LENGTH) {
+    return value?.trim?.() ?? "";
+  }
+
+  const area = digits.slice(0, 3);
+  const prefix = digits.slice(3, 6);
+  const lineNumber = digits.slice(6);
+  return `(${area})-${prefix}-${lineNumber}`;
+}
+
+function formatPhoneNumberForInput(value = "") {
+  const digits = stripPhoneNumber(value);
+  if (digits.length === 0) return "";
+
+  const area = digits.slice(0, 3);
+  const prefix = digits.slice(3, 6);
+  const lineNumber = digits.slice(6, 10);
+
+  if (digits.length < 3) {
+    return `(${area}`;
+  }
+
+  if (digits.length === 3) {
+    return `(${area})`;
+  }
+
+  if (digits.length <= 6) {
+    return `(${area})-${prefix}`;
+  }
+
+  return `(${area})-${prefix}-${lineNumber}`;
+}
+
+function normalizeMultiline(value = "") {
+  return value
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line, index, arr) => line.length > 0 || index === arr.length - 1)
+    .join("\n")
+    .trim();
+}
+
+function normalizeProfileValues(values) {
+  const phoneDigits = stripPhoneNumber(values.phone_number);
+
+  return {
+    company_name: values.company_name.trim(),
+    contact_name: values.contact_name.trim(),
+    contact_email: values.contact_email.trim().toLowerCase(),
+    phone_number: phoneDigits,
+    remit_to_address: normalizeMultiline(values.remit_to_address),
+  };
+}
+
+function validateProfileValues(values) {
+  if (values.company_name.length < 2) {
+    return "Company name must be at least 2 characters.";
+  }
+
+  if (values.contact_name.length < 2 || !/^[\p{L} .'-]+$/u.test(values.contact_name)) {
+    return "Enter a valid primary contact name.";
+  }
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.contact_email)) {
+    return "Enter a valid primary contact email.";
+  }
+
+  if (values.phone_number.length !== PHONE_DIGIT_LENGTH) {
+    return "Enter a 10-digit phone number in the format (###)-###-####.";
+  }
+
+  if (values.remit_to_address.length < 5) {
+    return "Remit-to address must be at least 5 characters.";
+  }
+
+  return null;
+}
+
+const PROFILE_STEPS = [
+  {
+    id: "company",
+    title: "Company name",
+    description: "We use this on invoices and communications.",
+  },
+  {
+    id: "contactName",
+    title: "Primary contact name",
+    description: "Who's the best person for us to reach out to?",
+  },
+  {
+    id: "contactEmail",
+    title: "Primary contact email",
+    description: "We'll send confirmations and updates here.",
+  },
+  {
+    id: "phone",
+    title: "Phone number",
+    description: "Include a 10-digit number we can call with questions.",
+  },
+  {
+    id: "remitAddress",
+    title: "Remit-to address",
+    description: "Where should districts send payment?",
+  },
+];
+
+function validateStep(stepId, values) {
+  const normalized = normalizeProfileValues(values);
+
+  switch (stepId) {
+    case "company":
+      if (normalized.company_name.length < 2) {
+        return "Company name must be at least 2 characters.";
+      }
+      return null;
+    case "contactName":
+      if (
+        normalized.contact_name.length < 2 ||
+        !/^[\p{L} .'-]+$/u.test(normalized.contact_name)
+      ) {
+        return "Enter a valid primary contact name.";
+      }
+      return null;
+    case "contactEmail":
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized.contact_email)) {
+        return "Enter a valid primary contact email.";
+      }
+      return null;
+    case "phone":
+      if (normalized.phone_number.length !== PHONE_DIGIT_LENGTH) {
+        return "Enter a 10-digit phone number in the format (###)-###-####.";
+      }
+      return null;
+    case "remitAddress":
+      if (normalized.remit_to_address.length < 5) {
+        return "Remit-to address must be at least 5 characters.";
+      }
+      return null;
+    default:
+      return null;
+  }
+}
+
 function VendorProfileForm({
   initialValues,
   onSubmit,
@@ -18,39 +171,96 @@ function VendorProfileForm({
   error,
   disableCancel,
 }) {
-  const [formValues, setFormValues] = useState(initialValues);
+  const [formValues, setFormValues] = useState({
+    ...initialValues,
+    phone_number: formatPhoneNumberForInput(initialValues.phone_number),
+  });
+  const [validationError, setValidationError] = useState(null);
+  const [currentStep, setCurrentStep] = useState(0);
 
   useEffect(() => {
-    setFormValues(initialValues);
+    setFormValues({
+      ...initialValues,
+      phone_number: formatPhoneNumberForInput(initialValues.phone_number),
+    });
+    setValidationError(null);
+    setCurrentStep(0);
   }, [initialValues]);
 
   function handleChange(event) {
     const { name, value } = event.target;
+    if (name === "phone_number") {
+      setFormValues((previous) => ({
+        ...previous,
+        [name]: formatPhoneNumberForInput(value),
+      }));
+      return;
+    }
+
     setFormValues((previous) => ({ ...previous, [name]: value }));
   }
 
-  function handleSubmit(event) {
+  function handleFormSubmit(event) {
     event.preventDefault();
-    onSubmit({
-      company_name: formValues.company_name.trim(),
-      contact_name: formValues.contact_name.trim(),
-      contact_email: formValues.contact_email.trim(),
-      phone_number: formValues.phone_number.trim(),
-      remit_to_address: formValues.remit_to_address.trim(),
-    });
+    if (saving) {
+      return;
+    }
+    const step = PROFILE_STEPS[currentStep];
+
+    if (!step) {
+      return;
+    }
+
+    if (currentStep < PROFILE_STEPS.length - 1) {
+      const stepValidation = validateStep(step.id, formValues);
+      if (stepValidation) {
+        setValidationError(stepValidation);
+        return;
+      }
+
+      setValidationError(null);
+      setCurrentStep((previous) => previous + 1);
+      return;
+    }
+
+    const normalizedValues = normalizeProfileValues(formValues);
+    const validationMessage = validateProfileValues(normalizedValues);
+
+    if (validationMessage) {
+      setValidationError(validationMessage);
+      return;
+    }
+
+    setValidationError(null);
+    onSubmit(normalizedValues);
   }
+
+  const step = PROFILE_STEPS[currentStep];
+  const isFirstStep = currentStep === 0;
+  const isLastStep = currentStep === PROFILE_STEPS.length - 1;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 px-4 py-6">
       <div className="w-full max-w-2xl rounded-2xl bg-white p-6 shadow-xl">
-        <h2 className="text-lg font-semibold text-slate-900">Vendor profile</h2>
-        <p className="mt-1 text-sm text-slate-600">
-          We use this information on invoices and when we contact you about billing or
-          support. Please keep it up to date.
-        </p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">Vendor profile</h2>
+            <p className="mt-1 text-sm text-slate-600">
+              Complete these quick steps before entering the vendor workspace.
+            </p>
+          </div>
+          <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Step {currentStep + 1} of {PROFILE_STEPS.length}
+          </span>
+        </div>
 
-        <form className="mt-6 space-y-5" onSubmit={handleSubmit}>
-          <div className="grid gap-4 md:grid-cols-2">
+        <form className="mt-6 space-y-5" onSubmit={handleFormSubmit}>
+          <div>
+            <h3 className="text-base font-semibold text-slate-900">{step.title}</h3>
+            <p className="mt-1 text-sm text-slate-600">{step.description}</p>
+          </div>
+
+          {step.id === "company" ? (
             <label className="block text-sm font-medium text-slate-700">
               Company name
               <input
@@ -59,9 +269,13 @@ function VendorProfileForm({
                 value={formValues.company_name}
                 onChange={handleChange}
                 required
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
+                autoFocus
+                className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
               />
             </label>
+          ) : null}
+
+          {step.id === "contactName" ? (
             <label className="block text-sm font-medium text-slate-700">
               Primary contact name
               <input
@@ -70,12 +284,13 @@ function VendorProfileForm({
                 value={formValues.contact_name}
                 onChange={handleChange}
                 required
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
+                autoFocus
+                className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
               />
             </label>
-          </div>
+          ) : null}
 
-          <div className="grid gap-4 md:grid-cols-2">
+          {step.id === "contactEmail" ? (
             <label className="block text-sm font-medium text-slate-700">
               Primary contact email
               <input
@@ -84,9 +299,13 @@ function VendorProfileForm({
                 value={formValues.contact_email}
                 onChange={handleChange}
                 required
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
+                autoFocus
+                className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
               />
             </label>
+          ) : null}
+
+          {step.id === "phone" ? (
             <label className="block text-sm font-medium text-slate-700">
               Phone number
               <input
@@ -95,41 +314,77 @@ function VendorProfileForm({
                 value={formValues.phone_number}
                 onChange={handleChange}
                 required
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
+                pattern={PHONE_INPUT_PATTERN.source}
+                inputMode="tel"
+                placeholder="(555)-123-4567"
+                title="Enter a 10-digit phone number in the format (###)-###-####"
+                autoFocus
+                className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
               />
             </label>
-          </div>
+          ) : null}
 
-          <label className="block text-sm font-medium text-slate-700">
-            Remit-to address
-            <textarea
-              name="remit_to_address"
-              value={formValues.remit_to_address}
-              onChange={handleChange}
-              required
-              rows={4}
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
-            />
-          </label>
+          {step.id === "remitAddress" ? (
+            <label className="block text-sm font-medium text-slate-700">
+              Remit-to address
+              <textarea
+                name="remit_to_address"
+                value={formValues.remit_to_address}
+                onChange={handleChange}
+                required
+                rows={4}
+                autoFocus
+                className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
+              />
+            </label>
+          ) : null}
 
+          {validationError ? (
+            <p className="text-sm text-red-600">{validationError}</p>
+          ) : null}
           {error ? <p className="text-sm text-red-600">{error}</p> : null}
 
-          <div className="flex flex-wrap justify-end gap-3">
-            <button
-              type="button"
-              onClick={onCancel}
-              disabled={disableCancel || saving}
-              className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              Close
-            </button>
-            <button
-              type="submit"
-              disabled={saving}
-              className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white shadow transition hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {saving ? "Saving…" : "Save details"}
-            </button>
+          <div className="flex flex-wrap justify-between gap-3">
+            <div>
+              {disableCancel ? null : (
+                <button
+                  type="button"
+                  onClick={onCancel}
+                  disabled={saving}
+                  className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Close
+                </button>
+              )}
+            </div>
+
+            <div className="flex flex-wrap gap-3">
+              {!isFirstStep ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setValidationError(null);
+                    setCurrentStep((previous) => Math.max(previous - 1, 0));
+                  }}
+                  disabled={saving}
+                  className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Back
+                </button>
+              ) : null}
+
+              <button
+                type="submit"
+                disabled={saving}
+                className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white shadow transition hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {saving
+                  ? "Saving…"
+                  : isLastStep
+                    ? "Save details"
+                    : "Next"}
+              </button>
+            </div>
           </div>
         </form>
       </div>
@@ -184,9 +439,6 @@ export default function VendorDashboard({ vendorId }) {
     try {
       const token = await getAccessTokenSilently();
       const profile = await fetchVendorProfile(token);
-
-      // 👇 Debug log to inspect the API data
-      console.log("Vendor profile received:", profile);
 
       setVendorProfile(profile);
       return profile;
@@ -327,7 +579,7 @@ export default function VendorDashboard({ vendorId }) {
     company_name: vendorProfile?.company_name ?? "",
     contact_name: vendorProfile?.contact_name ?? "",
     contact_email: vendorProfile?.contact_email ?? "",
-    phone_number: vendorProfile?.phone_number ?? "",
+    phone_number: formatPhoneNumberForDisplay(vendorProfile?.phone_number ?? ""),
     remit_to_address: vendorProfile?.remit_to_address ?? "",
   };
 
@@ -375,7 +627,11 @@ export default function VendorDashboard({ vendorId }) {
                       {vendorProfile.contact_name || "Add a contact"}
                     </p>
                     <p>{vendorProfile.contact_email || "Add an email"}</p>
-                    <p>{vendorProfile.phone_number || "Add a phone number"}</p>
+                    <p>
+                      {vendorProfile.phone_number
+                        ? formatPhoneNumberForDisplay(vendorProfile.phone_number)
+                        : "Add a phone number"}
+                    </p>
                   </div>
                   <div>
                     <p className="text-xs uppercase tracking-wide text-slate-500">
