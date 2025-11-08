@@ -18,6 +18,7 @@ def read_current_user(current_user: User = Depends(get_current_user)) -> dict[st
         "name": current_user.name,
         "role": current_user.role,
         "vendor_id": current_user.vendor_id,
+        "district_id": getattr(current_user, "district_id", None),
         "auth0_sub": current_user.auth0_sub,
         "needs_role_selection": current_user.role is None,
     }

@@ -97,6 +97,10 @@ def test_list_pending_users_endpoint_filters_results(client: TestClient, seeded_
             "role": "vendor",
             "is_approved": False,
             "is_active": True,
+            "vendor_id": None,
+            "vendor_company_name": None,
+            "district_id": None,
+            "district_company_name": None,
         }
     ]
 

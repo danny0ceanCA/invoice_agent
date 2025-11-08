@@ -18,6 +18,7 @@ export interface CurrentUserResponse {
   name: string;
   role: UserRole | null;
   vendor_id: number | null;
+  district_id: number | null;
   auth0_sub: string | null;
   needs_role_selection: boolean;
 }

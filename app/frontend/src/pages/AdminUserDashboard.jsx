@@ -17,7 +17,15 @@ function normalizeUserShape(user) {
   if (!user) return user;
   const isApproved = user.is_approved ?? user.approved ?? false;
   const isActive = user.is_active ?? user.active ?? false;
-  return { ...user, is_approved: isApproved, is_active: isActive };
+  const vendorCompany = user.vendor_company_name ?? user.vendorCompanyName ?? null;
+  const districtCompany = user.district_company_name ?? user.districtCompanyName ?? null;
+  return {
+    ...user,
+    is_approved: isApproved,
+    is_active: isActive,
+    vendor_company_name: vendorCompany,
+    district_company_name: districtCompany,
+  };
 }
 
 const TABS = [
@@ -236,7 +244,8 @@ export default function AdminUserDashboard() {
           <table className="w-full border-separate border-spacing-y-2 text-left">
             <thead>
               <tr className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                <th className="rounded-l-lg bg-slate-50 px-4 py-2">Email</th>
+                <th className="rounded-l-lg bg-slate-50 px-4 py-2">Account</th>
+                <th className="bg-slate-50 px-4 py-2">Company</th>
                 <th className="bg-slate-50 px-4 py-2">Role</th>
                 <th className="bg-slate-50 px-4 py-2">Approved</th>
                 <th className="bg-slate-50 px-4 py-2">Active</th>
@@ -248,11 +257,41 @@ export default function AdminUserDashboard() {
                 const isApproved = Boolean(user.is_approved);
                 const isActive = Boolean(user.is_active);
                 const isBusy = isUserBusy(user.id);
+                const hasVendorCompany = Boolean(user.vendor_company_name);
+                const hasDistrictCompany = Boolean(user.district_company_name);
 
                 return (
                   <tr key={user.id} className="rounded-lg bg-white shadow-sm">
                     <td className="rounded-l-lg px-4 py-3 text-sm font-medium text-slate-900">
-                      {user.email}
+                      <div className="space-y-1">
+                        <p className="font-semibold text-slate-900">{user.email}</p>
+                        {user.name ? (
+                          <p className="text-xs font-normal text-slate-500">{user.name}</p>
+                        ) : null}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-sm text-slate-600">
+                      <div className="space-y-2">
+                        {hasVendorCompany ? (
+                          <div className="flex items-center gap-2">
+                            <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[0.65rem] font-semibold uppercase tracking-widest text-emerald-600">
+                              Vendor
+                            </span>
+                            <span className="text-sm font-medium text-slate-700">{user.vendor_company_name}</span>
+                          </div>
+                        ) : null}
+                        {hasDistrictCompany ? (
+                          <div className="flex items-center gap-2">
+                            <span className="inline-flex items-center rounded-full bg-sky-50 px-2 py-0.5 text-[0.65rem] font-semibold uppercase tracking-widest text-sky-600">
+                              District
+                            </span>
+                            <span className="text-sm font-medium text-slate-700">{user.district_company_name}</span>
+                          </div>
+                        ) : null}
+                        {!hasVendorCompany && !hasDistrictCompany ? (
+                          <p className="text-xs text-slate-400">No company linked</p>
+                        ) : null}
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-sm text-slate-600">
                       <select

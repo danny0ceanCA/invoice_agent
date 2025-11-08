@@ -74,7 +74,7 @@ export function App() {
     }
 
     if (profile.role === "district") {
-      return <DistrictDashboard />;
+      return <DistrictDashboard districtId={profile.district_id ?? null} />;
     }
 
     if (profile.role === "admin") {
