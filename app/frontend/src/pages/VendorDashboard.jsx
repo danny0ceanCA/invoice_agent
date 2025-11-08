@@ -10,6 +10,94 @@ import {
 } from "../api/vendors";
 import JobStatusCard from "./JobStatusCard";
 
+const PHONE_DIGIT_LENGTH = 10;
+const PHONE_INPUT_PATTERN = /^\(\d{3}\)-\d{3}-\d{4}$/;
+
+function stripPhoneNumber(value = "") {
+  return value.replace(/\D/g, "").slice(0, PHONE_DIGIT_LENGTH);
+}
+
+function formatPhoneNumberForDisplay(value = "") {
+  const digits = stripPhoneNumber(value);
+  if (digits.length !== PHONE_DIGIT_LENGTH) {
+    return value?.trim?.() ?? "";
+  }
+
+  const area = digits.slice(0, 3);
+  const prefix = digits.slice(3, 6);
+  const lineNumber = digits.slice(6);
+  return `(${area})-${prefix}-${lineNumber}`;
+}
+
+function formatPhoneNumberForInput(value = "") {
+  const digits = stripPhoneNumber(value);
+  if (digits.length === 0) return "";
+
+  const area = digits.slice(0, 3);
+  const prefix = digits.slice(3, 6);
+  const lineNumber = digits.slice(6, 10);
+
+  if (digits.length < 3) {
+    return `(${area}`;
+  }
+
+  if (digits.length === 3) {
+    return `(${area})`;
+  }
+
+  if (digits.length <= 6) {
+    return `(${area})-${prefix}`;
+  }
+
+  return `(${area})-${prefix}-${lineNumber}`;
+}
+
+function normalizeMultiline(value = "") {
+  return value
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line, index, arr) => line.length > 0 || index === arr.length - 1)
+    .join("\n")
+    .trim();
+}
+
+function normalizeProfileValues(values) {
+  const phoneDigits = stripPhoneNumber(values.phone_number);
+
+  return {
+    company_name: values.company_name.trim(),
+    contact_name: values.contact_name.trim(),
+    contact_email: values.contact_email.trim().toLowerCase(),
+    phone_number: phoneDigits,
+    remit_to_address: normalizeMultiline(values.remit_to_address),
+  };
+}
+
+function validateProfileValues(values) {
+  if (values.company_name.length < 2) {
+    return "Company name must be at least 2 characters.";
+  }
+
+  if (values.contact_name.length < 2 || !/^[\p{L} .'-]+$/u.test(values.contact_name)) {
+    return "Enter a valid primary contact name.";
+  }
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.contact_email)) {
+    return "Enter a valid primary contact email.";
+  }
+
+  if (values.phone_number.length !== PHONE_DIGIT_LENGTH) {
+    return "Enter a 10-digit phone number in the format (###)-###-####.";
+  }
+
+  if (values.remit_to_address.length < 5) {
+    return "Remit-to address must be at least 5 characters.";
+  }
+
+  return null;
+}
+
 function VendorProfileForm({
   initialValues,
   onSubmit,
@@ -18,26 +106,45 @@ function VendorProfileForm({
   error,
   disableCancel,
 }) {
-  const [formValues, setFormValues] = useState(initialValues);
+  const [formValues, setFormValues] = useState({
+    ...initialValues,
+    phone_number: formatPhoneNumberForInput(initialValues.phone_number),
+  });
+  const [validationError, setValidationError] = useState(null);
 
   useEffect(() => {
-    setFormValues(initialValues);
+    setFormValues({
+      ...initialValues,
+      phone_number: formatPhoneNumberForInput(initialValues.phone_number),
+    });
+    setValidationError(null);
   }, [initialValues]);
 
   function handleChange(event) {
     const { name, value } = event.target;
+    if (name === "phone_number") {
+      setFormValues((previous) => ({
+        ...previous,
+        [name]: formatPhoneNumberForInput(value),
+      }));
+      return;
+    }
+
     setFormValues((previous) => ({ ...previous, [name]: value }));
   }
 
   function handleSubmit(event) {
     event.preventDefault();
-    onSubmit({
-      company_name: formValues.company_name.trim(),
-      contact_name: formValues.contact_name.trim(),
-      contact_email: formValues.contact_email.trim(),
-      phone_number: formValues.phone_number.trim(),
-      remit_to_address: formValues.remit_to_address.trim(),
-    });
+    const normalizedValues = normalizeProfileValues(formValues);
+    const validationMessage = validateProfileValues(normalizedValues);
+
+    if (validationMessage) {
+      setValidationError(validationMessage);
+      return;
+    }
+
+    setValidationError(null);
+    onSubmit(normalizedValues);
   }
 
   return (
@@ -95,6 +202,10 @@ function VendorProfileForm({
                 value={formValues.phone_number}
                 onChange={handleChange}
                 required
+                pattern={PHONE_INPUT_PATTERN.source}
+                inputMode="tel"
+                placeholder="(555)-123-4567"
+                title="Enter a 10-digit phone number in the format (###)-###-####"
                 className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
               />
             </label>
@@ -112,17 +223,22 @@ function VendorProfileForm({
             />
           </label>
 
+          {validationError ? (
+            <p className="text-sm text-red-600">{validationError}</p>
+          ) : null}
           {error ? <p className="text-sm text-red-600">{error}</p> : null}
 
           <div className="flex flex-wrap justify-end gap-3">
-            <button
-              type="button"
-              onClick={onCancel}
-              disabled={disableCancel || saving}
-              className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              Close
-            </button>
+            {disableCancel ? null : (
+              <button
+                type="button"
+                onClick={onCancel}
+                disabled={saving}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Close
+              </button>
+            )}
             <button
               type="submit"
               disabled={saving}
@@ -327,7 +443,7 @@ export default function VendorDashboard({ vendorId }) {
     company_name: vendorProfile?.company_name ?? "",
     contact_name: vendorProfile?.contact_name ?? "",
     contact_email: vendorProfile?.contact_email ?? "",
-    phone_number: vendorProfile?.phone_number ?? "",
+    phone_number: formatPhoneNumberForDisplay(vendorProfile?.phone_number ?? ""),
     remit_to_address: vendorProfile?.remit_to_address ?? "",
   };
 
@@ -375,7 +491,11 @@ export default function VendorDashboard({ vendorId }) {
                       {vendorProfile.contact_name || "Add a contact"}
                     </p>
                     <p>{vendorProfile.contact_email || "Add an email"}</p>
-                    <p>{vendorProfile.phone_number || "Add a phone number"}</p>
+                    <p>
+                      {vendorProfile.phone_number
+                        ? formatPhoneNumberForDisplay(vendorProfile.phone_number)
+                        : "Add a phone number"}
+                    </p>
                   </div>
                   <div>
                     <p className="text-xs uppercase tracking-wide text-slate-500">
