@@ -14,18 +14,10 @@ import {
 } from "../api/adminUsers";
 
 function normalizeUserShape(user) {
-  if (!user) {
-    return user;
-  }
-
+  if (!user) return user;
   const isApproved = user.is_approved ?? user.approved ?? false;
   const isActive = user.is_active ?? user.active ?? false;
-
-  return {
-    ...user,
-    is_approved: isApproved,
-    is_active: isActive,
-  };
+  return { ...user, is_approved: isApproved, is_active: isActive };
 }
 
 const TABS = [
@@ -51,17 +43,13 @@ export default function AdminUserDashboard() {
 
   const isUserBusy = useCallback(
     (userId) => busyUserIds.includes(userId),
-    [busyUserIds],
+    [busyUserIds]
   );
 
   const updateBusyState = useCallback((userId, busy) => {
     setBusyUserIds((prev) => {
       const next = new Set(prev);
-      if (busy) {
-        next.add(userId);
-      } else {
-        next.delete(userId);
-      }
+      busy ? next.add(userId) : next.delete(userId);
       return Array.from(next);
     });
   }, []);
@@ -75,8 +63,8 @@ export default function AdminUserDashboard() {
         listUsers(token),
         listPendingUsers(token),
       ]);
-      setUsers(usersResponse.map((user) => normalizeUserShape(user)));
-      setPendingUsers(pendingResponse.map((user) => normalizeUserShape(user)));
+      setUsers(usersResponse.map(normalizeUserShape));
+      setPendingUsers(pendingResponse.map(normalizeUserShape));
     } catch (err) {
       console.error("admin_users_load_failed", err);
       setError("We couldn't load user accounts. Please try again.");
@@ -86,25 +74,18 @@ export default function AdminUserDashboard() {
   }, [getAccessTokenSilently]);
 
   useEffect(() => {
-    loadUsers().catch(() => {
-      /* handled in loadUsers */
-    });
+    loadUsers().catch(() => {});
   }, [loadUsers]);
 
   const displayedUsers = useMemo(() => {
-    if (activeTab === "pending") {
-      return pendingUsers;
-    }
-    if (activeTab === "deactivated") {
+    if (activeTab === "pending") return pendingUsers;
+    if (activeTab === "deactivated")
       return users.filter((user) => user.is_active === false);
-    }
 
     const combinedUsers = [...users];
-    const knownUserIds = new Set(combinedUsers.map((user) => user.id));
-    pendingUsers.forEach((pendingUser) => {
-      if (!knownUserIds.has(pendingUser.id)) {
-        combinedUsers.push(pendingUser);
-      }
+    const knownUserIds = new Set(combinedUsers.map((u) => u.id));
+    pendingUsers.forEach((p) => {
+      if (!knownUserIds.has(p.id)) combinedUsers.push(p);
     });
     return combinedUsers;
   }, [activeTab, pendingUsers, users]);
@@ -112,31 +93,18 @@ export default function AdminUserDashboard() {
   const handleApprove = async (userId) => {
     const token = await getAccessTokenSilently();
     updateBusyState(userId, true);
-
     try {
       const { user: approvedUser } = await approveUser(userId, token);
-      const normalizedApprovedUser = normalizeUserShape(approvedUser);
-
+      const normalized = normalizeUserShape(approvedUser);
       setUsers((current) =>
-        current.map((user) => {
-          if (user.id !== userId) {
-            return user;
-          }
-
-          return {
-            ...user,
-            role: normalizedApprovedUser?.role ?? user.role,
-            is_approved: normalizedApprovedUser?.is_approved ?? true,
-            is_active: normalizedApprovedUser?.is_active ?? true,
-          };
-        }),
+        current.map((u) =>
+          u.id === userId
+            ? { ...u, ...normalized, is_approved: true, is_active: true }
+            : u
+        )
       );
-
-      setPendingUsers((current) =>
-        current.filter((pendingUser) => pendingUser.id !== userId),
-      );
-
-      toast.success("✅ User approved successfully");
+      setPendingUsers((current) => current.filter((u) => u.id !== userId));
+      toast.success("User approved successfully");
     } catch (err) {
       console.error("user_approve_failed", err);
       toast.error("We couldn't approve the user. Please try again.");
@@ -148,23 +116,17 @@ export default function AdminUserDashboard() {
   const handleRoleChange = async (userId, role) => {
     const token = await getAccessTokenSilently();
     updateBusyState(userId, true);
-
-    const previousUsers = [...users];
+    const prev = [...users];
     setUsers((current) =>
-      current.map((user) =>
-        user.id === userId
-          ? { ...user, role }
-          : user,
-      ),
+      current.map((u) => (u.id === userId ? { ...u, role } : u))
     );
-
     try {
       await updateUserRole(userId, role, token);
       toast.success("Role updated");
     } catch (err) {
       console.error("user_role_update_failed", err);
       toast.error("We couldn't update the role. Please try again.");
-      setUsers(previousUsers);
+      setUsers(prev);
     } finally {
       updateBusyState(userId, false);
     }
@@ -173,16 +135,13 @@ export default function AdminUserDashboard() {
   const handleDeactivate = async (userId) => {
     const token = await getAccessTokenSilently();
     updateBusyState(userId, true);
-
     try {
       const response = await deactivateUser(userId, token);
-      const normalizedUser = normalizeUserShape(response);
+      const normalized = normalizeUserShape(response);
       setUsers((current) =>
-        current.map((user) =>
-          user.id === userId
-            ? { ...user, is_active: normalizedUser?.is_active ?? false }
-            : user,
-        ),
+        current.map((u) =>
+          u.id === userId ? { ...u, is_active: normalized?.is_active ?? false } : u
+        )
       );
       toast.success("User deactivated");
     } catch (err) {
@@ -193,40 +152,25 @@ export default function AdminUserDashboard() {
     }
   };
 
-  const handleDecline = async (userId, email) => {
+  const handleDecline = async (userId) => {
     const confirmed = window.confirm(
-      "Are you sure you want to decline this user?",
+      "Are you sure you want to decline this user?"
     );
-
-    if (!confirmed) {
-      return;
-    }
+    if (!confirmed) return;
 
     const token = await getAccessTokenSilently();
     updateBusyState(userId, true);
-
     try {
       const { user: declinedUser, message } = await declineUser(userId, token);
-      const normalizedDeclinedUser = normalizeUserShape(declinedUser);
-
+      const normalized = normalizeUserShape(declinedUser);
       setUsers((current) =>
-        current.map((user) => {
-          if (user.id !== userId) {
-            return user;
-          }
-
-          return {
-            ...user,
-            is_active: normalizedDeclinedUser?.is_active ?? false,
-            is_approved: normalizedDeclinedUser?.is_approved ?? false,
-          };
-        }),
+        current.map((u) =>
+          u.id === userId
+            ? { ...u, is_active: normalized?.is_active ?? false, is_approved: false }
+            : u
+        )
       );
-
-      setPendingUsers((current) =>
-        current.filter((pendingUser) => pendingUser.id !== userId),
-      );
-
+      setPendingUsers((current) => current.filter((u) => u.id !== userId));
       toast.success(message ?? "User declined successfully.");
     } catch (err) {
       console.error("user_decline_failed", err);
@@ -243,16 +187,13 @@ export default function AdminUserDashboard() {
           <Link
             to="/"
             className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
-            aria-label="Return to the admin console"
           >
-            <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-            Back to Admin Console
+            <ArrowLeft className="h-4 w-4" /> Back to Admin Console
           </Link>
           <button
             type="button"
             onClick={() => loadUsers()}
             className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
-            aria-label="Refresh user list"
           >
             Refresh
           </button>
@@ -276,47 +217,16 @@ export default function AdminUserDashboard() {
                 ? "bg-slate-900 text-white shadow"
                 : "bg-slate-100 text-slate-600 hover:bg-slate-200"
             }`}
-            aria-pressed={activeTab === tab.id}
           >
             {tab.label}
           </button>
         ))}
       </div>
 
-      <div
-        className="relative overflow-x-auto rounded-lg border border-slate-200 bg-white p-4 shadow-sm"
-        aria-busy={loading || busyUserIds.length > 0}
-      >
-        {(loading || busyUserIds.length > 0) && (
-          <div
-            className="absolute inset-0 z-10 flex items-center justify-center bg-white/70 backdrop-blur-sm"
-            aria-hidden={loading ? undefined : "true"}
-          >
-            <svg
-              className="h-8 w-8 animate-spin text-indigo-600"
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              role="presentation"
-            >
-              <circle
-                className="opacity-25"
-                cx="12"
-                cy="12"
-                r="10"
-                stroke="currentColor"
-                strokeWidth="4"
-              ></circle>
-              <path
-                className="opacity-75"
-                fill="currentColor"
-                d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
-              ></path>
-            </svg>
-          </div>
-        )}
-
-        {error ? (
+      <div className="relative overflow-x-auto rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        {loading ? (
+          <div className="text-center text-slate-500 py-8">Loading users...</div>
+        ) : error ? (
           <div className="text-sm text-red-600">{error}</div>
         ) : displayedUsers.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 py-8 text-center text-sm text-slate-500">
@@ -335,74 +245,69 @@ export default function AdminUserDashboard() {
             </thead>
             <tbody>
               {displayedUsers.map((user) => {
-                const isApproved = Boolean(
-                  user.is_approved ?? user.approved ?? false,
-                );
-                const isActive = Boolean(
-                  user.is_active ?? user.active ?? false,
-                );
+                const isApproved = Boolean(user.is_approved);
+                const isActive = Boolean(user.is_active);
                 const isBusy = isUserBusy(user.id);
 
                 return (
                   <tr key={user.id} className="rounded-lg bg-white shadow-sm">
-                    <td className="rounded-l-lg px-4 py-3 text-sm font-medium text-slate-900">{user.email}</td>
+                    <td className="rounded-l-lg px-4 py-3 text-sm font-medium text-slate-900">
+                      {user.email}
+                    </td>
                     <td className="px-4 py-3 text-sm text-slate-600">
-                      <label className="sr-only" htmlFor={`role-${user.id}`}>
-                        Change role for {user.email}
-                      </label>
                       <select
                         id={`role-${user.id}`}
                         className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
                         value={user.role ?? ""}
-                        onChange={(event) => {
-                          const nextRole = event.target.value;
-                          if (nextRole && nextRole !== user.role) {
+                        onChange={(e) => {
+                          const nextRole = e.target.value;
+                          if (nextRole && nextRole !== user.role)
                             handleRoleChange(user.id, nextRole).catch(() => {});
-                          }
                         }}
                         disabled={isBusy}
-                        aria-label={`Change role for ${user.email}`}
                       >
                         <option value="" disabled>
                           Select role
                         </option>
-                        {ROLE_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
+                        {ROLE_OPTIONS.map((opt) => (
+                          <option key={opt.value} value={opt.value}>
+                            {opt.label}
                           </option>
                         ))}
                       </select>
                     </td>
                     <td className="px-4 py-3 text-sm text-slate-600">
                       {isApproved ? (
-                        <span className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
+                        <span className="inline-flex items-center rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
                           Approved
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-2 rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700">
+                        <span className="inline-flex items-center rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700">
                           Pending Approval
                         </span>
                       )}
                     </td>
                     <td className="px-4 py-3 text-sm text-slate-600">
                       {isActive ? (
-                        <span className="inline-flex items-center gap-2 rounded-full bg-sky-50 px-3 py-1 text-xs font-medium text-sky-700">
+                        <span className="inline-flex items-center rounded-full bg-sky-50 px-3 py-1 text-xs font-medium text-sky-700">
                           Active
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-500">
+                        <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-500">
                           Inactive
                         </span>
                       )}
                     </td>
-                    <td className="flex flex-wrap items-center justify-end gap-2 rounded-r-lg px-4 py-3 text-sm">
+
+                    {/* ACTIONS */}
+                    <td className="flex justify-end items-center gap-3 px-4 py-3 rounded-r-lg bg-white">
                       {isApproved ? (
                         <button
                           type="button"
                           onClick={() => handleDeactivate(user.id)}
-                          className="rounded-lg border border-red-600 bg-red-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-offset-2"
+                          className="inline-flex items-center justify-center font-bold px-3 py-2 rounded-md shadow-md border transition-colors !bg-red-600 hover:!bg-red-700 !text-white !border-red-700"
+                          style={{ backgroundColor: "#dc2626", color: "#fff" }}
                           disabled={isBusy || !isActive}
-                          aria-label={`Deactivate ${user.email}`}
                         >
                           Deactivate
                         </button>
@@ -411,18 +316,18 @@ export default function AdminUserDashboard() {
                           <button
                             type="button"
                             onClick={() => handleApprove(user.id)}
-                            className="rounded-lg border border-emerald-600 bg-emerald-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-200 focus:ring-offset-2"
+                            className="inline-flex items-center justify-center font-bold px-3 py-2 rounded-md shadow-md border transition-colors !bg-green-600 hover:!bg-green-700 !text-white !border-green-700"
+                            style={{ backgroundColor: "#16a34a", color: "#fff" }}
                             disabled={isBusy}
-                            aria-label={`Approve ${user.email}`}
                           >
                             Approve
                           </button>
                           <button
                             type="button"
-                            onClick={() => handleDecline(user.id, user.email)}
-                            className="rounded-lg border border-red-600 bg-red-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-200 focus:ring-offset-2"
+                            onClick={() => handleDecline(user.id)}
+                            className="inline-flex items-center justify-center font-bold px-3 py-2 rounded-md shadow-md border transition-colors !bg-red-600 hover:!bg-red-700 !text-white !border-red-700"
+                            style={{ backgroundColor: "#dc2626", color: "#fff" }}
                             disabled={isBusy}
-                            aria-label={`Decline ${user.email}`}
                           >
                             Decline
                           </button>
@@ -439,4 +344,3 @@ export default function AdminUserDashboard() {
     </div>
   );
 }
-
