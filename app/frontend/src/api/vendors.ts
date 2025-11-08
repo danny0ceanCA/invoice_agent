@@ -8,6 +8,8 @@ export interface VendorProfile {
   phone_number: string | null;
   remit_to_address: string | null;
   is_profile_complete: boolean;
+  district_company_name: string | null;
+  is_district_linked: boolean;
 }
 
 export interface VendorProfilePayload {
@@ -16,6 +18,7 @@ export interface VendorProfilePayload {
   contact_email: string;
   phone_number: string;
   remit_to_address: string;
+  district_key: string | null;
 }
 
 async function vendorFetch<T>(

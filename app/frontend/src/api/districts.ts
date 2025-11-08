@@ -7,6 +7,7 @@ export interface DistrictProfile {
   contact_email: string | null;
   phone_number: string | null;
   mailing_address: string | null;
+  district_key: string;
   is_profile_complete: boolean;
 }
 
