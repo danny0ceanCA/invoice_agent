@@ -812,6 +812,17 @@ export default function DistrictDashboard({ districtId = null }) {
                       ) : (
                         <p>Add a mailing address</p>
                       )}
+                      <div className="mt-4 rounded-xl border border-dashed border-amber-300 bg-amber-50 p-4 text-amber-800">
+                        <p className="text-xs font-semibold uppercase tracking-widest text-amber-600">
+                          District access key
+                        </p>
+                        <p className="mt-2 font-mono text-lg font-semibold text-amber-900">
+                          {districtProfile.district_key}
+                        </p>
+                        <p className="mt-1 text-xs text-amber-700">
+                          Share this key only with trusted vendors so their invoices route to your district.
+                        </p>
+                      </div>
                     </div>
                   </div>
                   <div className="flex flex-col items-end gap-2">

@@ -60,11 +60,14 @@ def _is_approved_status(status: str) -> bool:
     return "approved" in normalized or "paid" in normalized
 
 
-def fetch_district_vendor_overview(session: Session) -> DistrictVendorOverview:
+def fetch_district_vendor_overview(
+    session: Session, district_id: int
+) -> DistrictVendorOverview:
     """Return vendor data ready for district consumption."""
 
     vendors = (
         session.query(Vendor)
+        .filter(Vendor.district_id == district_id)
         .options(selectinload(Vendor.invoices).selectinload(Invoice.line_items))
         .order_by(Vendor.company_name.asc())
         .all()

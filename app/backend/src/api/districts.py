@@ -27,6 +27,7 @@ def _serialize_district(district: District) -> DistrictProfile:
         district.contact_email,
         district.phone_number,
         district.mailing_address,
+        district.district_key,
     ]
     is_complete = all(
         isinstance(value, str) and value.strip() for value in required_fields
@@ -39,6 +40,7 @@ def _serialize_district(district: District) -> DistrictProfile:
         contact_email=district.contact_email,
         phone_number=district.phone_number,
         mailing_address=district.mailing_address,
+        district_key=district.district_key,
         is_profile_complete=is_complete,
     )
 
@@ -107,11 +109,18 @@ def update_district_profile(
 @router.get("/vendors", response_model=DistrictVendorOverview)
 def list_vendor_overview(
     session: Session = Depends(get_session_dependency),
-    _: User = Depends(require_district_user),
+    current_user: User = Depends(require_district_user),
 ) -> DistrictVendorOverview:
     """Return vendor performance data for district reviewers."""
 
-    return fetch_district_vendor_overview(session)
+    district_id = current_user.district_id
+    if district_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="District profile not found",
+        )
+
+    return fetch_district_vendor_overview(session, district_id)
 
 
 __all__ = ["router"]

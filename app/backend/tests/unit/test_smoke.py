@@ -60,6 +60,27 @@ def vendor_and_user() -> tuple[int, int]:
             session.add(vendor)
             session.flush()
 
+        district = (
+            session.query(District)
+            .filter(District.company_name == "Test District")
+            .one_or_none()
+        )
+        if district is None:
+            district = District(
+                company_name="Test District",
+                contact_email="district@example.com",
+                contact_name="District Admin",
+                phone_number="555-555-0000",
+                mailing_address="200 District Ave\nSacramento, CA 95814",
+            )
+            session.add(district)
+            session.flush()
+
+        if vendor.district_id is not None:
+            vendor.district_id = None
+            session.add(vendor)
+            session.flush()
+
         user = (
             session.query(User)
             .filter(User.email == "user@example.com")
@@ -186,6 +207,14 @@ def test_vendor_profile_endpoints(
 
     app.dependency_overrides[get_current_user] = override_current_user
 
+    with session_scope() as session:
+        district = (
+            session.query(District)
+            .filter(District.company_name == "Test District")
+            .one()
+        )
+        district_key = district.district_key
+
     payload = {
         "company_name": "Responsive Healthcare Associates",
         "contact_name": "Regina Martinez",
@@ -199,12 +228,20 @@ def test_vendor_profile_endpoints(
         assert response.status_code == 200
         data = response.json()
         assert data["company_name"] == "Test Vendor"
+        assert data["is_district_linked"] is False
+
+        response = client.put("/api/vendors/me", json=payload)
+        assert response.status_code == 400
+
+        payload["district_key"] = district_key
 
         response = client.put("/api/vendors/me", json=payload)
         assert response.status_code == 200
         updated = response.json()
         assert updated["company_name"] == payload["company_name"]
         assert updated["contact_name"] == payload["contact_name"]
+        assert updated["district_company_name"] == district.company_name
+        assert updated["is_district_linked"] is True
         assert updated["is_profile_complete"] is True
     finally:
         app.dependency_overrides.pop(get_current_user, None)
@@ -214,6 +251,7 @@ def test_vendor_profile_endpoints(
         assert vendor is not None
         assert vendor.company_name == payload["company_name"]
         assert vendor.contact_name == payload["contact_name"]
+        assert vendor.district_id == district.id
 
 
 def test_district_profile_endpoints(
@@ -243,12 +281,14 @@ def test_district_profile_endpoints(
         assert response.status_code == 200
         data = response.json()
         assert data["company_name"] == "Test District"
+        assert data["district_key"]
 
         response = client.put("/api/districts/me", json=payload)
         assert response.status_code == 200
         updated = response.json()
         assert updated["company_name"] == payload["company_name"]
         assert updated["is_profile_complete"] is True
+        assert updated["district_key"] == data["district_key"]
     finally:
         app.dependency_overrides.pop(get_current_user, None)
 
@@ -268,6 +308,16 @@ def test_district_vendor_overview(
     _, district_user_id = district_and_user
 
     with session_scope() as session:
+        district = (
+            session.query(District)
+            .filter(District.company_name == "Test District")
+            .one()
+        )
+        vendor = session.get(Vendor, vendor_id)
+        assert vendor is not None
+        vendor.district_id = district.id
+        session.add(vendor)
+
         invoice = Invoice(
             vendor_id=vendor_id,
             upload_id=None,

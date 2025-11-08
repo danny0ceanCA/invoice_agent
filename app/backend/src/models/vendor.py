@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import String, Text
+from sqlalchemy import ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
@@ -21,9 +21,15 @@ class Vendor(Base):
     contact_email: Mapped[str] = mapped_column(String(255), nullable=False)
     phone_number: Mapped[str | None] = mapped_column(String(50), nullable=True)
     remit_to_address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    district_id: Mapped[int | None] = mapped_column(
+        ForeignKey("districts.id"), nullable=True, index=True
+    )
 
     users: Mapped[list["User"]] = relationship("User", back_populates="vendor")
     datasets: Mapped[list["DatasetProfile"]] = relationship("DatasetProfile", back_populates="vendor")
     uploads: Mapped[list["Upload"]] = relationship("Upload", back_populates="vendor")
     invoices: Mapped[list["Invoice"]] = relationship("Invoice", back_populates="vendor")
     jobs: Mapped[list["Job"]] = relationship("Job", back_populates="vendor")
+    district: Mapped["District | None"] = relationship(
+        "District", back_populates="vendors"
+    )

@@ -16,6 +16,7 @@ class DistrictProfile(BaseModel):
     contact_email: EmailStr | None
     phone_number: str | None
     mailing_address: str | None
+    district_key: str
     is_profile_complete: bool
 
     model_config = ConfigDict(from_attributes=True)
