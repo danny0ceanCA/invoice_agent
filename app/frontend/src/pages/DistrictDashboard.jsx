@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useAuth0 } from "@auth0/auth0-react";
+import toast from "react-hot-toast";
+
+import {
+  fetchDistrictProfile,
+  fetchDistrictVendors,
+  updateDistrictProfile,
+} from "../api/districts";
 
 const menuItems = [
   {
@@ -64,22 +72,32 @@ const parseCurrencyValue = (value) => {
   return Number.isFinite(numeric) ? numeric : 0;
 };
 
-const collectVendorInvoices = (profiles) => {
-  return profiles.flatMap((vendor) =>
+const collectVendorInvoices = (profiles) =>
+  profiles.flatMap((vendor) =>
     Object.entries(vendor.invoices ?? {}).flatMap(([yearString, invoices]) => {
       const year = Number(yearString);
-      return (invoices ?? []).map((invoice) => ({
-        vendorId: vendor.id,
-        vendorName: vendor.name,
-        year,
-        month: invoice.month,
-        monthIndex: MONTH_INDEX[invoice.month] ?? -1,
-        status: invoice.status ?? "",
-        total: parseCurrencyValue(invoice.total),
-      }));
+      return (invoices ?? []).map((invoice) => {
+        const monthIndex =
+          typeof invoice.monthIndex === "number"
+            ? invoice.monthIndex
+            : MONTH_INDEX[invoice.month] ?? -1;
+        const totalValue =
+          typeof invoice.totalValue === "number"
+            ? invoice.totalValue
+            : parseCurrencyValue(invoice.total);
+
+        return {
+          vendorId: vendor.id,
+          vendorName: vendor.name,
+          year,
+          month: invoice.month,
+          monthIndex,
+          status: invoice.status ?? "",
+          total: totalValue,
+        };
+      });
     })
   );
-};
 
 const computeVendorMetrics = (profiles) => {
   const invoices = collectVendorInvoices(profiles);
@@ -120,7 +138,14 @@ const getLatestInvoiceForVendor = (vendor) => {
     return (entries ?? []).map((invoice) => ({
       ...invoice,
       year,
-      monthIndex: MONTH_INDEX[invoice.month] ?? -1,
+      monthIndex:
+        typeof invoice.monthIndex === "number"
+          ? invoice.monthIndex
+          : MONTH_INDEX[invoice.month] ?? -1,
+      totalValue:
+        typeof invoice.totalValue === "number"
+          ? invoice.totalValue
+          : parseCurrencyValue(invoice.total),
     }));
   });
 
@@ -154,299 +179,404 @@ const getHealthBadgeClasses = (health) => {
   return "bg-slate-100 text-slate-600";
 };
 
-const vendorProfiles = [
-  {
-    id: "harbor-education",
-    name: "Harbor Education Services",
-    focus: "Speech Therapy",
-    campusesServed: 8,
-    teamSize: 14,
-    health: "On Track",
-    manager: "Alana Ruiz",
-    managerTitle: "Account Director",
-    email: "alana@harboredu.com",
-    phone: "(555) 214-0183",
-    summary:
-      "Provides bilingual speech therapists and scheduling support across core elementary campuses.",
-    highlights: [
-      { label: "Active Contracts", value: "3" },
-      { label: "Avg. Response", value: "2.1 hrs" },
-      { label: "Fill Rate", value: "98%" },
-    ],
-    invoices: {
-      2024: [
-        {
-          month: "January",
-          total: "$18,240",
-          status: "Approved",
-          processedOn: "Feb 2, 2024",
-          pdfUrl: "/invoices/harbor-education/january-2024.pdf",
-          timesheetCsvUrl: "/timesheets/harbor-education/january-2024.csv",
-          students: [
-            { id: "maya-chen", name: "Maya Chen", service: "RN", amount: "$3,041" },
-            { id: "jordan-miles", name: "Jordan Miles", service: "RN", amount: "$2,996" },
-            { id: "amir-patel", name: "Amir Patel", service: "SLP", amount: "$3,210" },
-            { id: "riley-watts", name: "Riley Watts", service: "SLP", amount: "$2,870" },
-          ],
-        },
-        {
-          month: "February",
-          total: "$18,240",
-          status: "Approved",
-          processedOn: "Mar 4, 2024",
-          pdfUrl: "/invoices/harbor-education/february-2024.pdf",
-          timesheetCsvUrl: "/timesheets/harbor-education/february-2024.csv",
-          students: [
-            { id: "maya-chen", name: "Maya Chen", service: "RN", amount: "$3,041" },
-            { id: "jordan-miles", name: "Jordan Miles", service: "RN", amount: "$2,996" },
-            { id: "sophia-cabrera", name: "Sophia Cabrera", service: "SLP", amount: "$3,155" },
-            { id: "leo-kim", name: "Leo Kim", service: "SLP", amount: "$2,890" },
-          ],
-        },
-        {
-          month: "March",
-          total: "$19,120",
-          status: "In Review",
-          processedOn: "Apr 8, 2024",
-          pdfUrl: "/invoices/harbor-education/march-2024.pdf",
-          timesheetCsvUrl: "/timesheets/harbor-education/march-2024.csv",
-          students: [
-            { id: "maya-chen", name: "Maya Chen", service: "RN", amount: "$3,105" },
-            { id: "jordan-miles", name: "Jordan Miles", service: "RN", amount: "$3,020" },
-            { id: "amir-patel", name: "Amir Patel", service: "SLP", amount: "$3,180" },
-            { id: "riley-watts", name: "Riley Watts", service: "SLP", amount: "$2,920" },
-          ],
-        },
-        {
-          month: "April",
-          total: "$19,120",
-          status: "Pending Submission",
-          processedOn: "Due May 5, 2024",
-          pdfUrl: "/invoices/harbor-education/april-2024-draft.pdf",
-          timesheetCsvUrl: "/timesheets/harbor-education/april-2024-draft.csv",
-          students: [
-            { id: "maya-chen", name: "Maya Chen", service: "RN", amount: "$3,120" },
-            { id: "jordan-miles", name: "Jordan Miles", service: "RN", amount: "$3,055" },
-            { id: "sophia-cabrera", name: "Sophia Cabrera", service: "SLP", amount: "$2,985" },
-          ],
-        },
-      ],
-      2023: [
-        {
-          month: "October",
-          total: "$17,880",
-          status: "Approved",
-          processedOn: "Nov 6, 2023",
-          pdfUrl: "/invoices/harbor-education/october-2023.pdf",
-          timesheetCsvUrl: "/timesheets/harbor-education/october-2023.csv",
-          students: [
-            { id: "maya-chen", name: "Maya Chen", service: "RN", amount: "$2,940" },
-            { id: "amir-patel", name: "Amir Patel", service: "SLP", amount: "$3,115" },
-          ],
-        },
-        {
-          month: "November",
-          total: "$17,880",
-          status: "Approved",
-          processedOn: "Dec 7, 2023",
-          pdfUrl: "/invoices/harbor-education/november-2023.pdf",
-          timesheetCsvUrl: "/timesheets/harbor-education/november-2023.csv",
-          students: [
-            { id: "maya-chen", name: "Maya Chen", service: "RN", amount: "$2,940" },
-            { id: "riley-watts", name: "Riley Watts", service: "SLP", amount: "$3,045" },
-          ],
-        },
-        {
-          month: "December",
-          total: "$18,240",
-          status: "Approved",
-          processedOn: "Jan 5, 2024",
-          pdfUrl: "/invoices/harbor-education/december-2023.pdf",
-          timesheetCsvUrl: "/timesheets/harbor-education/december-2023.csv",
-          students: [
-            { id: "maya-chen", name: "Maya Chen", service: "RN", amount: "$3,005" },
-            { id: "jordan-miles", name: "Jordan Miles", service: "RN", amount: "$2,960" },
-            { id: "amir-patel", name: "Amir Patel", service: "SLP", amount: "$3,120" },
-          ],
-        },
-      ],
-    },
-  },
-  {
-    id: "lumen-learning",
-    name: "Lumen Learning Labs",
-    focus: "Occupational Therapy",
-    campusesServed: 5,
-    teamSize: 9,
-    health: "Monitoring",
-    manager: "David Shah",
-    managerTitle: "Engagement Lead",
-    email: "david@lumenlabs.io",
-    phone: "(555) 907-4410",
-    summary:
-      "Hybrid onsite and teletherapy support with emphasis on adaptive equipment trainings.",
-    highlights: [
-      { label: "Active Contracts", value: "2" },
-      { label: "Avg. Response", value: "3.8 hrs" },
-      { label: "Fill Rate", value: "91%" },
-    ],
-    invoices: {
-      2024: [
-        {
-          month: "January",
-          total: "$12,600",
-          status: "Approved",
-          processedOn: "Feb 1, 2024",
-          pdfUrl: "/invoices/lumen-learning/january-2024.pdf",
-          timesheetCsvUrl: "/timesheets/lumen-learning/january-2024.csv",
-          students: [
-            { id: "elliot-ramirez", name: "Elliot Ramirez", service: "OTR", amount: "$2,880" },
-            { id: "tessa-nguyen", name: "Tessa Nguyen", service: "OTR", amount: "$2,760" },
-            { id: "ian-barnes", name: "Ian Barnes", service: "COTA", amount: "$2,410" },
-          ],
-        },
-        {
-          month: "February",
-          total: "$12,600",
-          status: "Needs Revision",
-          processedOn: "Action Required",
-          pdfUrl: "/invoices/lumen-learning/february-2024-draft.pdf",
-          timesheetCsvUrl: "/timesheets/lumen-learning/february-2024-draft.csv",
-          students: [
-            { id: "elliot-ramirez", name: "Elliot Ramirez", service: "OTR", amount: "$2,880" },
-            { id: "tessa-nguyen", name: "Tessa Nguyen", service: "OTR", amount: "$2,760" },
-            { id: "ian-barnes", name: "Ian Barnes", service: "COTA", amount: "$2,430" },
-            { id: "lena-ford", name: "Lena Ford", service: "COTA", amount: "$2,210" },
-          ],
-        },
-        {
-          month: "March",
-          total: "$13,050",
-          status: "Pending Submission",
-          processedOn: "Due Apr 28, 2024",
-          pdfUrl: "/invoices/lumen-learning/march-2024-draft.pdf",
-          timesheetCsvUrl: "/timesheets/lumen-learning/march-2024-draft.csv",
-          students: [
-            { id: "elliot-ramirez", name: "Elliot Ramirez", service: "OTR", amount: "$2,940" },
-            { id: "tessa-nguyen", name: "Tessa Nguyen", service: "OTR", amount: "$2,820" },
-            { id: "ian-barnes", name: "Ian Barnes", service: "COTA", amount: "$2,320" },
-            { id: "lena-ford", name: "Lena Ford", service: "COTA", amount: "$2,280" },
-          ],
-        },
-      ],
-      2023: [
-        {
-          month: "November",
-          total: "$11,980",
-          status: "Approved",
-          processedOn: "Dec 2, 2023",
-          pdfUrl: "/invoices/lumen-learning/november-2023.pdf",
-          timesheetCsvUrl: "/timesheets/lumen-learning/november-2023.csv",
-          students: [
-            { id: "elliot-ramirez", name: "Elliot Ramirez", service: "OTR", amount: "$2,760" },
-            { id: "ian-barnes", name: "Ian Barnes", service: "COTA", amount: "$2,280" },
-          ],
-        },
-        {
-          month: "December",
-          total: "$12,250",
-          status: "Approved",
-          processedOn: "Jan 3, 2024",
-          pdfUrl: "/invoices/lumen-learning/december-2023.pdf",
-          timesheetCsvUrl: "/timesheets/lumen-learning/december-2023.csv",
-          students: [
-            { id: "elliot-ramirez", name: "Elliot Ramirez", service: "OTR", amount: "$2,820" },
-            { id: "tessa-nguyen", name: "Tessa Nguyen", service: "OTR", amount: "$2,700" },
-            { id: "ian-barnes", name: "Ian Barnes", service: "COTA", amount: "$2,320" },
-          ],
-        },
-      ],
-    },
-  },
-  {
-    id: "northstar-analytics",
-    name: "Northstar Analytics",
-    focus: "Data & Insights",
-    campusesServed: 12,
-    teamSize: 6,
-    health: "In Procurement",
-    manager: "Priya Nandakumar",
-    managerTitle: "Partner Success",
-    email: "priya@northstar.io",
-    phone: "(555) 765-0023",
-    summary:
-      "Centralizes district assessment data and produces executive dashboards for cabinet review.",
-    highlights: [
-      { label: "Projects", value: "4" },
-      { label: "Avg. Response", value: "1.2 hrs" },
-      { label: "Data Refresh", value: "Weekly" },
-    ],
-    invoices: {
-      2024: [
-        {
-          month: "February",
-          total: "$22,400",
-          status: "Approved",
-          processedOn: "Mar 3, 2024",
-          pdfUrl: "/invoices/northstar-analytics/february-2024.pdf",
-          timesheetCsvUrl: "/timesheets/northstar-analytics/february-2024.csv",
-          students: [
-            { id: "data-warehouse", name: "Data Warehouse Support", service: "Data Strategy", amount: "$8,960" },
-            { id: "kpi-dashboard", name: "KPI Dashboard Refresh", service: "Analytics", amount: "$7,420" },
-          ],
-        },
-        {
-          month: "March",
-          total: "$22,400",
-          status: "In Review",
-          processedOn: "Apr 9, 2024",
-          pdfUrl: "/invoices/northstar-analytics/march-2024.pdf",
-          timesheetCsvUrl: "/timesheets/northstar-analytics/march-2024.csv",
-          students: [
-            { id: "data-warehouse", name: "Data Warehouse Support", service: "Data Strategy", amount: "$8,960" },
-            { id: "attendance-dashboard", name: "Attendance Dashboard Updates", service: "Analytics", amount: "$7,540" },
-            { id: "professional-learning", name: "Professional Learning", service: "Enablement", amount: "$5,920" },
-          ],
-        },
-        {
-          month: "April",
-          total: "$22,400",
-          status: "Pending Submission",
-          processedOn: "Due May 10, 2024",
-          pdfUrl: "/invoices/northstar-analytics/april-2024-draft.pdf",
-          timesheetCsvUrl: "/timesheets/northstar-analytics/april-2024-draft.csv",
-          students: [
-            { id: "data-warehouse", name: "Data Warehouse Support", service: "Data Strategy", amount: "$8,960" },
-            { id: "attendance-dashboard", name: "Attendance Dashboard Updates", service: "Analytics", amount: "$7,540" },
-          ],
-        },
-      ],
-      2023: [
-        {
-          month: "December",
-          total: "$21,900",
-          status: "Approved",
-          processedOn: "Jan 4, 2024",
-          pdfUrl: "/invoices/northstar-analytics/december-2023.pdf",
-          timesheetCsvUrl: "/timesheets/northstar-analytics/december-2023.csv",
-          students: [
-            { id: "data-warehouse", name: "Data Warehouse Support", service: "Data Strategy", amount: "$8,760" },
-            { id: "attendance-dashboard", name: "Attendance Dashboard Updates", service: "Analytics", amount: "$7,320" },
-          ],
-        },
-      ],
-    },
-  },
-];
+const isApiError = (value) =>
+  typeof value === "object" && value !== null && "status" in value;
+
+function DistrictProfileForm({
+  initialValues,
+  onSubmit,
+  onCancel,
+  saving,
+  error,
+  disableCancel,
+}) {
+  const [formValues, setFormValues] = useState(initialValues);
+
+  useEffect(() => {
+    setFormValues(initialValues);
+  }, [initialValues]);
+
+  function handleChange(event) {
+    const { name, value } = event.target;
+    setFormValues((previous) => ({ ...previous, [name]: value }));
+  }
+
+  function handleSubmit(event) {
+    event.preventDefault();
+    onSubmit({
+      company_name: formValues.company_name.trim(),
+      contact_name: formValues.contact_name.trim(),
+      contact_email: formValues.contact_email.trim(),
+      phone_number: formValues.phone_number.trim(),
+      mailing_address: formValues.mailing_address.trim(),
+    });
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 px-4 py-6">
+      <div className="w-full max-w-2xl rounded-2xl bg-white p-6 shadow-xl">
+        <h2 className="text-lg font-semibold text-slate-900">District profile</h2>
+        <p className="mt-1 text-sm text-slate-600">
+          Keep your district contact information current so vendors and admins know how to reach you.
+        </p>
+
+        <form className="mt-6 space-y-5" onSubmit={handleSubmit}>
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="block text-sm font-medium text-slate-700">
+              District name
+              <input
+                type="text"
+                name="company_name"
+                value={formValues.company_name}
+                onChange={handleChange}
+                required
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
+              />
+            </label>
+            <label className="block text-sm font-medium text-slate-700">
+              Primary contact name
+              <input
+                type="text"
+                name="contact_name"
+                value={formValues.contact_name}
+                onChange={handleChange}
+                required
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
+              />
+            </label>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="block text-sm font-medium text-slate-700">
+              Primary contact email
+              <input
+                type="email"
+                name="contact_email"
+                value={formValues.contact_email}
+                onChange={handleChange}
+                required
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
+              />
+            </label>
+            <label className="block text-sm font-medium text-slate-700">
+              Phone number
+              <input
+                type="tel"
+                name="phone_number"
+                value={formValues.phone_number}
+                onChange={handleChange}
+                required
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
+              />
+            </label>
+          </div>
+
+          <label className="block text-sm font-medium text-slate-700">
+            Mailing address
+            <textarea
+              name="mailing_address"
+              value={formValues.mailing_address}
+              onChange={handleChange}
+              required
+              rows={4}
+              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
+            />
+          </label>
+
+          {error ? <p className="text-sm text-red-600">{error}</p> : null}
+
+          <div className="flex flex-wrap justify-end gap-3">
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={disableCancel || saving}
+              className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Close
+            </button>
+            <button
+              type="submit"
+              disabled={saving}
+              className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white shadow transition hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {saving ? "Saving…" : "Save details"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
 
 
-export default function DistrictDashboard() {
+export default function DistrictDashboard({ districtId = null }) {
+  const { isAuthenticated, getAccessTokenSilently } = useAuth0();
   const [activeKey, setActiveKey] = useState(menuItems[0].key);
   const [selectedVendorId, setSelectedVendorId] = useState(null);
   const [selectedInvoiceKey, setSelectedInvoiceKey] = useState(null);
+  const [vendorProfiles, setVendorProfiles] = useState([]);
+  const [vendorsLoading, setVendorsLoading] = useState(false);
+  const [vendorsError, setVendorsError] = useState(null);
+  const [districtProfile, setDistrictProfile] = useState(null);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [profileError, setProfileError] = useState(null);
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileFormError, setProfileFormError] = useState(null);
+  const [showProfileForm, setShowProfileForm] = useState(false);
+  const [profilePromptDismissed, setProfilePromptDismissed] = useState(false);
+
   const activeItem = menuItems.find((item) => item.key === activeKey) ?? menuItems[0];
   const selectedVendor = vendorProfiles.find((vendor) => vendor.id === selectedVendorId) ?? null;
-  const vendorMetrics = useMemo(() => computeVendorMetrics(vendorProfiles), []);
+  const vendorMetrics = useMemo(() => computeVendorMetrics(vendorProfiles), [vendorProfiles]);
+
+  const normalizeVendorOverview = useCallback(
+    (overview) => {
+      if (!overview?.vendors?.length) {
+        return [];
+      }
+
+      return overview.vendors.map((vendor) => {
+        const invoicesByYear = Object.entries(vendor.invoices ?? {}).reduce(
+          (acc, [yearKey, invoices]) => {
+            const sortedInvoices = [...(invoices ?? [])]
+              .map((invoice) => {
+                const monthIndex =
+                  typeof invoice.month_index === "number"
+                    ? invoice.month_index
+                    : MONTH_INDEX[invoice.month] ?? -1;
+                const students = (invoice.students ?? []).map((student) => ({
+                  id: `student-${student.id}`,
+                  name: student.name,
+                  service: student.service ?? null,
+                  amount: currencyFormatter.format(student.amount ?? 0),
+                  amountValue: student.amount ?? 0,
+                  pdfUrl: student.pdf_url ?? null,
+                  timesheetUrl: student.timesheet_url ?? null,
+                }));
+                return {
+                  month: invoice.month,
+                  monthIndex,
+                  total: currencyFormatter.format(invoice.total ?? 0),
+                  totalValue: invoice.total ?? 0,
+                  status: invoice.status ? invoice.status.trim() : "",
+                  processedOn: invoice.processed_on ?? "Processing",
+                  pdfUrl: invoice.pdf_url ?? null,
+                  timesheetCsvUrl: invoice.timesheet_csv_url ?? null,
+                  students,
+                };
+              })
+              .sort((a, b) => (b.monthIndex ?? -1) - (a.monthIndex ?? -1));
+            acc[Number(yearKey)] = sortedInvoices;
+            return acc;
+          },
+          {},
+        );
+
+        const metrics = vendor.metrics ?? {
+          latest_year: null,
+          invoices_this_year: 0,
+          approved_count: 0,
+          needs_action_count: 0,
+          total_spend: 0,
+          outstanding_spend: 0,
+        };
+
+        const healthLabel =
+          vendor.health_label ??
+          (metrics.needs_action_count > 0
+            ? "Needs Attention"
+            : metrics.invoices_this_year > 0
+            ? "On Track"
+            : "Onboarding");
+
+        const latestInvoice = vendor.latest_invoice
+          ? {
+              month: vendor.latest_invoice.month,
+              year: vendor.latest_invoice.year,
+              total: currencyFormatter.format(vendor.latest_invoice.total ?? 0),
+              totalValue: vendor.latest_invoice.total ?? 0,
+              status: vendor.latest_invoice.status ?? "",
+            }
+          : null;
+
+        const summary = latestInvoice
+          ? `Latest invoice ${latestInvoice.month} ${latestInvoice.year} • ${latestInvoice.total}`
+          : "No invoices submitted yet.";
+
+        const metricsCamel = {
+          latestYear: metrics.latest_year ?? null,
+          invoicesThisYear: metrics.invoices_this_year ?? 0,
+          approvedCount: metrics.approved_count ?? 0,
+          needsActionCount: metrics.needs_action_count ?? 0,
+          totalSpend: metrics.total_spend ?? 0,
+          outstandingSpend: metrics.outstanding_spend ?? 0,
+        };
+
+        const remitToAddress = vendor.remit_to_address?.trim();
+
+        return {
+          id: String(vendor.id),
+          name: vendor.name,
+          manager: vendor.contact_name?.trim() ?? "",
+          email: vendor.contact_email?.trim() ?? "",
+          phone: vendor.phone_number?.trim() ?? "",
+          summary,
+          health: healthLabel,
+          highlights: [],
+          invoices: invoicesByYear,
+          metrics: metricsCamel,
+          tileMetrics: {
+            invoicesThisYear: metricsCamel.invoicesThisYear,
+            approvedCount: metricsCamel.approvedCount,
+            needsActionCount: metricsCamel.needsActionCount,
+            totalSpend: metricsCamel.totalSpend,
+          },
+          latestInvoice,
+          remitToAddress: remitToAddress && remitToAddress.length ? remitToAddress : null,
+        };
+      });
+    },
+    [],
+  );
+
+  const loadVendors = useCallback(async () => {
+    if (!isAuthenticated) {
+      setVendorProfiles([]);
+      setVendorsError(null);
+      return;
+    }
+
+    setVendorsLoading(true);
+    setVendorsError(null);
+    try {
+      const token = await getAccessTokenSilently();
+      const overview = await fetchDistrictVendors(token);
+      setVendorProfiles(normalizeVendorOverview(overview));
+    } catch (error) {
+      console.error("district_vendor_overview_failed", error);
+      setVendorsError("We couldn't load vendor activity. Please try again.");
+      setVendorProfiles([]);
+    } finally {
+      setVendorsLoading(false);
+    }
+  }, [getAccessTokenSilently, isAuthenticated, normalizeVendorOverview]);
+
+  const loadDistrictProfile = useCallback(async () => {
+    if (!isAuthenticated) {
+      setDistrictProfile(null);
+      setProfileError(null);
+      return null;
+    }
+
+    if (districtId == null) {
+      setDistrictProfile(null);
+      setProfileError(
+        "Your account is not linked to a district profile yet. Please contact an administrator.",
+      );
+      return null;
+    }
+
+    setProfileLoading(true);
+    setProfileError(null);
+    try {
+      const token = await getAccessTokenSilently();
+      const profile = await fetchDistrictProfile(token);
+      setDistrictProfile(profile);
+      return profile;
+    } catch (error) {
+      console.error("district_profile_fetch_failed", error);
+      setDistrictProfile(null);
+      if (isApiError(error) && error.status === 404) {
+        setProfileError(
+          "Your account is not linked to a district profile yet. Please contact an administrator.",
+        );
+        return null;
+      }
+      setProfileError(
+        "We couldn't load your district profile. Refresh the page or try again later.",
+      );
+      return null;
+    } finally {
+      setProfileLoading(false);
+    }
+  }, [districtId, getAccessTokenSilently, isAuthenticated]);
+
+  const handleProfileSubmit = useCallback(
+    async (values) => {
+      setProfileSaving(true);
+      setProfileFormError(null);
+      try {
+        const token = await getAccessTokenSilently();
+        const profile = await updateDistrictProfile(token, values);
+        setDistrictProfile(profile);
+        setShowProfileForm(false);
+        setProfilePromptDismissed(false);
+        toast.success("District profile updated.");
+      } catch (error) {
+        console.error("district_profile_update_failed", error);
+        setProfileFormError(
+          error instanceof Error && error.message
+            ? error.message
+            : "We couldn't save your profile. Please try again.",
+        );
+      } finally {
+        setProfileSaving(false);
+      }
+    },
+    [getAccessTokenSilently],
+  );
+
+  const handleProfileCancel = useCallback(() => {
+    setShowProfileForm(false);
+    setProfileFormError(null);
+    setProfilePromptDismissed(true);
+  }, []);
+
+  const initialProfileValues = {
+    company_name: districtProfile?.company_name ?? "",
+    contact_name: districtProfile?.contact_name ?? "",
+    contact_email: districtProfile?.contact_email ?? "",
+    phone_number: districtProfile?.phone_number ?? "",
+    mailing_address: districtProfile?.mailing_address ?? "",
+  };
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setVendorProfiles([]);
+      setVendorsError(null);
+      setDistrictProfile(null);
+      setProfileError(null);
+      setShowProfileForm(false);
+      setProfilePromptDismissed(false);
+      return;
+    }
+
+    loadVendors().catch(() => {});
+    loadDistrictProfile().catch(() => {});
+  }, [isAuthenticated, loadDistrictProfile, loadVendors]);
+
+  useEffect(() => {
+    setProfilePromptDismissed(false);
+  }, [districtProfile?.id]);
+
+  useEffect(() => {
+    if (
+      districtProfile &&
+      !districtProfile.is_profile_complete &&
+      !profilePromptDismissed
+    ) {
+      setShowProfileForm(true);
+    }
+  }, [districtProfile, profilePromptDismissed]);
+
+  useEffect(() => {
+    if (
+      selectedVendorId !== null &&
+      !vendorProfiles.some((vendor) => vendor.id === selectedVendorId)
+    ) {
+      setSelectedVendorId(null);
+    }
+  }, [selectedVendorId, vendorProfiles]);
+
   useEffect(() => {
     setSelectedInvoiceKey(null);
   }, [activeKey, selectedVendorId]);
@@ -490,13 +620,41 @@ export default function DistrictDashboard() {
       return [];
     }
 
-    const baseHighlights = [
-      { label: "Focus Area", value: selectedVendor.focus },
-      { label: "Campuses", value: selectedVendor.campusesServed?.toString() ?? null },
-      { label: "Team Members", value: selectedVendor.teamSize?.toString() ?? null },
+    const metrics = selectedVendor.metrics ?? {
+      invoicesThisYear: 0,
+      approvedCount: 0,
+      needsActionCount: 0,
+      totalSpend: 0,
+      outstandingSpend: 0,
+    };
+
+    const highlights = [
+      {
+        label: "Invoices this year",
+        value: metrics.invoicesThisYear ? metrics.invoicesThisYear.toString() : "0",
+      },
+      {
+        label: "Approved",
+        value: metrics.approvedCount ? metrics.approvedCount.toString() : "0",
+      },
+      {
+        label: "Needs action",
+        value: metrics.needsActionCount ? metrics.needsActionCount.toString() : "0",
+      },
+      {
+        label: "Spend YTD",
+        value: currencyFormatter.format(metrics.totalSpend ?? 0),
+      },
     ];
 
-    return [...baseHighlights, ...(selectedVendor.highlights ?? [])].filter((item) => Boolean(item?.value));
+    if (metrics.outstandingSpend) {
+      highlights.push({
+        label: "Outstanding",
+        value: currencyFormatter.format(metrics.outstandingSpend),
+      });
+    }
+
+    return highlights.filter((item) => item.value && item.value !== "0");
   }, [selectedVendor]);
 
   const vendorContactSummary = useMemo(() => {
@@ -507,9 +665,6 @@ export default function DistrictDashboard() {
     const segments = [];
     if (selectedVendor.manager) {
       let primaryContact = `Primary contact: ${selectedVendor.manager}`;
-      if (selectedVendor.managerTitle) {
-        primaryContact = `${primaryContact}, ${selectedVendor.managerTitle}`;
-      }
       segments.push(primaryContact);
     }
 
@@ -519,6 +674,27 @@ export default function DistrictDashboard() {
     }
 
     return segments.length ? segments.join(" • ") : null;
+  }, [selectedVendor]);
+
+  const vendorHeaderContactLine = useMemo(() => {
+    if (!selectedVendor) {
+      return null;
+    }
+
+    const segments = [selectedVendor.manager, selectedVendor.email, selectedVendor.phone]
+      .map((value) => (value ? value.trim() : ""))
+      .filter(Boolean);
+
+    return segments.length ? segments.join(" • ") : null;
+  }, [selectedVendor]);
+
+  const vendorRemitTo = useMemo(() => {
+    if (!selectedVendor?.remitToAddress) {
+      return null;
+    }
+
+    const trimmed = selectedVendor.remitToAddress.trim();
+    return trimmed.length ? trimmed : null;
   }, [selectedVendor]);
 
   return (
@@ -586,6 +762,68 @@ export default function DistrictDashboard() {
 
         {activeItem.key === "vendors" ? (
           <div className="mt-8 space-y-6">
+            {profileError ? (
+              <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-600">
+                {profileError}
+              </div>
+            ) : null}
+
+            {profileLoading && !districtProfile ? (
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                Loading district profile…
+              </div>
+            ) : null}
+
+            {districtProfile ? (
+              <section className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div>
+                    <h4 className="text-sm font-semibold uppercase tracking-widest text-slate-500">
+                      District profile
+                    </h4>
+                    <p className="mt-1 text-lg font-semibold text-slate-900">
+                      {districtProfile.company_name}
+                    </p>
+                    <div className="mt-3 space-y-1 text-sm text-slate-600">
+                      <p>
+                        Primary contact:{" "}
+                        <span className="font-medium text-slate-900">
+                          {districtProfile.contact_name || "Add a contact name"}
+                        </span>
+                      </p>
+                      <p>
+                        {(districtProfile.contact_email || "Add an email") +
+                          " • " +
+                          (districtProfile.phone_number || "Add a phone number")}
+                      </p>
+                      {districtProfile.mailing_address ? (
+                        <p className="whitespace-pre-line">
+                          {districtProfile.mailing_address}
+                        </p>
+                      ) : (
+                        <p>Add a mailing address</p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex flex-col items-end gap-2">
+                    {!districtProfile.is_profile_complete ? (
+                      <span className="inline-flex items-center rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700">
+                        Complete your profile
+                      </span>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => setShowProfileForm(true)}
+                      disabled={profileLoading}
+                      className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-600 shadow-sm transition hover:border-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Update profile
+                    </button>
+                  </div>
+                </div>
+              </section>
+            ) : null}
+
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 shadow-sm">
                 <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">Vendor Partners</p>
@@ -622,66 +860,79 @@ export default function DistrictDashboard() {
                 <p className="text-xs text-slate-500">
                   Choose a partner to review their invoices this fiscal year.
                 </p>
-                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                  {vendorProfiles.map((vendor) => (
-                    <button
-                      key={vendor.id}
-                      onClick={() => setSelectedVendorId(vendor.id)}
-                      className="flex h-full flex-col justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-5 text-left transition hover:border-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/70"
-                      type="button"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-semibold text-slate-900">{vendor.name}</p>
-                          <p className="mt-1 text-xs text-slate-500">
-                            Contact: {vendor.manager}
-                            {vendor.managerTitle ? `, ${vendor.managerTitle}` : ""}
-                          </p>
+                {vendorsLoading ? (
+                  <p className="text-sm text-slate-500">Loading vendor activity…</p>
+                ) : vendorsError ? (
+                  <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-600">
+                    {vendorsError}
+                  </div>
+                ) : vendorProfiles.length === 0 ? (
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                    No vendor activity has been recorded yet.
+                  </div>
+                ) : (
+                  <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                    {vendorProfiles.map((vendor) => (
+                      <button
+                        key={vendor.id}
+                        onClick={() => setSelectedVendorId(vendor.id)}
+                        className="flex h-full flex-col justify-between gap-3 rounded-2xl border border-slate-200 bg-white p-5 text-left transition hover:border-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/70"
+                        type="button"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-semibold text-slate-900">{vendor.name}</p>
+                            <p className="mt-1 text-xs text-slate-500">
+                              Contact: {vendor.manager || "Not provided"}
+                            </p>
+                          </div>
+                          {vendor.health ? (
+                            <span
+                              className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${getHealthBadgeClasses(
+                                vendor.health
+                              )}`}
+                            >
+                              {vendor.health}
+                            </span>
+                          ) : null}
                         </div>
-                        {vendor.health ? (
-                          <span
-                            className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${getHealthBadgeClasses(
-                              vendor.health
-                            )}`}
-                          >
-                            {vendor.health}
-                          </span>
+                        {vendor.summary ? (
+                          <p className="text-xs leading-relaxed text-slate-600">{vendor.summary}</p>
                         ) : null}
-                      </div>
-                      {vendor.summary ? (
-                        <p className="text-xs leading-relaxed text-slate-600">{vendor.summary}</p>
-                      ) : null}
-                      <div className="grid gap-2 text-xs text-slate-500 sm:grid-cols-2">
-                        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                          <p className="font-semibold text-slate-900">{vendor.focus}</p>
-                          <p className="text-[0.65rem] uppercase tracking-widest text-slate-500">Focus Area</p>
+                        <div className="grid gap-2 text-xs text-slate-500 sm:grid-cols-2">
+                          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                            <p className="font-semibold text-slate-900">{vendor.tileMetrics.invoicesThisYear}</p>
+                            <p className="text-[0.65rem] uppercase tracking-widest text-slate-500">Invoices this year</p>
+                          </div>
+                          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                            <p className="font-semibold text-slate-900">{vendor.tileMetrics.approvedCount}</p>
+                            <p className="text-[0.65rem] uppercase tracking-widest text-slate-500">Approved</p>
+                          </div>
+                          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                            <p className="font-semibold text-slate-900">
+                              {currencyFormatter.format(vendor.tileMetrics.totalSpend ?? 0)}
+                            </p>
+                            <p className="text-[0.65rem] uppercase tracking-widest text-slate-500">Spend YTD</p>
+                          </div>
+                          {(() => {
+                            const latestInvoice = vendor.latestInvoice ?? getLatestInvoiceForVendor(vendor);
+                            if (!latestInvoice) {
+                              return null;
+                            }
+                            return (
+                              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                                <p className="font-semibold text-slate-900">{latestInvoice.total}</p>
+                                <p className="text-[0.65rem] uppercase tracking-widest text-slate-500">
+                                  Last invoice: {latestInvoice.month} {latestInvoice.year}
+                                </p>
+                              </div>
+                            );
+                          })()}
                         </div>
-                        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                          <p className="font-semibold text-slate-900">{vendor.campusesServed}</p>
-                          <p className="text-[0.65rem] uppercase tracking-widest text-slate-500">Campuses Served</p>
-                        </div>
-                        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                          <p className="font-semibold text-slate-900">{vendor.teamSize}</p>
-                          <p className="text-[0.65rem] uppercase tracking-widest text-slate-500">Team Size</p>
-                        </div>
-                        {(() => {
-                          const latestInvoice = getLatestInvoiceForVendor(vendor);
-                          if (!latestInvoice) {
-                            return null;
-                          }
-                          return (
-                            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                              <p className="font-semibold text-slate-900">{latestInvoice.total}</p>
-                              <p className="text-[0.65rem] uppercase tracking-widest text-slate-500">
-                                Last invoice: {latestInvoice.month} {latestInvoice.year}
-                              </p>
-                            </div>
-                          );
-                        })()}
-                      </div>
-                    </button>
-                  ))}
-                </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             ) : activeInvoiceDetails ? (
               <div className="space-y-6">
@@ -712,28 +963,35 @@ export default function DistrictDashboard() {
                     <p className="mt-1 text-sm text-slate-500">
                       Status: {activeInvoiceDetails.status} · Processed {activeInvoiceDetails.processedOn}
                     </p>
-                    {selectedVendor.manager ? (
-                      <p className="text-xs text-slate-500">
-                        Contact: {selectedVendor.manager}
-                        {selectedVendor.managerTitle ? `, ${selectedVendor.managerTitle}` : ""}
+                    {vendorHeaderContactLine ? (
+                      <p className="text-xs text-slate-500">{vendorHeaderContactLine}</p>
+                    ) : null}
+                    {vendorRemitTo ? (
+                      <p className="mt-2 text-xs text-slate-500">
+                        <span className="font-semibold text-slate-700">Remit to:</span>
+                        <br />
+                        <span className="whitespace-pre-line text-slate-700">{vendorRemitTo}</span>
                       </p>
                     ) : null}
-                    <p className="text-xs text-slate-500">
-                      {selectedVendor.email} • {selectedVendor.phone}
-                    </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
                     <span className="inline-flex items-center rounded-full bg-slate-900 px-3 py-1 text-sm font-semibold text-white">
                       Total {activeInvoiceDetails.total}
                     </span>
-                    <a
-                      href={activeInvoiceDetails.pdfUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center rounded-full bg-amber-500 px-3 py-1.5 text-sm font-semibold text-white shadow-sm transition hover:bg-amber-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
-                    >
-                      Download PDF Invoice
-                    </a>
+                    {activeInvoiceDetails.pdfUrl ? (
+                      <a
+                        href={activeInvoiceDetails.pdfUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center rounded-full bg-amber-500 px-3 py-1.5 text-sm font-semibold text-white shadow-sm transition hover:bg-amber-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
+                      >
+                        Download PDF Invoice
+                      </a>
+                    ) : (
+                      <span className="text-xs text-slate-500">
+                        Invoice file not available
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -769,6 +1027,13 @@ export default function DistrictDashboard() {
                     </dl>
                     {vendorContactSummary ? (
                       <p className="mt-4 text-xs text-slate-500">{vendorContactSummary}</p>
+                    ) : null}
+                    {vendorRemitTo ? (
+                      <p className="mt-3 text-xs text-slate-500">
+                        <span className="font-semibold text-slate-700">Remit to:</span>
+                        <br />
+                        <span className="whitespace-pre-line text-slate-700">{vendorRemitTo}</span>
+                      </p>
                     ) : null}
                   </div>
                 ) : null}
@@ -845,6 +1110,16 @@ export default function DistrictDashboard() {
                     <p className="text-xs uppercase tracking-widest text-amber-500">{selectedVendor.name}</p>
                     <h4 className="mt-1 text-2xl font-semibold text-slate-900">Select a month</h4>
                     <p className="mt-1 text-sm text-slate-500">Choose a billing month to review detailed student services.</p>
+                    {vendorHeaderContactLine ? (
+                      <p className="mt-2 text-xs text-slate-500">{vendorHeaderContactLine}</p>
+                    ) : null}
+                    {vendorRemitTo ? (
+                      <p className="mt-2 text-xs text-slate-500">
+                        <span className="font-semibold text-slate-700">Remit to:</span>
+                        <br />
+                        <span className="whitespace-pre-line text-slate-700">{vendorRemitTo}</span>
+                      </p>
+                    ) : null}
                   </div>
                   <button
                     onClick={() => setSelectedVendorId(null)}
@@ -888,6 +1163,13 @@ export default function DistrictDashboard() {
                     </dl>
                     {vendorContactSummary ? (
                       <p className="mt-4 text-xs text-slate-500">{vendorContactSummary}</p>
+                    ) : null}
+                    {vendorRemitTo ? (
+                      <p className="mt-3 text-xs text-slate-500">
+                        <span className="font-semibold text-slate-700">Remit to:</span>
+                        <br />
+                        <span className="whitespace-pre-line text-slate-700">{vendorRemitTo}</span>
+                      </p>
                     ) : null}
                   </div>
                 ) : null}
@@ -934,6 +1216,17 @@ export default function DistrictDashboard() {
           </div>
         )}
       </section>
+
+      {showProfileForm ? (
+        <DistrictProfileForm
+          initialValues={initialProfileValues}
+          onSubmit={handleProfileSubmit}
+          onCancel={handleProfileCancel}
+          saving={profileSaving}
+          error={profileFormError}
+          disableCancel={profileSaving}
+        />
+      ) : null}
     </div>
   );
 }

@@ -26,6 +26,10 @@ class UserOut(BaseModel):
     role: str | None
     is_approved: bool
     is_active: bool
+    vendor_id: int | None
+    vendor_company_name: str | None
+    district_id: int | None
+    district_company_name: str | None
 
 
 class RoleUpdate(BaseModel):

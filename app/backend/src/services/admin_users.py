@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from fastapi import HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.backend.src.models import User
 
@@ -25,6 +25,7 @@ def list_users(session: Session) -> list[User]:
 
     return (
         session.query(User)
+        .options(selectinload(User.vendor), selectinload(User.district))
         .order_by(User.created_at.desc())
         .all()
     )
@@ -35,6 +36,7 @@ def list_pending_users(session: Session) -> list[User]:
 
     return (
         session.query(User)
+        .options(selectinload(User.vendor), selectinload(User.district))
         .filter(User.is_approved.is_(False), User.is_active.is_(True))
         .order_by(User.created_at.asc())
         .all()

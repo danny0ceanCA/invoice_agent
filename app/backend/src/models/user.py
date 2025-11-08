@@ -37,12 +37,32 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="true"
     )
-    vendor_id: Mapped[int | None] = mapped_column(ForeignKey("vendors.id"), nullable=True)
+    vendor_id: Mapped[int | None] = mapped_column(
+        ForeignKey("vendors.id"), nullable=True, index=True
+    )
+    district_id: Mapped[int | None] = mapped_column(
+        ForeignKey("districts.id"), nullable=True, index=True
+    )
     auth0_sub: Mapped[str | None] = mapped_column(
         String(255), unique=True, nullable=True, index=True
     )
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     vendor: Mapped["Vendor | None"] = relationship("Vendor", back_populates="users")
+    district: Mapped["District | None"] = relationship(
+        "District", back_populates="users"
+    )
     approvals: Mapped[list["Approval"]] = relationship("Approval", back_populates="reviewer")
     jobs: Mapped[list["Job"]] = relationship("Job", back_populates="user")
+
+    @property
+    def vendor_company_name(self) -> str | None:
+        """Return the associated vendor's company name, if available."""
+
+        return self.vendor.company_name if self.vendor else None
+
+    @property
+    def district_company_name(self) -> str | None:
+        """Return the associated district's company name, if available."""
+
+        return self.district.company_name if self.district else None

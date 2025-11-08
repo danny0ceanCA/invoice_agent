@@ -23,7 +23,7 @@ os.environ.setdefault("LOCAL_STORAGE_PATH", "/tmp/invoice-agent-tests")
 from app.backend.src.agents.invoice_agent import InvoiceAgent
 from app.backend.src.db import get_engine, session_scope
 from app.backend.src.main import app
-from app.backend.src.models import Invoice, Vendor, User
+from app.backend.src.models import District, Invoice, InvoiceLineItem, Vendor, User
 from app.backend.src.models.base import Base
 from app.backend.src.core.security import get_current_user
 
@@ -86,6 +86,51 @@ def vendor_and_user() -> tuple[int, int]:
         vendor_id = vendor.id
         user_id = user.id
     return vendor_id, user_id
+
+
+@pytest.fixture()
+def district_and_user() -> tuple[int, int]:
+    with session_scope() as session:
+        district = (
+            session.query(District)
+            .filter(District.company_name == "Test District")
+            .one_or_none()
+        )
+        if district is None:
+            district = District(
+                company_name="Test District",
+                contact_email="district@example.com",
+                contact_name="District Admin",
+                phone_number="555-555-0000",
+                mailing_address="200 District Ave\nSacramento, CA 95814",
+            )
+            session.add(district)
+            session.flush()
+
+        user = (
+            session.query(User)
+            .filter(User.email == "district-user@example.com")
+            .one_or_none()
+        )
+        if user is None:
+            user = User(
+                email="district-user@example.com",
+                name="District Reviewer",
+                role="district",
+                is_approved=True,
+                district_id=district.id,
+            )
+            session.add(user)
+            session.flush()
+        else:
+            if user.district_id != district.id:
+                user.district_id = district.id
+            if not user.is_approved:
+                user.is_approved = True
+            session.add(user)
+            session.flush()
+
+        return district.id, user.id
 
 
 def test_liveness_endpoint(client: TestClient) -> None:
@@ -169,3 +214,112 @@ def test_vendor_profile_endpoints(
         assert vendor is not None
         assert vendor.company_name == payload["company_name"]
         assert vendor.contact_name == payload["contact_name"]
+
+
+def test_district_profile_endpoints(
+    client: TestClient, district_and_user: tuple[int, int]
+) -> None:
+    district_id, user_id = district_and_user
+
+    def override_current_user() -> User:
+        with session_scope() as session:
+            user = session.get(User, user_id)
+            assert user is not None
+            _ = user.district
+            return user
+
+    app.dependency_overrides[get_current_user] = override_current_user
+
+    payload = {
+        "company_name": "Sacramento City USD",
+        "contact_name": "Jordan Ellis",
+        "contact_email": "jordan.ellis@example.com",
+        "phone_number": "916-555-2020",
+        "mailing_address": "5735 47th Avenue\nSacramento, CA 95824",
+    }
+
+    try:
+        response = client.get("/api/districts/me")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["company_name"] == "Test District"
+
+        response = client.put("/api/districts/me", json=payload)
+        assert response.status_code == 200
+        updated = response.json()
+        assert updated["company_name"] == payload["company_name"]
+        assert updated["is_profile_complete"] is True
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+    with session_scope() as session:
+        district = session.get(District, district_id)
+        assert district is not None
+        assert district.company_name == payload["company_name"]
+        assert district.contact_name == payload["contact_name"]
+
+
+def test_district_vendor_overview(
+    client: TestClient,
+    vendor_and_user: tuple[int, int],
+    district_and_user: tuple[int, int],
+) -> None:
+    vendor_id, _ = vendor_and_user
+    _, district_user_id = district_and_user
+
+    with session_scope() as session:
+        invoice = Invoice(
+            vendor_id=vendor_id,
+            upload_id=None,
+            student_name="Sample Student",
+            invoice_number="INV-SMOKE-001",
+            invoice_code="SMK-001",
+            service_month="April 2024",
+            invoice_date=datetime(2024, 4, 30),
+            total_hours=4.0,
+            total_cost=800.0,
+            status="approved",
+            pdf_s3_key="invoices/sample.pdf",
+        )
+        session.add(invoice)
+        session.flush()
+        session.add(
+            InvoiceLineItem(
+                invoice_id=invoice.id,
+                student="Sample Student",
+                clinician="Clinician A",
+                service_code="SLP",
+                hours=4.0,
+                rate=200.0,
+                cost=800.0,
+                service_date="2024-04-15",
+            )
+        )
+
+    def override_current_user() -> User:
+        with session_scope() as session:
+            user = session.get(User, district_user_id)
+            assert user is not None
+            _ = user.district
+            return user
+
+    app.dependency_overrides[get_current_user] = override_current_user
+
+    try:
+        response = client.get("/api/districts/vendors")
+        assert response.status_code == 200
+        payload = response.json()
+        assert "vendors" in payload
+        vendor_entries = payload["vendors"]
+        assert isinstance(vendor_entries, list) and vendor_entries
+        matching = next(v for v in vendor_entries if v["id"] == vendor_id)
+        assert matching["metrics"]["total_spend"] >= 800.0
+        assert matching["latest_invoice"] is not None
+        invoices = matching["invoices"]
+        assert invoices
+        year_key = max(invoices.keys())
+        month_entries = invoices[year_key]
+        assert month_entries
+        assert month_entries[0]["students"]
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
