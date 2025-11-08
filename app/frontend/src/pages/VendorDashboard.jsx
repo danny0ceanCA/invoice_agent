@@ -198,13 +198,24 @@ export default function VendorDashboard({ vendorId }) {
     );
   }
 
-  const initialProfileValues = {
-    company_name: vendorProfile?.company_name ?? "",
-    contact_name: vendorProfile?.contact_name ?? "",
-    contact_email: vendorProfile?.contact_email ?? "",
-    phone_number: formatPhoneNumberForDisplay(vendorProfile?.phone_number ?? ""),
-    remit_to_address: vendorProfile?.remit_to_address ?? "",
-  };
+  const initialProfileValues = useMemo(
+    () => ({
+      company_name: vendorProfile?.company_name ?? "",
+      contact_name: vendorProfile?.contact_name ?? "",
+      contact_email: vendorProfile?.contact_email ?? "",
+      phone_number: formatPhoneNumberForDisplay(
+        vendorProfile?.phone_number ?? "",
+      ),
+      remit_to_address: vendorProfile?.remit_to_address ?? "",
+    }),
+    [
+      vendorProfile?.company_name,
+      vendorProfile?.contact_name,
+      vendorProfile?.contact_email,
+      vendorProfile?.phone_number,
+      vendorProfile?.remit_to_address,
+    ],
+  );
 
   return (
     <div className="min-h-screen bg-slate-50 p-6">
