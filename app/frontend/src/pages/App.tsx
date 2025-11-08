@@ -74,7 +74,15 @@ export function App() {
     }
 
     if (profile.role === "district") {
-      return <DistrictDashboard districtId={profile.district_id ?? null} />;
+      const activeDistrictId =
+        profile.active_district_id ?? profile.district_id ?? null;
+      return (
+        <DistrictDashboard
+          districtId={activeDistrictId}
+          initialMemberships={profile.district_memberships ?? []}
+          onMembershipChange={loadProfile}
+        />
+      );
     }
 
     if (profile.role === "admin") {
@@ -82,7 +90,7 @@ export function App() {
     }
 
     return null;
-  }, [profile]);
+  }, [profile, loadProfile]);
 
   const routedDashboard = (
     <Routes>

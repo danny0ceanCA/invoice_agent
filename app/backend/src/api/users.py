@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.backend.src.core.security import get_current_user
 from app.backend.src.db import get_session_dependency
-from app.backend.src.models import District, User, Vendor
+from app.backend.src.models import User, Vendor
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -67,15 +67,7 @@ def set_user_role(
     elif payload.role == "district":
         if current_user.vendor_id is not None:
             current_user.vendor_id = None
-        if getattr(current_user, "district_id", None) is None:
-            district = District(
-                company_name=_generate_company_name(current_user, "District"),
-                contact_name=current_user.name,
-                contact_email=current_user.email,
-            )
-            session.add(district)
-            session.flush()
-            current_user.district_id = district.id
+        current_user.district_id = None
 
     session.add(current_user)
     session.commit()
@@ -87,7 +79,7 @@ def set_user_role(
         "name": current_user.name,
         "role": current_user.role,
         "vendor_id": current_user.vendor_id,
-        "district_id": getattr(current_user, "district_id", None),
+        "district_id": current_user.active_district_id,
         "auth0_sub": current_user.auth0_sub,
         "needs_role_selection": False,
     }

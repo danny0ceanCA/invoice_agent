@@ -44,11 +44,13 @@ def _serialize_vendor(vendor: Vendor) -> VendorProfile:
 
 @router.get("/me", response_model=VendorProfile)
 def get_vendor_profile(
+    session: Session = Depends(get_session_dependency),
     current_user: User = Depends(require_vendor_user),
 ) -> VendorProfile:
     """Return the vendor profile for the authenticated user."""
 
-    vendor = current_user.vendor
+    vendor_id = current_user.vendor_id
+    vendor = session.get(Vendor, vendor_id) if vendor_id is not None else None
     if vendor is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

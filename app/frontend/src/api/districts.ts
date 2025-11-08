@@ -19,6 +19,18 @@ export interface DistrictProfilePayload {
   mailing_address: string;
 }
 
+export interface DistrictMembershipEntry {
+  district_id: number;
+  company_name: string;
+  district_key: string;
+  is_active: boolean;
+}
+
+export interface DistrictMembershipCollection {
+  active_district_id: number | null;
+  memberships: DistrictMembershipEntry[];
+}
+
 export interface DistrictVendorStudent {
   id: number;
   name: string;
@@ -120,4 +132,33 @@ export async function fetchDistrictVendors(
   accessToken: string,
 ): Promise<DistrictVendorOverview> {
   return districtFetch<DistrictVendorOverview>("/districts/vendors", accessToken);
+}
+
+export async function fetchDistrictMemberships(
+  accessToken: string,
+): Promise<DistrictMembershipCollection> {
+  return districtFetch<DistrictMembershipCollection>("/districts/memberships", accessToken);
+}
+
+export async function addDistrictMembership(
+  accessToken: string,
+  districtKey: string,
+): Promise<DistrictMembershipCollection> {
+  return districtFetch<DistrictMembershipCollection>("/districts/memberships", accessToken, {
+    method: "POST",
+    body: JSON.stringify({ district_key: districtKey }),
+  });
+}
+
+export async function activateDistrictMembership(
+  accessToken: string,
+  districtId: number,
+): Promise<DistrictMembershipCollection> {
+  return districtFetch<DistrictMembershipCollection>(
+    `/districts/memberships/${districtId}/activate`,
+    accessToken,
+    {
+      method: "POST",
+    },
+  );
 }

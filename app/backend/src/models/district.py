@@ -29,6 +29,11 @@ class District(Base):
     )
 
     users: Mapped[list["User"]] = relationship("User", back_populates="district")
+    memberships: Mapped[list["DistrictMembership"]] = relationship(
+        "DistrictMembership",
+        back_populates="district",
+        cascade="all, delete-orphan",
+    )
     vendors: Mapped[list["Vendor"]] = relationship("Vendor", back_populates="district")
 
 

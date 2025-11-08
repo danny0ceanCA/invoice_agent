@@ -23,7 +23,14 @@ os.environ.setdefault("LOCAL_STORAGE_PATH", "/tmp/invoice-agent-tests")
 from app.backend.src.agents.invoice_agent import InvoiceAgent
 from app.backend.src.db import get_engine, session_scope
 from app.backend.src.main import app
-from app.backend.src.models import District, Invoice, InvoiceLineItem, Vendor, User
+from app.backend.src.models import (
+    District,
+    DistrictMembership,
+    Invoice,
+    InvoiceLineItem,
+    Vendor,
+    User,
+)
 from app.backend.src.models.base import Base
 from app.backend.src.core.security import get_current_user
 
@@ -39,6 +46,34 @@ def setup_database() -> None:
 @pytest.fixture()
 def client() -> TestClient:
     return TestClient(app)
+
+
+@pytest.fixture()
+def admin_user() -> int:
+    with session_scope() as session:
+        user = (
+            session.query(User)
+            .filter(User.email == "admin-user@example.com")
+            .one_or_none()
+        )
+        if user is None:
+            user = User(
+                email="admin-user@example.com",
+                name="Admin User",
+                role="admin",
+                is_approved=True,
+            )
+            session.add(user)
+            session.flush()
+        else:
+            if user.role != "admin":
+                user.role = "admin"
+            if not user.is_approved:
+                user.is_approved = True
+            session.add(user)
+            session.flush()
+
+        return user.id
 
 
 @pytest.fixture()
@@ -151,6 +186,20 @@ def district_and_user() -> tuple[int, int]:
             session.add(user)
             session.flush()
 
+        membership = (
+            session.query(DistrictMembership)
+            .filter(
+                DistrictMembership.user_id == user.id,
+                DistrictMembership.district_id == district.id,
+            )
+            .one_or_none()
+        )
+        if membership is None:
+            session.add(
+                DistrictMembership(user_id=user.id, district_id=district.id)
+            )
+            session.flush()
+
         return district.id, user.id
 
 
@@ -158,6 +207,134 @@ def test_liveness_endpoint(client: TestClient) -> None:
     response = client.get("/api/health/live")
     assert response.status_code == 200
     assert response.json()["status"] == "live"
+
+
+def test_admin_can_create_district(
+    client: TestClient, admin_user: int
+) -> None:
+    from uuid import uuid4
+
+    def override_current_user() -> User:
+        with session_scope() as session:
+            user = session.get(User, admin_user)
+            assert user is not None
+            return user
+
+    app.dependency_overrides[get_current_user] = override_current_user
+
+    unique_suffix = uuid4().hex[:6]
+    payload = {
+        "company_name": f"Integration District {unique_suffix}",
+        "contact_name": "Integration Admin",
+        "contact_email": f"integration-{unique_suffix}@example.com",
+        "phone_number": "555-000-1234",
+        "mailing_address": "100 Integration Way\nSacramento, CA 95824",
+        "district_key": "INTG-1234-5678",
+    }
+
+    try:
+        response = client.post("/api/admin/districts", json=payload)
+        assert response.status_code == 201, response.text
+        created = response.json()
+        assert created["company_name"] == payload["company_name"]
+        assert created["district_key"].replace("-", "")
+
+        listing = client.get("/api/admin/districts")
+        assert listing.status_code == 200, listing.text
+        names = [entry["company_name"] for entry in listing.json()]
+        assert payload["company_name"] in names
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+
+def test_district_user_can_add_and_activate_memberships(
+    client: TestClient, district_and_user: tuple[int, int]
+) -> None:
+    from uuid import uuid4
+
+    district_id, user_id = district_and_user
+    unique_suffix = uuid4().hex[:12]
+    new_key = (
+        f"{unique_suffix[:4]}-{unique_suffix[4:8]}-{unique_suffix[8:12]}"
+    ).upper()
+
+    with session_scope() as session:
+        original_memberships = (
+            session.query(DistrictMembership)
+            .filter(DistrictMembership.user_id == user_id)
+            .count()
+        )
+        assert original_memberships == 1
+
+        new_district = District(
+            company_name=f"Expansion District {unique_suffix}",
+            contact_name="Expansion Admin",
+            contact_email=f"expansion-{unique_suffix}@example.com",
+            phone_number="555-123-4567",
+            mailing_address="400 Expansion Way\nSacramento, CA 95838",
+        )
+        new_district.district_key = new_key
+        session.add(new_district)
+        session.flush()
+        new_district_id = new_district.id
+
+    def override_current_user() -> User:
+        with session_scope() as session:
+            user = session.get(User, user_id)
+            assert user is not None
+            return user
+
+    app.dependency_overrides[get_current_user] = override_current_user
+
+    try:
+        response = client.get("/api/districts/memberships")
+        assert response.status_code == 200, response.text
+        initial_collection = response.json()
+        assert initial_collection["active_district_id"] == district_id
+        assert len(initial_collection["memberships"]) == 1
+
+        response = client.post(
+            "/api/districts/memberships",
+            json={"district_key": new_key},
+        )
+        assert response.status_code == 200, response.text
+        add_collection = response.json()
+        assert len(add_collection["memberships"]) == 2
+        added_entry = next(
+            (
+                entry
+                for entry in add_collection["memberships"]
+                if entry["district_id"] == new_district_id
+            ),
+            None,
+        )
+        assert added_entry is not None
+        assert added_entry["district_key"] == new_key
+        assert not added_entry["is_active"]
+
+        response = client.post(
+            f"/api/districts/memberships/{new_district_id}/activate",
+        )
+        assert response.status_code == 200, response.text
+        activate_collection = response.json()
+        assert activate_collection["active_district_id"] == new_district_id
+        new_active_entry = next(
+            (
+                entry
+                for entry in activate_collection["memberships"]
+                if entry["district_id"] == new_district_id
+            ),
+            None,
+        )
+        assert new_active_entry is not None
+        assert new_active_entry["is_active"] is True
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+
+    with session_scope() as session:
+        user = session.get(User, user_id)
+        assert user is not None
+        assert user.district_id == new_district_id
 
 
 def test_invoice_agent_generates_invoices(tmp_path: Path, vendor_and_user: tuple[int, int]) -> None:
@@ -297,6 +474,62 @@ def test_district_profile_endpoints(
         assert district is not None
         assert district.company_name == payload["company_name"]
         assert district.contact_name == payload["contact_name"]
+
+
+def test_district_membership_management(
+    client: TestClient, district_and_user: tuple[int, int]
+) -> None:
+    original_district_id, user_id = district_and_user
+
+    with session_scope() as session:
+        additional = District(
+            company_name="Secondary Test District",
+            contact_email="secondary@example.com",
+            contact_name="Secondary Admin",
+            phone_number="555-555-1111",
+            mailing_address="201 District Ave\nSacramento, CA 95814",
+        )
+        session.add(additional)
+        session.flush()
+        new_district_id = additional.id
+        new_key = additional.district_key
+
+    def override_current_user() -> User:
+        with session_scope() as session:
+            user = session.get(User, user_id)
+            assert user is not None
+            _ = user.district
+            return user
+
+    app.dependency_overrides[get_current_user] = override_current_user
+
+    try:
+        listing = client.get("/api/districts/memberships")
+        assert listing.status_code == 200, listing.text
+        data = listing.json()
+        assert data["active_district_id"] == original_district_id
+
+        response = client.post(
+            "/api/districts/memberships",
+            json={"district_key": new_key},
+        )
+        assert response.status_code == 200, response.text
+        memberships = response.json()
+        assert len(memberships["memberships"]) >= 2
+
+        activation = client.post(
+            f"/api/districts/memberships/{new_district_id}/activate"
+        )
+        assert activation.status_code == 200, activation.text
+        activated = activation.json()
+        assert activated["active_district_id"] == new_district_id
+
+        reset = client.post(
+            f"/api/districts/memberships/{original_district_id}/activate"
+        )
+        assert reset.status_code == 200, reset.text
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
 
 
 def test_district_vendor_overview(

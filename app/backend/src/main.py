@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .api import (
     admin,
     admin_users,
+    admin_districts,
     analytics,
     auth,
     districts,
@@ -40,6 +41,7 @@ def create_app() -> FastAPI:
     app.include_router(analytics.router, prefix="/api")
     app.include_router(admin.router, prefix="/api")
     app.include_router(admin_users.router, prefix="/api")
+    app.include_router(admin_districts.router, prefix="/api")
     app.include_router(users.router, prefix="/api")
     app.include_router(vendors.router, prefix="/api")
     app.include_router(districts.router, prefix="/api")

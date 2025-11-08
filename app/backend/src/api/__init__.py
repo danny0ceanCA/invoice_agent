@@ -3,6 +3,7 @@
 from . import (
     admin,
     admin_users,
+    admin_districts,
     analytics,
     auth,
     districts,
@@ -17,6 +18,7 @@ from . import (
 __all__ = [
     "admin",
     "admin_users",
+    "admin_districts",
     "analytics",
     "auth",
     "districts",

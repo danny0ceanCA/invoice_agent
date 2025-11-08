@@ -43,6 +43,41 @@ class DistrictProfileUpdate(BaseModel):
         )
 
 
+class DistrictMembershipEntry(BaseModel):
+    """Serialized membership entry for a district user."""
+
+    district_id: int
+    company_name: str
+    district_key: str
+    is_active: bool
+
+
+class DistrictMembershipCollection(BaseModel):
+    """List of district memberships paired with the active selection."""
+
+    active_district_id: int | None
+    memberships: list[DistrictMembershipEntry]
+
+
+class DistrictKeySubmission(BaseModel):
+    """Payload submitted when a user enters a district access key."""
+
+    district_key: str
+
+    def normalized(self) -> "DistrictKeySubmission":
+        """Return a copy with a normalized district key."""
+
+        key_characters = "".join(char for char in self.district_key if char.isalnum()).upper()
+        normalized_key = (
+            "-".join(
+                key_characters[i : i + 4] for i in range(0, len(key_characters), 4)
+            )
+            if key_characters
+            else ""
+        )
+        return DistrictKeySubmission(district_key=normalized_key)
+
+
 class DistrictVendorInvoiceStudent(BaseModel):
     """Student service summary attached to an invoice."""
 
@@ -114,6 +149,9 @@ class DistrictVendorOverview(BaseModel):
 __all__ = [
     "DistrictProfile",
     "DistrictProfileUpdate",
+    "DistrictMembershipCollection",
+    "DistrictMembershipEntry",
+    "DistrictKeySubmission",
     "DistrictVendorInvoice",
     "DistrictVendorInvoiceStudent",
     "DistrictVendorLatestInvoice",
