@@ -9,10 +9,9 @@ import {
   updateVendorProfile,
 } from "../api/vendors";
 import JobStatusCard from "./JobStatusCard";
+import VendorProfileWizard from "../components/VendorProfileWizard";
 
 const PHONE_DIGIT_LENGTH = 10;
-const PHONE_INPUT_PATTERN = /^\(\d{3}\)-\d{3}-\d{4}$/;
-
 function stripPhoneNumber(value = "") {
   return value.replace(/\D/g, "").slice(0, PHONE_DIGIT_LENGTH);
 }
@@ -29,369 +28,6 @@ function formatPhoneNumberForDisplay(value = "") {
   return `(${area})-${prefix}-${lineNumber}`;
 }
 
-function formatPhoneNumberForInput(value = "") {
-  const digits = stripPhoneNumber(value);
-  if (digits.length === 0) return "";
-
-  const area = digits.slice(0, 3);
-  const prefix = digits.slice(3, 6);
-  const lineNumber = digits.slice(6, 10);
-
-  if (digits.length < 3) {
-    return `(${area}`;
-  }
-
-  if (digits.length === 3) {
-    return `(${area})`;
-  }
-
-  if (digits.length <= 6) {
-    return `(${area})-${prefix}`;
-  }
-
-  return `(${area})-${prefix}-${lineNumber}`;
-}
-
-function normalizeMultiline(value = "") {
-  return value
-    .replace(/\r\n/g, "\n")
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line, index, arr) => line.length > 0 || index === arr.length - 1)
-    .join("\n")
-    .trim();
-}
-
-function normalizeProfileValues(values) {
-  const phoneDigits = stripPhoneNumber(values.phone_number);
-
-  return {
-    company_name: values.company_name.trim(),
-    contact_name: values.contact_name.trim(),
-    contact_email: values.contact_email.trim().toLowerCase(),
-    phone_number: phoneDigits,
-    remit_to_address: normalizeMultiline(values.remit_to_address),
-  };
-}
-
-function validateProfileValues(values) {
-  if (values.company_name.length < 2) {
-    return "Company name must be at least 2 characters.";
-  }
-
-  if (values.contact_name.length < 2 || !/^[\p{L} .'-]+$/u.test(values.contact_name)) {
-    return "Enter a valid primary contact name.";
-  }
-
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.contact_email)) {
-    return "Enter a valid primary contact email.";
-  }
-
-  if (values.phone_number.length !== PHONE_DIGIT_LENGTH) {
-    return "Enter a 10-digit phone number in the format (###)-###-####.";
-  }
-
-  if (values.remit_to_address.length < 5) {
-    return "Remit-to address must be at least 5 characters.";
-  }
-
-  return null;
-}
-
-const PROFILE_STEPS = [
-  {
-    id: "company",
-    title: "Company name",
-    description: "We use this on invoices and communications.",
-  },
-  {
-    id: "contactName",
-    title: "Primary contact name",
-    description: "Who's the best person for us to reach out to?",
-  },
-  {
-    id: "contactEmail",
-    title: "Primary contact email",
-    description: "We'll send confirmations and updates here.",
-  },
-  {
-    id: "phone",
-    title: "Phone number",
-    description: "Include a 10-digit number we can call with questions.",
-  },
-  {
-    id: "remitAddress",
-    title: "Remit-to address",
-    description: "Where should districts send payment?",
-  },
-];
-
-function validateStep(stepId, values) {
-  const normalized = normalizeProfileValues(values);
-
-  switch (stepId) {
-    case "company":
-      if (normalized.company_name.length < 2) {
-        return "Company name must be at least 2 characters.";
-      }
-      return null;
-    case "contactName":
-      if (
-        normalized.contact_name.length < 2 ||
-        !/^[\p{L} .'-]+$/u.test(normalized.contact_name)
-      ) {
-        return "Enter a valid primary contact name.";
-      }
-      return null;
-    case "contactEmail":
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized.contact_email)) {
-        return "Enter a valid primary contact email.";
-      }
-      return null;
-    case "phone":
-      if (normalized.phone_number.length !== PHONE_DIGIT_LENGTH) {
-        return "Enter a 10-digit phone number in the format (###)-###-####.";
-      }
-      return null;
-    case "remitAddress":
-      if (normalized.remit_to_address.length < 5) {
-        return "Remit-to address must be at least 5 characters.";
-      }
-      return null;
-    default:
-      return null;
-  }
-}
-
-function VendorProfileForm({
-  initialValues,
-  onSubmit,
-  onCancel,
-  saving,
-  error,
-  disableCancel,
-}) {
-  const [formValues, setFormValues] = useState({
-    ...initialValues,
-    phone_number: formatPhoneNumberForInput(initialValues.phone_number),
-  });
-  const [validationError, setValidationError] = useState(null);
-  const [currentStep, setCurrentStep] = useState(0);
-
-  useEffect(() => {
-    setFormValues({
-      ...initialValues,
-      phone_number: formatPhoneNumberForInput(initialValues.phone_number),
-    });
-    setValidationError(null);
-    setCurrentStep(0);
-  }, [initialValues]);
-
-  function handleChange(event) {
-    const { name, value } = event.target;
-    if (name === "phone_number") {
-      setFormValues((previous) => ({
-        ...previous,
-        [name]: formatPhoneNumberForInput(value),
-      }));
-      return;
-    }
-
-    setFormValues((previous) => ({ ...previous, [name]: value }));
-  }
-
-  function handleFormSubmit(event) {
-    event.preventDefault();
-    if (saving) {
-      return;
-    }
-    const step = PROFILE_STEPS[currentStep];
-
-    if (!step) {
-      return;
-    }
-
-    if (currentStep < PROFILE_STEPS.length - 1) {
-      const stepValidation = validateStep(step.id, formValues);
-      if (stepValidation) {
-        setValidationError(stepValidation);
-        return;
-      }
-
-      setValidationError(null);
-      setCurrentStep((previous) => previous + 1);
-      return;
-    }
-
-    const normalizedValues = normalizeProfileValues(formValues);
-    const validationMessage = validateProfileValues(normalizedValues);
-
-    if (validationMessage) {
-      setValidationError(validationMessage);
-      return;
-    }
-
-    setValidationError(null);
-    onSubmit(normalizedValues);
-  }
-
-  const step = PROFILE_STEPS[currentStep];
-  const isFirstStep = currentStep === 0;
-  const isLastStep = currentStep === PROFILE_STEPS.length - 1;
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 px-4 py-6">
-      <div className="w-full max-w-2xl rounded-2xl bg-white p-6 shadow-xl">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-lg font-semibold text-slate-900">Vendor profile</h2>
-            <p className="mt-1 text-sm text-slate-600">
-              Complete these quick steps before entering the vendor workspace.
-            </p>
-          </div>
-          <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-            Step {currentStep + 1} of {PROFILE_STEPS.length}
-          </span>
-        </div>
-
-        <form className="mt-6 space-y-5" onSubmit={handleFormSubmit}>
-          <div>
-            <h3 className="text-base font-semibold text-slate-900">{step.title}</h3>
-            <p className="mt-1 text-sm text-slate-600">{step.description}</p>
-          </div>
-
-          {step.id === "company" ? (
-            <label className="block text-sm font-medium text-slate-700">
-              Company name
-              <input
-                type="text"
-                name="company_name"
-                value={formValues.company_name}
-                onChange={handleChange}
-                required
-                autoFocus
-                className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
-              />
-            </label>
-          ) : null}
-
-          {step.id === "contactName" ? (
-            <label className="block text-sm font-medium text-slate-700">
-              Primary contact name
-              <input
-                type="text"
-                name="contact_name"
-                value={formValues.contact_name}
-                onChange={handleChange}
-                required
-                autoFocus
-                className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
-              />
-            </label>
-          ) : null}
-
-          {step.id === "contactEmail" ? (
-            <label className="block text-sm font-medium text-slate-700">
-              Primary contact email
-              <input
-                type="email"
-                name="contact_email"
-                value={formValues.contact_email}
-                onChange={handleChange}
-                required
-                autoFocus
-                className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
-              />
-            </label>
-          ) : null}
-
-          {step.id === "phone" ? (
-            <label className="block text-sm font-medium text-slate-700">
-              Phone number
-              <input
-                type="tel"
-                name="phone_number"
-                value={formValues.phone_number}
-                onChange={handleChange}
-                required
-                pattern={PHONE_INPUT_PATTERN.source}
-                inputMode="tel"
-                placeholder="(555)-123-4567"
-                title="Enter a 10-digit phone number in the format (###)-###-####"
-                autoFocus
-                className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
-              />
-            </label>
-          ) : null}
-
-          {step.id === "remitAddress" ? (
-            <label className="block text-sm font-medium text-slate-700">
-              Remit-to address
-              <textarea
-                name="remit_to_address"
-                value={formValues.remit_to_address}
-                onChange={handleChange}
-                required
-                rows={4}
-                autoFocus
-                className="mt-2 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
-              />
-            </label>
-          ) : null}
-
-          {validationError ? (
-            <p className="text-sm text-red-600">{validationError}</p>
-          ) : null}
-          {error ? <p className="text-sm text-red-600">{error}</p> : null}
-
-          <div className="flex flex-wrap justify-between gap-3">
-            <div>
-              {disableCancel ? null : (
-                <button
-                  type="button"
-                  onClick={onCancel}
-                  disabled={saving}
-                  className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  Close
-                </button>
-              )}
-            </div>
-
-            <div className="flex flex-wrap gap-3">
-              {!isFirstStep ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setValidationError(null);
-                    setCurrentStep((previous) => Math.max(previous - 1, 0));
-                  }}
-                  disabled={saving}
-                  className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  Back
-                </button>
-              ) : null}
-
-              <button
-                type="submit"
-                disabled={saving}
-                className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white shadow transition hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {saving
-                  ? "Saving…"
-                  : isLastStep
-                    ? "Save details"
-                    : "Next"}
-              </button>
-            </div>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-}
-
 export default function VendorDashboard({ vendorId }) {
   const [jobs, setJobs] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
@@ -399,10 +35,8 @@ export default function VendorDashboard({ vendorId }) {
   const [vendorProfile, setVendorProfile] = useState(null);
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileError, setProfileError] = useState(null);
-  const [profileSaving, setProfileSaving] = useState(false);
-  const [profileFormError, setProfileFormError] = useState(null);
   const [showProfileForm, setShowProfileForm] = useState(false);
-  const [profilePromptDismissed, setProfilePromptDismissed] = useState(false);
+  const [isWizardManuallyOpened, setIsWizardManuallyOpened] = useState(false);
 
   const { isAuthenticated, getAccessTokenSilently, loginWithRedirect } = useAuth0();
 
@@ -461,7 +95,7 @@ export default function VendorDashboard({ vendorId }) {
       setVendorProfile(null);
       setProfileError(null);
       setShowProfileForm(false);
-      setProfilePromptDismissed(false);
+      setIsWizardManuallyOpened(false);
       return;
     }
 
@@ -474,46 +108,35 @@ export default function VendorDashboard({ vendorId }) {
     loadVendorProfile();
   }, [loadVendorProfile]);
 
-  useEffect(() => {
-    setProfilePromptDismissed(false);
-  }, [vendorId]);
-
-  // 🔹 Updated logic – modal opens if missing company_name or incomplete or no profile at all
+  // 🔹 Updated logic – wizard opens if missing company_name or incomplete or no profile at all
   useEffect(() => {
     if (
       !vendorProfile ||
       !vendorProfile.company_name ||
       !vendorProfile.is_profile_complete
     ) {
-      if (!profilePromptDismissed) {
-        setShowProfileForm(true);
-      }
+      setShowProfileForm(true);
+      setIsWizardManuallyOpened(false);
+      return;
     }
-  }, [vendorProfile, profilePromptDismissed]);
+    if (!isWizardManuallyOpened) {
+      setShowProfileForm(false);
+    }
+  }, [isWizardManuallyOpened, vendorProfile]);
 
   async function handleProfileSubmit(updatedValues) {
-    setProfileSaving(true);
-    setProfileFormError(null);
     try {
       const token = await getAccessTokenSilently();
       const profile = await updateVendorProfile(token, updatedValues);
       setVendorProfile(profile);
-      setShowProfileForm(false);
-      setProfilePromptDismissed(false);
       toast.success("Vendor profile updated.");
+      return profile;
     } catch (err) {
       console.error("vendor_profile_update_failed", err);
-      setProfileFormError(
-        err?.message ?? "We couldn't save your profile. Please try again.",
-      );
-    } finally {
-      setProfileSaving(false);
+      const message =
+        err?.message ?? "We couldn't save your profile. Please try again.";
+      throw new Error(message);
     }
-  }
-
-  function handleProfileCancel() {
-    setShowProfileForm(false);
-    setProfilePromptDismissed(true);
   }
 
   async function handleUpload(event) {
@@ -607,7 +230,9 @@ export default function VendorDashboard({ vendorId }) {
           <aside className="space-y-6">
             <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
               <h2 className="text-sm font-semibold text-slate-900">Vendor profile</h2>
-              {profileLoading ? (
+              {profileError ? (
+                <p className="mt-3 text-sm text-red-600">{profileError}</p>
+              ) : profileLoading ? (
                 <p className="mt-3 text-sm text-slate-500">Loading profile…</p>
               ) : vendorProfile ? (
                 <div className="mt-4 space-y-4 text-sm text-slate-600">
@@ -648,8 +273,8 @@ export default function VendorDashboard({ vendorId }) {
                   <button
                     type="button"
                     onClick={() => {
+                      setIsWizardManuallyOpened(true);
                       setShowProfileForm(true);
-                      setProfilePromptDismissed(false);
                     }}
                     className="inline-flex items-center rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
                   >
@@ -713,13 +338,13 @@ export default function VendorDashboard({ vendorId }) {
       </div>
 
       {showProfileForm ? (
-        <VendorProfileForm
+        <VendorProfileWizard
           initialValues={initialProfileValues}
           onSubmit={handleProfileSubmit}
-          onCancel={handleProfileCancel}
-          saving={profileSaving}
-          error={profileFormError}
-          disableCancel={!vendorProfile || !vendorProfile.is_profile_complete}
+          onClose={() => {
+            setShowProfileForm(false);
+            setIsWizardManuallyOpened(false);
+          }}
         />
       ) : null}
     </div>
