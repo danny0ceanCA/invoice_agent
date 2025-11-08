@@ -149,30 +149,35 @@ function validateStep(stepId, values) {
 }
 
 export default function VendorProfileWizard({ initialValues, onSubmit, onClose }) {
-  const [currentStep, setCurrentStep] = useState(0);
-  const [formValues, setFormValues] = useState(() => ({
-    company_name: initialValues?.company_name ?? "",
-    contact_name: initialValues?.contact_name ?? "",
-    contact_email: initialValues?.contact_email ?? "",
-    phone_number: formatPhoneNumberForInput(initialValues?.phone_number ?? ""),
-    remit_to_address: initialValues?.remit_to_address ?? "",
-  }));
-  const [validationError, setValidationError] = useState(null);
-  const [submitError, setSubmitError] = useState(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  useEffect(() => {
-    setFormValues({
+  const memoizedInitialValues = useMemo(
+    () => ({
       company_name: initialValues?.company_name ?? "",
       contact_name: initialValues?.contact_name ?? "",
       contact_email: initialValues?.contact_email ?? "",
       phone_number: formatPhoneNumberForInput(initialValues?.phone_number ?? ""),
       remit_to_address: initialValues?.remit_to_address ?? "",
-    });
+    }),
+    [
+      initialValues?.company_name,
+      initialValues?.contact_name,
+      initialValues?.contact_email,
+      initialValues?.phone_number,
+      initialValues?.remit_to_address,
+    ],
+  );
+
+  const [currentStep, setCurrentStep] = useState(0);
+  const [formValues, setFormValues] = useState(() => memoizedInitialValues);
+  const [validationError, setValidationError] = useState(null);
+  const [submitError, setSubmitError] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    setFormValues(memoizedInitialValues);
     setCurrentStep(0);
     setValidationError(null);
     setSubmitError(null);
-  }, [initialValues]);
+  }, [memoizedInitialValues]);
 
   const currentStepConfig = useMemo(
     () => PROFILE_STEPS[currentStep] ?? PROFILE_STEPS[0],

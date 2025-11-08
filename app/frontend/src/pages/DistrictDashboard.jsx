@@ -532,13 +532,22 @@ export default function DistrictDashboard({ districtId = null }) {
     setProfilePromptDismissed(true);
   }, []);
 
-  const initialProfileValues = {
-    company_name: districtProfile?.company_name ?? "",
-    contact_name: districtProfile?.contact_name ?? "",
-    contact_email: districtProfile?.contact_email ?? "",
-    phone_number: districtProfile?.phone_number ?? "",
-    mailing_address: districtProfile?.mailing_address ?? "",
-  };
+  const initialProfileValues = useMemo(
+    () => ({
+      company_name: districtProfile?.company_name ?? "",
+      contact_name: districtProfile?.contact_name ?? "",
+      contact_email: districtProfile?.contact_email ?? "",
+      phone_number: districtProfile?.phone_number ?? "",
+      mailing_address: districtProfile?.mailing_address ?? "",
+    }),
+    [
+      districtProfile?.company_name,
+      districtProfile?.contact_name,
+      districtProfile?.contact_email,
+      districtProfile?.phone_number,
+      districtProfile?.mailing_address,
+    ],
+  );
   useEffect(() => {
     if (!isAuthenticated) {
       setVendorProfiles([]);
