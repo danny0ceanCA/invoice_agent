@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { Plus, Users2 } from "lucide-react";
+import { KeyRound, Plus, Users2 } from "lucide-react";
 import { useAuth0 } from "@auth0/auth0-react";
 import toast from "react-hot-toast";
 
@@ -151,6 +151,31 @@ export default function AdminDashboard({ currentUser }) {
             </span>
           </Link>
 
+          <a
+            href="#district-keys"
+            className="group flex h-full flex-col justify-between rounded-xl border border-amber-100 bg-gradient-to-r from-amber-50 via-orange-50 to-rose-50 p-6 text-amber-900 shadow-sm transition-transform duration-200 ease-out hover:-translate-y-1 hover:shadow-xl"
+            aria-label="Jump to district creation form"
+          >
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-sm font-medium uppercase tracking-wide text-amber-600">Provisioning</p>
+                <h3 className="mt-2 text-xl font-semibold text-amber-950">District Keys</h3>
+              </div>
+              <div className="rounded-full bg-amber-100 p-2 text-amber-600">
+                <KeyRound className="h-6 w-6" aria-hidden="true" />
+              </div>
+            </div>
+            <p className="mt-4 text-sm leading-relaxed text-amber-700">
+              Create districts and generate secure access keys to onboard new education partners.
+            </p>
+            <span className="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-amber-600">
+              Issue district keys
+              <span aria-hidden="true" className="transition-transform group-hover:translate-x-1">
+                →
+              </span>
+            </span>
+          </a>
+
           {cards.map((card) => (
             <div
               key={card.title}
@@ -165,7 +190,7 @@ export default function AdminDashboard({ currentUser }) {
 
       {currentUser?.role === "admin" ? (
         <div className="space-y-6">
-          <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+          <section id="district-keys" className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
             <h3 className="text-lg font-semibold text-slate-900">Create a district</h3>
             <p className="mt-1 text-sm text-slate-600">
               Generate new districts and share the generated access keys with trusted staff members.
