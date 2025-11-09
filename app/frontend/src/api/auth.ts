@@ -7,6 +7,13 @@ export const API_BASE = (
 export type UserRole = "vendor" | "district" | "admin";
 export type RoleSelectionOption = Exclude<UserRole, "admin">;
 
+export interface DistrictMembershipEntry {
+  district_id: number;
+  company_name: string;
+  district_key: string;
+  is_active: boolean;
+}
+
 export interface ApiError extends Error {
   status?: number;
   statusText?: string;
@@ -19,6 +26,8 @@ export interface CurrentUserResponse {
   role: UserRole | null;
   vendor_id: number | null;
   district_id: number | null;
+  active_district_id: number | null;
+  district_memberships: DistrictMembershipEntry[];
   auth0_sub: string | null;
   needs_role_selection: boolean;
 }

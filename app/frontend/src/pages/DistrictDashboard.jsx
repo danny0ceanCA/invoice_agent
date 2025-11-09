@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth0 } from "@auth0/auth0-react";
 import toast from "react-hot-toast";
+import { CheckCircle2, Plus } from "lucide-react";
 
 import {
   fetchDistrictProfile,
   fetchDistrictVendors,
+  fetchDistrictMemberships,
   updateDistrictProfile,
+  addDistrictMembership,
+  activateDistrictMembership,
 } from "../api/districts";
 
 const menuItems = [
@@ -33,7 +37,7 @@ const menuItems = [
     label: "Settings",
     description:
       "Configure district-wide preferences, notification cadences, and escalation workflows.",
-    comingSoon: true,
+    comingSoon: false,
   },
 ];
 
@@ -309,7 +313,11 @@ function DistrictProfileForm({
 }
 
 
-export default function DistrictDashboard({ districtId = null }) {
+export default function DistrictDashboard({
+  districtId = null,
+  initialMemberships = [],
+  onMembershipChange = null,
+}) {
   const { isAuthenticated, getAccessTokenSilently } = useAuth0();
   const [activeKey, setActiveKey] = useState(menuItems[0].key);
   const [selectedVendorId, setSelectedVendorId] = useState(null);
@@ -324,10 +332,26 @@ export default function DistrictDashboard({ districtId = null }) {
   const [profileFormError, setProfileFormError] = useState(null);
   const [showProfileForm, setShowProfileForm] = useState(false);
   const [profilePromptDismissed, setProfilePromptDismissed] = useState(false);
+  const [memberships, setMemberships] = useState(initialMemberships);
+  const [membershipLoading, setMembershipLoading] = useState(false);
+  const [membershipError, setMembershipError] = useState(null);
+  const [activeDistrictId, setActiveDistrictId] = useState(districtId);
+  const [newDistrictKey, setNewDistrictKey] = useState("");
+  const [membershipActionError, setMembershipActionError] = useState(null);
+  const [addingMembership, setAddingMembership] = useState(false);
+  const [activatingDistrictId, setActivatingDistrictId] = useState(null);
 
   const activeItem = menuItems.find((item) => item.key === activeKey) ?? menuItems[0];
   const selectedVendor = vendorProfiles.find((vendor) => vendor.id === selectedVendorId) ?? null;
   const vendorMetrics = useMemo(() => computeVendorMetrics(vendorProfiles), [vendorProfiles]);
+
+  useEffect(() => {
+    setMemberships(initialMemberships ?? []);
+  }, [initialMemberships]);
+
+  useEffect(() => {
+    setActiveDistrictId(districtId ?? null);
+  }, [districtId]);
 
   const normalizeVendorOverview = useCallback(
     (overview) => {
@@ -439,8 +463,125 @@ export default function DistrictDashboard({ districtId = null }) {
     [],
   );
 
+  const handleDistrictKeyChange = useCallback((event) => {
+    const rawValue = event.target.value ?? "";
+    const normalized = rawValue.replace(/[^a-zA-Z0-9-]/g, "").toUpperCase();
+    setNewDistrictKey(normalized);
+  }, []);
+
+  const loadMemberships = useCallback(async () => {
+    if (!isAuthenticated) {
+      setMemberships([]);
+      setActiveDistrictId(null);
+      setMembershipError(null);
+      return null;
+    }
+
+    setMembershipLoading(true);
+    setMembershipError(null);
+    try {
+      const token = await getAccessTokenSilently();
+      const collection = await fetchDistrictMemberships(token);
+      setMemberships(collection.memberships ?? []);
+      setActiveDistrictId(collection.active_district_id ?? null);
+      return collection;
+    } catch (error) {
+      console.error("district_memberships_fetch_failed", error);
+      setMemberships([]);
+      setActiveDistrictId(null);
+      setMembershipError(
+        "We couldn't load your district access list. Try refreshing the page.",
+      );
+      return null;
+    } finally {
+      setMembershipLoading(false);
+    }
+  }, [getAccessTokenSilently, isAuthenticated]);
+
+  const handleAddMembership = useCallback(
+    async (event) => {
+      event.preventDefault();
+      if (addingMembership) {
+        return;
+      }
+
+      const candidate = newDistrictKey.trim();
+      if (!candidate) {
+        setMembershipActionError("Enter a district access key to continue.");
+        return;
+      }
+
+      setAddingMembership(true);
+      setMembershipActionError(null);
+      try {
+        const token = await getAccessTokenSilently();
+        const collection = await addDistrictMembership(token, candidate);
+        setMemberships(collection.memberships ?? []);
+        setActiveDistrictId(collection.active_district_id ?? null);
+        setNewDistrictKey("");
+        toast.success("District access key added.");
+        if (typeof onMembershipChange === "function") {
+          await onMembershipChange();
+        }
+      } catch (error) {
+        console.error("district_membership_add_failed", error);
+        setMembershipActionError(
+          error instanceof Error && error.message
+            ? error.message
+            : "We couldn't add that access key. Please verify and try again.",
+        );
+      } finally {
+        setAddingMembership(false);
+      }
+    },
+    [addingMembership, getAccessTokenSilently, newDistrictKey, onMembershipChange],
+  );
+
+  const handleActivateMembership = useCallback(
+    async (targetDistrictId) => {
+      if (targetDistrictId == null || targetDistrictId === activeDistrictId) {
+        return;
+      }
+      if (activatingDistrictId === targetDistrictId) {
+        return;
+      }
+
+      setActivatingDistrictId(targetDistrictId);
+      setMembershipActionError(null);
+      try {
+        const token = await getAccessTokenSilently();
+        const collection = await activateDistrictMembership(
+          token,
+          targetDistrictId,
+        );
+        setMemberships(collection.memberships ?? []);
+        setActiveDistrictId(collection.active_district_id ?? null);
+        toast.success("Active district updated.");
+        if (typeof onMembershipChange === "function") {
+          await onMembershipChange();
+        }
+      } catch (error) {
+        console.error("district_membership_activate_failed", error);
+        setMembershipActionError(
+          error instanceof Error && error.message
+            ? error.message
+            : "We couldn't switch districts. Please try again.",
+        );
+      } finally {
+        setActivatingDistrictId(null);
+      }
+    },
+    [activeDistrictId, activatingDistrictId, getAccessTokenSilently, onMembershipChange],
+  );
+
   const loadVendors = useCallback(async () => {
     if (!isAuthenticated) {
+      setVendorProfiles([]);
+      setVendorsError(null);
+      return;
+    }
+
+    if (activeDistrictId == null) {
       setVendorProfiles([]);
       setVendorsError(null);
       return;
@@ -459,7 +600,12 @@ export default function DistrictDashboard({ districtId = null }) {
     } finally {
       setVendorsLoading(false);
     }
-  }, [getAccessTokenSilently, isAuthenticated, normalizeVendorOverview]);
+  }, [
+    activeDistrictId,
+    getAccessTokenSilently,
+    isAuthenticated,
+    normalizeVendorOverview,
+  ]);
 
   const loadDistrictProfile = useCallback(async () => {
     if (!isAuthenticated) {
@@ -468,10 +614,10 @@ export default function DistrictDashboard({ districtId = null }) {
       return null;
     }
 
-    if (districtId == null) {
+    if (activeDistrictId == null) {
       setDistrictProfile(null);
       setProfileError(
-        "Your account is not linked to a district profile yet. Please contact an administrator.",
+        "Add a district access key from Settings to connect to your workspace.",
       );
       return null;
     }
@@ -499,7 +645,7 @@ export default function DistrictDashboard({ districtId = null }) {
     } finally {
       setProfileLoading(false);
     }
-  }, [districtId, getAccessTokenSilently, isAuthenticated]);
+  }, [activeDistrictId, getAccessTokenSilently, isAuthenticated]);
 
   const handleProfileSubmit = useCallback(
     async (values) => {
@@ -556,12 +702,31 @@ export default function DistrictDashboard({ districtId = null }) {
       setProfileError(null);
       setShowProfileForm(false);
       setProfilePromptDismissed(false);
+      setMemberships([]);
+      setActiveDistrictId(null);
+      setMembershipError(null);
+      setNewDistrictKey("");
+      return;
+    }
+
+    loadMemberships().catch(() => {});
+  }, [isAuthenticated, loadMemberships]);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      return;
+    }
+
+    if (activeDistrictId == null) {
+      setVendorProfiles([]);
+      setVendorsError(null);
+      setDistrictProfile(null);
       return;
     }
 
     loadVendors().catch(() => {});
     loadDistrictProfile().catch(() => {});
-  }, [isAuthenticated, loadDistrictProfile, loadVendors]);
+  }, [activeDistrictId, isAuthenticated, loadDistrictProfile, loadVendors]);
 
   useEffect(() => {
     setProfilePromptDismissed(false);
@@ -1227,13 +1392,117 @@ export default function DistrictDashboard({ districtId = null }) {
           </div>
 
         ) : (
-          <div className="mt-8 rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-slate-500">
-            <p className="text-sm font-medium">
-              {activeItem.comingSoon
-                ? "This module is being finalized. Check back soon for rich dashboards and workflows."
-                : "Select an option from the menu to get started."}
-            </p>
-          </div>
+          activeItem.key === "settings" ? (
+            <div className="mt-8 space-y-6">
+              <section className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                <h4 className="text-sm font-semibold uppercase tracking-widest text-slate-500">
+                  District access keys
+                </h4>
+                <p className="mt-2 text-sm text-slate-600">
+                  Enter the secure access keys that administrators share with your team to unlock district consoles.
+                </p>
+                <form
+                  onSubmit={handleAddMembership}
+                  className="mt-4 flex flex-col gap-3 sm:flex-row"
+                >
+                  <div className="flex flex-1 items-center gap-3 rounded-xl border border-slate-300 bg-white px-4 py-3 transition focus-within:border-amber-400 focus-within:ring-2 focus-within:ring-amber-200">
+                    <input
+                      type="text"
+                      className="w-full border-none bg-transparent text-sm font-medium uppercase tracking-widest text-slate-900 focus:outline-none"
+                      placeholder="e.g., ASCS-1234-5678"
+                      value={newDistrictKey}
+                      onChange={handleDistrictKeyChange}
+                      disabled={addingMembership}
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-amber-500 px-4 py-3 text-sm font-semibold text-white shadow transition hover:bg-amber-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/70 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={addingMembership}
+                  >
+                    <Plus className="h-4 w-4" aria-hidden="true" />
+                    {addingMembership ? "Adding…" : "Add key"}
+                  </button>
+                </form>
+                {membershipActionError ? (
+                  <p className="mt-3 text-sm font-medium text-red-600">
+                    {membershipActionError}
+                  </p>
+                ) : null}
+                <p className="mt-3 text-xs text-slate-500">
+                  Keys are not case sensitive—we’ll normalize them for you automatically.
+                </p>
+              </section>
+
+              <section className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-semibold uppercase tracking-widest text-slate-500">
+                    Linked districts
+                  </h4>
+                  {membershipLoading ? (
+                    <span className="text-xs text-slate-500">Updating…</span>
+                  ) : null}
+                </div>
+                {membershipError ? (
+                  <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-600">
+                    {membershipError}
+                  </div>
+                ) : memberships.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-5 text-sm text-slate-600">
+                    Add a district key to unlock your console access.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {memberships.map((membership) => (
+                      <div
+                        key={membership.district_id}
+                        className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-slate-300 sm:flex-row sm:items-center sm:justify-between"
+                      >
+                        <div>
+                          <p className="text-base font-semibold text-slate-900">
+                            {membership.company_name}
+                          </p>
+                          <p className="mt-1 font-mono text-xs tracking-widest text-amber-700">
+                            {membership.district_key}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {membership.is_active ? (
+                            <span className="inline-flex items-center gap-2 rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">
+                              <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+                              Active
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleActivateMembership(membership.district_id)}
+                              disabled={
+                                activatingDistrictId === membership.district_id ||
+                                addingMembership
+                              }
+                              className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              {activatingDistrictId === membership.district_id
+                                ? "Switching…"
+                                : "Make active"}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+            </div>
+          ) : (
+            <div className="mt-8 rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center text-slate-500">
+              <p className="text-sm font-medium">
+                {activeItem.comingSoon
+                  ? "This module is being finalized. Check back soon for rich dashboards and workflows."
+                  : "Select an option from the menu to get started."}
+              </p>
+            </div>
+          )
         )}
       </section>
 

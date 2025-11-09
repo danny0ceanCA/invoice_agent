@@ -52,6 +52,11 @@ class User(Base):
     district: Mapped["District | None"] = relationship(
         "District", back_populates="users"
     )
+    district_memberships: Mapped[list["DistrictMembership"]] = relationship(
+        "DistrictMembership",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
     approvals: Mapped[list["Approval"]] = relationship("Approval", back_populates="reviewer")
     jobs: Mapped[list["Job"]] = relationship("Job", back_populates="user")
 
@@ -66,3 +71,13 @@ class User(Base):
         """Return the associated district's company name, if available."""
 
         return self.district.company_name if self.district else None
+
+    @property
+    def active_district_id(self) -> int | None:
+        """Return the identifier for the user's active district selection."""
+
+        if getattr(self, "district_id", None) is not None:
+            return self.district_id
+        if self.district_memberships:
+            return self.district_memberships[0].district_id
+        return None
