@@ -7,7 +7,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.backend.src.db import get_session_dependency
+from ..db import get_session_dependency
 
 router = APIRouter(tags=["health"])
 

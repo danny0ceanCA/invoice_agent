@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.backend.src.core.security import require_admin_user
-from app.backend.src.db import get_session_dependency
+from ..db import get_session_dependency
 from app.backend.src.models import District
 from app.backend.src.schemas.district import DistrictProfile, DistrictProfileUpdate
 

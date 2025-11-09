@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.backend.src.core.security import get_current_user
-from app.backend.src.db import get_session_dependency
+from ..db import get_session_dependency
 from app.backend.src.models import User, Vendor
 
 router = APIRouter(prefix="/users", tags=["users"])

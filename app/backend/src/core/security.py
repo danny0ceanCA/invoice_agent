@@ -14,7 +14,7 @@ from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
 from app.backend.src.core.config import get_settings
-from app.backend.src.db import get_session_dependency
+from ..db import get_session_dependency
 from app.backend.src.models import User
 from app.backend.src.models.vendor import Vendor
 

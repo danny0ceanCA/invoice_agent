@@ -7,7 +7,7 @@ import string
 
 from sqlalchemy import MetaData, inspect, select, text
 
-from app.backend.src.db import get_engine
+from .. import get_engine
 
 ALPHABET = string.ascii_uppercase + string.digits
 

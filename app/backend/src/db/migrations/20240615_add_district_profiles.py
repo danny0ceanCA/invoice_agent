@@ -14,7 +14,7 @@ from sqlalchemy import (
     text,
 )
 
-from app.backend.src.db import get_engine
+from .. import get_engine
 
 
 def _generate_company_name(

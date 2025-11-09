@@ -12,13 +12,13 @@ import pandas as pd
 import structlog
 from sqlalchemy.orm import Session
 
-from app.backend.src.db import session_scope
-from app.backend.src.models.invoice import Invoice
-from app.backend.src.models.job import Job
-from app.backend.src.models.line_item import InvoiceLineItem
-from app.backend.src.services.metrics import invoice_jobs_total
-from app.backend.src.services.pdf_generation import InvoicePdf, generate_invoice_pdf
-from app.backend.src.services.s3 import upload_bytes
+from ..db import session_scope
+from ..models.invoice import Invoice
+from ..models.job import Job
+from ..models.line_item import InvoiceLineItem
+from ..services.metrics import invoice_jobs_total
+from ..services.pdf_generation import InvoicePdf, generate_invoice_pdf
+from ..services.s3 import upload_bytes
 
 LOGGER = structlog.get_logger(__name__)
 
