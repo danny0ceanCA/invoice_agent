@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr
 from sqlalchemy.orm import Session
 
 from app.backend.src.core.security import require_role
-from app.backend.src.db import get_session_dependency
+from ..db import get_session_dependency
 from app.backend.src.models import User
 from app.backend.src.services import admin_users as admin_user_service
 

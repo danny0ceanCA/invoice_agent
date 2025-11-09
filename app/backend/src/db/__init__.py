@@ -7,6 +7,8 @@ from contextlib import contextmanager
 
 from sqlalchemy.orm import Session
 
+from ..models.base import Base
+
 from .session import SessionLocal, engine as _engine
 
 # Safe session manager for FastAPI + SQLAlchemy
@@ -58,6 +60,7 @@ def session_scope() -> Iterator[Session]:
 
 
 __all__ = [
+    "Base",
     "get_engine",
     "get_session",
     "get_session_dependency",

@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.backend.src.core.security import require_vendor_user
-from app.backend.src.db import get_session_dependency
+from ..db import get_session_dependency
 from app.backend.src.models import Job, User
 from app.backend.src.services.s3 import generate_presigned_url
 try:

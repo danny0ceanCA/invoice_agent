@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.backend.src.core.security import require_vendor_user
-from app.backend.src.db import get_session_dependency
+from ..db import get_session_dependency
 from app.backend.src.models import District, User, Vendor
 from app.backend.src.schemas.vendor import (
     VendorDistrictKeySubmission,

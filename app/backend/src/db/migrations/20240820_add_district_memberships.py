@@ -16,7 +16,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.engine import Connection
 
-from app.backend.src.db import get_engine
+from .. import get_engine
 
 
 def _ensure_membership_table(connection: Connection) -> Table:

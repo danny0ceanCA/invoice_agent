@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, selectinload
 
 from app.backend.src.core.security import require_district_user
-from app.backend.src.db import get_session_dependency
+from ..db import get_session_dependency
 from app.backend.src.models import District, DistrictMembership, User
 from app.backend.src.schemas.district import (
     DistrictKeySubmission,

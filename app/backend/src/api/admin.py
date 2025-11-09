@@ -5,7 +5,7 @@ import os
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.backend.src.db import get_session_dependency
+from ..db import get_session_dependency
 from app.backend.src.models.user import User
 from app.backend.src.services.seed import seed_development_user
 from app.backend.src.core.security import require_admin_user
