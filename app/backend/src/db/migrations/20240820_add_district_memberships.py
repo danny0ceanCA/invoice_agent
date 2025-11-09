@@ -25,13 +25,13 @@ def _ensure_membership_table(connection: Connection) -> Table:
     inspector = inspect(connection)
     if "district_memberships" in inspector.get_table_names():
         metadata = MetaData()
-        metadata.reflect(
-            bind=connection,
-            only=["district_memberships"],
-        )
+        metadata.reflect(bind=connection, only=["district_memberships"])
         return metadata.tables["district_memberships"]
 
+    # ✅ Reflect existing tables so foreign keys resolve
     metadata = MetaData()
+    metadata.reflect(bind=connection, only=["users", "districts"])
+
     memberships = Table(
         "district_memberships",
         metadata,
@@ -65,14 +65,17 @@ def _ensure_membership_table(connection: Connection) -> Table:
 
     memberships.create(bind=connection, checkfirst=True)
 
+    # ✅ Add indexes manually (SQLite safe)
     connection.execute(
         text(
-            "CREATE INDEX IF NOT EXISTS ix_district_memberships_user_id ON district_memberships (user_id)"
+            "CREATE INDEX IF NOT EXISTS ix_district_memberships_user_id "
+            "ON district_memberships (user_id)"
         )
     )
     connection.execute(
         text(
-            "CREATE INDEX IF NOT EXISTS ix_district_memberships_district_id ON district_memberships (district_id)"
+            "CREATE INDEX IF NOT EXISTS ix_district_memberships_district_id "
+            "ON district_memberships (district_id)"
         )
     )
 
@@ -121,3 +124,7 @@ def upgrade() -> None:
 
 
 __all__ = ["upgrade"]
+
+# ✅ Ensure the migration runs when executed directly
+if __name__ == "__main__":
+    upgrade()
