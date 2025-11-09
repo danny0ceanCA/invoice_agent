@@ -14,12 +14,6 @@ import {
 
 const menuItems = [
   {
-    key: "profile",
-    label: "District Profile",
-    description:
-      "Keep your district contact information current so vendors and admins know how to reach you.",
-  },
-  {
     key: "vendors",
     label: "VendorsActive",
     description: "Monitor invoice activity across your approved partners.",
@@ -42,7 +36,7 @@ const menuItems = [
     key: "settings",
     label: "Settings",
     description:
-      "Configure district-wide preferences, notification cadences, and escalation workflows.",
+      "Configure district preferences, manage your profile, and maintain console access keys.",
     comingSoon: false,
   },
 ];
@@ -946,88 +940,7 @@ export default function DistrictDashboard({
           </p>
         ) : null}
 
-        {activeItem.key === "profile" ? (
-          <div className="mt-8 space-y-6">
-            {profileError ? (
-              <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-600">
-                {profileError}
-              </div>
-            ) : null}
-
-            {profileLoading && !districtProfile ? (
-              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-                Loading district profile…
-              </div>
-            ) : null}
-
-            {districtProfile ? (
-              <section className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
-                <div className="flex flex-wrap items-start justify-between gap-4">
-                  <div>
-                    <h4 className="text-sm font-semibold uppercase tracking-widest text-slate-500">
-                      District profile
-                    </h4>
-                    <p className="mt-1 text-lg font-semibold text-slate-900">
-                      {districtProfile.company_name}
-                    </p>
-                    <div className="mt-3 space-y-1 text-sm text-slate-600">
-                      <p>
-                        Primary contact:{" "}
-                        <span className="font-medium text-slate-900">
-                          {districtProfile.contact_name || "Add a contact name"}
-                        </span>
-                      </p>
-                      <p>
-                        {(districtProfile.contact_email || "Add an email") +
-                          " • " +
-                          (districtProfile.phone_number || "Add a phone number")}
-                      </p>
-                      {districtProfile.mailing_address ? (
-                        <p className="whitespace-pre-line">
-                          {districtProfile.mailing_address}
-                        </p>
-                      ) : (
-                        <p>Add a mailing address</p>
-                      )}
-                      <div className="mt-4 rounded-xl border border-dashed border-amber-300 bg-amber-50 p-4 text-amber-800">
-                        <p className="text-xs font-semibold uppercase tracking-widest text-amber-600">
-                          District access key
-                        </p>
-                        <p className="mt-2 font-mono text-lg font-semibold text-amber-900">
-                          {districtProfile.district_key}
-                        </p>
-                        <p className="mt-1 text-xs text-amber-700">
-                          Share this key only with trusted vendors so their invoices route to your district.
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex flex-col items-end gap-2">
-                    {!districtProfile.is_profile_complete ? (
-                      <span className="inline-flex items-center rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700">
-                        Complete your profile
-                      </span>
-                    ) : null}
-                    <button
-                      type="button"
-                      onClick={() => setShowProfileForm(true)}
-                      disabled={profileLoading}
-                      className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-600 shadow-sm transition hover:border-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      Update profile
-                    </button>
-                  </div>
-                </div>
-              </section>
-            ) : null}
-
-            {!profileLoading && !profileError && !districtProfile ? (
-              <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-                No district profile data is available for this workspace yet.
-              </div>
-            ) : null}
-          </div>
-        ) : activeItem.key === "vendors" ? (
+        {activeItem.key === "vendors" ? (
           <div className="mt-8 space-y-6">
             {profileError ? (
               <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-600">
@@ -1387,6 +1300,87 @@ export default function DistrictDashboard({
         ) : (
           activeItem.key === "settings" ? (
             <div className="mt-8 space-y-6">
+              <div className="space-y-6">
+                {profileError ? (
+                  <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-600">
+                    {profileError}
+                  </div>
+                ) : null}
+
+                {profileLoading && !districtProfile ? (
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                    Loading district profile…
+                  </div>
+                ) : null}
+
+                {districtProfile ? (
+                  <section className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+                    <div className="flex flex-wrap items-start justify-between gap-4">
+                      <div>
+                        <h4 className="text-sm font-semibold uppercase tracking-widest text-slate-500">
+                          District profile
+                        </h4>
+                        <p className="mt-1 text-lg font-semibold text-slate-900">
+                          {districtProfile.company_name}
+                        </p>
+                        <div className="mt-3 space-y-1 text-sm text-slate-600">
+                          <p>
+                            Primary contact:{" "}
+                            <span className="font-medium text-slate-900">
+                              {districtProfile.contact_name || "Add a contact name"}
+                            </span>
+                          </p>
+                          <p>
+                            {(districtProfile.contact_email || "Add an email") +
+                              " • " +
+                              (districtProfile.phone_number || "Add a phone number")}
+                          </p>
+                          {districtProfile.mailing_address ? (
+                            <p className="whitespace-pre-line">
+                              {districtProfile.mailing_address}
+                            </p>
+                          ) : (
+                            <p>Add a mailing address</p>
+                          )}
+                          <div className="mt-4 rounded-xl border border-dashed border-amber-300 bg-amber-50 p-4 text-amber-800">
+                            <p className="text-xs font-semibold uppercase tracking-widest text-amber-600">
+                              District access key
+                            </p>
+                            <p className="mt-2 font-mono text-lg font-semibold text-amber-900">
+                              {districtProfile.district_key}
+                            </p>
+                            <p className="mt-1 text-xs text-amber-700">
+                              Share this key only with trusted vendors so their invoices route to your district.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex flex-col items-end gap-2">
+                        {!districtProfile.is_profile_complete ? (
+                          <span className="inline-flex items-center rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700">
+                            Complete your profile
+                          </span>
+                        ) : null}
+                        <button
+                          type="button"
+                          onClick={() => setShowProfileForm(true)}
+                          disabled={profileLoading}
+                          className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-600 shadow-sm transition hover:border-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          Update profile
+                        </button>
+                      </div>
+                    </div>
+                  </section>
+                ) : null}
+
+                {!profileLoading && !profileError && !districtProfile ? (
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                    No district profile data is available for this workspace yet.
+                  </div>
+                ) : null}
+              </div>
+
               <section className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
                 <h4 className="text-sm font-semibold uppercase tracking-widest text-slate-500">
                   District access keys
