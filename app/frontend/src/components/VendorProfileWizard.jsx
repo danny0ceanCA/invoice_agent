@@ -39,14 +39,6 @@ const PROFILE_STEPS = [
     description: "Where should districts send payment?",
     placeholder: "123 Main St.\nSuite 200\nAustin, TX 78701",
   },
-  {
-    id: "districtKey",
-    field: "district_key",
-    title: "District access key",
-    description:
-      "Paste the secure key your district provided so we can route invoices directly to them.",
-    placeholder: "ABCD-EFGH-IJKL",
-  },
 ];
 
 function stripPhoneNumber(value = "") {
@@ -86,21 +78,8 @@ function normalizeMultiline(value = "") {
     .trim();
 }
 
-function normalizeDistrictKey(value = "") {
-  const sanitized = value.replace(/[^0-9a-z]/gi, "").toUpperCase();
-  if (!sanitized) {
-    return "";
-  }
-
-  return sanitized
-    .match(/.{1,4}/g)
-    .map((group) => group.toUpperCase())
-    .join("-");
-}
-
 function normalizeProfileValues(values) {
   const phoneDigits = stripPhoneNumber(values.phone_number);
-  const districtKey = normalizeDistrictKey(values.district_key);
 
   return {
     company_name: values.company_name.trim(),
@@ -108,11 +87,10 @@ function normalizeProfileValues(values) {
     contact_email: values.contact_email.trim().toLowerCase(),
     phone_number: phoneDigits,
     remit_to_address: normalizeMultiline(values.remit_to_address),
-    district_key: districtKey,
   };
 }
 
-function validateProfileValues(values, requiresDistrictKey) {
+function validateProfileValues(values) {
   if (values.company_name.length < 2) {
     return "Company name must be at least 2 characters.";
   }
@@ -133,14 +111,10 @@ function validateProfileValues(values, requiresDistrictKey) {
     return "Remit-to address must be at least 5 characters.";
   }
 
-  if (requiresDistrictKey && values.district_key.length === 0) {
-    return "Enter the district access key provided by your district.";
-  }
-
   return null;
 }
 
-function validateStep(stepId, values, requiresDistrictKey) {
+function validateStep(stepId, values) {
   const normalized = normalizeProfileValues(values);
 
   switch (stepId) {
@@ -169,23 +143,12 @@ function validateStep(stepId, values, requiresDistrictKey) {
         return "Remit-to address is required.";
       }
       return null;
-    case "districtKey":
-      if (requiresDistrictKey && normalized.district_key.length === 0) {
-        return "A district access key is required.";
-      }
-      return null;
     default:
       return null;
   }
 }
 
-export default function VendorProfileWizard({
-  initialValues,
-  onSubmit,
-  onClose,
-  requiresDistrictKey = false,
-  connectedDistrictName = null,
-}) {
+export default function VendorProfileWizard({ initialValues, onSubmit, onClose }) {
   const memoizedInitialValues = useMemo(
     () => ({
       company_name: initialValues?.company_name ?? "",
@@ -193,7 +156,6 @@ export default function VendorProfileWizard({
       contact_email: initialValues?.contact_email ?? "",
       phone_number: formatPhoneNumberForInput(initialValues?.phone_number ?? ""),
       remit_to_address: initialValues?.remit_to_address ?? "",
-      district_key: normalizeDistrictKey(initialValues?.district_key ?? ""),
     }),
     [
       initialValues?.company_name,
@@ -201,7 +163,6 @@ export default function VendorProfileWizard({
       initialValues?.contact_email,
       initialValues?.phone_number,
       initialValues?.remit_to_address,
-      initialValues?.district_key,
     ],
   );
 
@@ -233,14 +194,6 @@ export default function VendorProfileWizard({
       return;
     }
 
-    if (name === "district_key") {
-      setFormValues((previous) => ({
-        ...previous,
-        [name]: normalizeDistrictKey(value),
-      }));
-      return;
-    }
-
     setFormValues((previous) => ({
       ...previous,
       [name]: value,
@@ -253,7 +206,7 @@ export default function VendorProfileWizard({
     const step = PROFILE_STEPS[currentStep];
     if (!step) return;
 
-    const stepValidation = validateStep(step.id, formValues, requiresDistrictKey);
+    const stepValidation = validateStep(step.id, formValues);
     if (stepValidation) {
       setValidationError(stepValidation);
       return;
@@ -276,10 +229,7 @@ export default function VendorProfileWizard({
     }
 
     const normalizedValues = normalizeProfileValues(formValues);
-    const validationMessage = validateProfileValues(
-      normalizedValues,
-      requiresDistrictKey,
-    );
+    const validationMessage = validateProfileValues(normalizedValues);
 
     if (validationMessage) {
       setValidationError(validationMessage);
@@ -291,10 +241,7 @@ export default function VendorProfileWizard({
     setIsSubmitting(true);
 
     try {
-      await onSubmit?.({
-        ...normalizedValues,
-        district_key: normalizedValues.district_key || null,
-      });
+      await onSubmit?.(normalizedValues);
       onClose?.();
     } catch (err) {
       const message = err?.message ?? "We couldn't save your profile. Please try again.";
@@ -425,31 +372,6 @@ export default function VendorProfileWizard({
                   placeholder={currentStepConfig.placeholder}
                   className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-900 shadow-sm focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
                 />
-              </div>
-            ) : null}
-
-            {currentStepConfig.field === "district_key" ? (
-              <div className="space-y-2">
-                <label className="block text-sm font-medium text-slate-700" htmlFor="district_key">
-                  District access key
-                </label>
-                <input
-                  id="district_key"
-                  type="text"
-                  name="district_key"
-                  value={formValues.district_key}
-                  onChange={handleChange}
-                  autoFocus
-                  placeholder={currentStepConfig.placeholder}
-                  className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm uppercase tracking-widest text-slate-900 shadow-sm focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
-                />
-                <p className="text-xs text-slate-500">
-                  {requiresDistrictKey
-                    ? "You'll only be able to submit invoices once your account is linked to a district."
-                    : connectedDistrictName
-                      ? `Currently linked to ${connectedDistrictName}. Enter a new key to switch districts.`
-                      : "Share this key only with authorized district contacts."}
-                </p>
               </div>
             ) : null}
 

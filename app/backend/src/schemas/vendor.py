@@ -29,21 +29,9 @@ class VendorProfileUpdate(BaseModel):
     contact_email: EmailStr
     phone_number: str
     remit_to_address: str
-    district_key: str | None = None
 
     def normalized(self) -> "VendorProfileUpdate":
         """Return a copy of the payload with trimmed fields."""
-
-        key_characters = "".join(
-            char for char in (self.district_key or "") if char.isalnum()
-        ).upper()
-        normalized_key = (
-            "-".join(
-                key_characters[i : i + 4] for i in range(0, len(key_characters), 4)
-            )
-            if key_characters
-            else None
-        )
 
         return VendorProfileUpdate(
             company_name=self.company_name.strip(),
@@ -51,5 +39,32 @@ class VendorProfileUpdate(BaseModel):
             contact_email=self.contact_email,
             phone_number=self.phone_number.strip(),
             remit_to_address=self.remit_to_address.strip(),
-            district_key=normalized_key,
         )
+
+
+class VendorDistrictKeySubmission(BaseModel):
+    """Payload for registering or updating a vendor district key."""
+
+    district_key: str
+
+    def normalized(self) -> str:
+        """Return the normalized district key string."""
+
+        key_characters = "".join(char for char in self.district_key if char.isalnum()).upper()
+        if not key_characters:
+            return ""
+
+        groups = [
+            key_characters[i : i + 4]
+            for i in range(0, len(key_characters), 4)
+        ]
+        return "-".join(groups)
+
+
+class VendorDistrictLink(BaseModel):
+    """Representation of the vendor's current district connection."""
+
+    district_id: int | None
+    district_name: str | None
+    district_key: str | None
+    is_linked: bool

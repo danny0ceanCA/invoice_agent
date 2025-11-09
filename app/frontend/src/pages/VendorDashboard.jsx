@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth0 } from "@auth0/auth0-react";
 import toast from "react-hot-toast";
+import { useNavigate } from "react-router-dom";
 
 import { uploadInvoice } from "../api/invoices";
 import { listJobs } from "../api/jobs";
@@ -39,6 +40,7 @@ export default function VendorDashboard({ vendorId }) {
   const [isWizardManuallyOpened, setIsWizardManuallyOpened] = useState(false);
 
   const { isAuthenticated, getAccessTokenSilently, loginWithRedirect } = useAuth0();
+  const navigate = useNavigate();
 
   const activeJobs = useMemo(
     () =>
@@ -215,8 +217,6 @@ export default function VendorDashboard({ vendorId }) {
         vendorProfile?.phone_number ?? "",
       ),
       remit_to_address: vendorProfile?.remit_to_address ?? "",
-      district_key: "",
-      district_company_name: vendorProfile?.district_company_name ?? null,
     }),
     [
       vendorProfile?.company_name,
@@ -224,11 +224,8 @@ export default function VendorDashboard({ vendorId }) {
       vendorProfile?.contact_email,
       vendorProfile?.phone_number,
       vendorProfile?.remit_to_address,
-      vendorProfile?.district_company_name,
     ],
   );
-  const requiresDistrictKey = !vendorProfile?.is_district_linked;
-  const connectedDistrictName = vendorProfile?.district_company_name ?? null;
 
   return (
     <div className="min-h-screen bg-slate-50 p-6">
@@ -312,50 +309,26 @@ export default function VendorDashboard({ vendorId }) {
               )}
             </section>
 
-            <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-              <h2 className="text-sm font-semibold text-slate-900">District connection</h2>
-              <div className="mt-4 space-y-3 text-sm text-slate-600">
-                {vendorProfile ? (
-                  vendorProfile.is_district_linked ? (
-                    <div>
-                      <p className="text-xs uppercase tracking-wide text-slate-500">
-                        Connected district
-                      </p>
-                      <p className="mt-1 font-medium text-slate-900">
-                        {vendorProfile.district_company_name}
-                      </p>
-                      <p className="mt-2 text-xs text-slate-500">
-                        Invoices you submit will be routed to this district for review.
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="rounded-xl border border-dashed border-amber-300 bg-amber-50 p-4 text-amber-800">
-                      <p className="font-medium">Link your district</p>
-                      <p className="mt-1 text-xs text-amber-700">
-                        Enter the district access key shared with you to unlock invoice submissions.
-                      </p>
-                    </div>
-                  )
-                ) : (
-                  <p className="text-xs text-slate-500">
-                    Complete your vendor profile to connect with a district.
-                  </p>
-                )}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsWizardManuallyOpened(true);
-                    setShowProfileForm(true);
-                  }}
-                  className="inline-flex items-center rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
-                >
-                  {vendorProfile?.is_district_linked ? "Update district access" : "Enter district key"}
-                </button>
-              </div>
-            </section>
           </aside>
 
           <main className="space-y-6">
+            <section className="grid gap-4 sm:grid-cols-2">
+              <button
+                type="button"
+                onClick={() => navigate("/vendor/district-keys")}
+                className="flex h-full w-full flex-col justify-between rounded-2xl border border-slate-200 bg-white p-6 text-left shadow-sm transition hover:border-amber-400 hover:shadow-md"
+              >
+                <div>
+                  <h2 className="text-sm font-semibold text-slate-900">District keys</h2>
+                  <p className="mt-2 text-sm text-slate-600">
+                    Manage the access keys that connect your organization to partner districts.
+                  </p>
+                </div>
+                <span className="mt-4 text-xs font-semibold uppercase tracking-wide text-amber-600">
+                  Manage access
+                </span>
+              </button>
+            </section>
             <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
@@ -411,8 +384,6 @@ export default function VendorDashboard({ vendorId }) {
             setShowProfileForm(false);
             setIsWizardManuallyOpened(false);
           }}
-          requiresDistrictKey={requiresDistrictKey}
-          connectedDistrictName={connectedDistrictName}
         />
       ) : null}
     </div>
