@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.backend.src.core.config import get_settings
 from app.backend.src.db import get_session_dependency
 from app.backend.src.models import User
+from app.backend.src.models.vendor import Vendor
 
 ALGORITHMS = ["RS256"]
 _scheme = HTTPBearer(auto_error=False)
@@ -149,6 +150,45 @@ def _decode_token(token: str, *, domain: str, audiences: list[str]) -> dict[str,
 # User Resolution
 # -------------------------------------------------------
 
+def _ensure_vendor_record(session: Session, user: User) -> None:
+    """Ensure a vendor record exists for the given vendor user."""
+
+    if (user.role or "").lower() != "vendor":
+        return
+
+    vendor = user.vendor
+    changed = False
+
+    if vendor is None:
+        vendor = (
+            session.query(Vendor)
+            .filter(Vendor.contact_email == user.email)
+            .one_or_none()
+        )
+        if vendor is None:
+            vendor = Vendor(
+                company_name=user.name or user.email,
+                contact_name=user.name or user.email,
+                contact_email=user.email,
+                phone_number="N/A",
+                remit_to_address="N/A",
+            )
+            session.add(vendor)
+            session.flush()
+            print(
+                f"[auto-create] Vendor record created for {user.email}",
+                flush=True,
+            )
+            changed = True
+        if user.vendor_id != vendor.id:
+            user.vendor_id = vendor.id
+            session.add(user)
+            changed = True
+
+    if changed:
+        session.commit()
+
+
 def _resolve_user(session: Session, payload: dict[str, Any]) -> User:
     """Map a verified Auth0 payload to an application user."""
     print("DEBUG: Entering _resolve_user", file=sys.stdout, flush=True)
@@ -163,6 +203,7 @@ def _resolve_user(session: Session, payload: dict[str, Any]) -> User:
     user = session.query(User).filter(User.auth0_sub == subject).one_or_none()
     if user:
         print("DEBUG: _resolve_user returning existing:", user.email, user.role, file=sys.stdout, flush=True)
+        _ensure_vendor_record(session, user)
         return user
 
     # Lookup by email (with namespaced support)
@@ -176,6 +217,7 @@ def _resolve_user(session: Session, payload: dict[str, Any]) -> User:
                 session.add(user)
                 session.commit()
             print("DEBUG: _resolve_user linked email to sub:", user.email, user.role, file=sys.stdout, flush=True)
+            _ensure_vendor_record(session, user)
             return user
 
     if not email:
@@ -191,6 +233,7 @@ def _resolve_user(session: Session, payload: dict[str, Any]) -> User:
     session.add(user)
     session.commit()
     print("DEBUG: _resolve_user created new user:", user.email, user.role, file=sys.stdout, flush=True)
+    _ensure_vendor_record(session, user)
     return user
 
 
