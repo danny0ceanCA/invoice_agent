@@ -408,18 +408,32 @@ def test_vendor_profile_endpoints(
         assert data["is_district_linked"] is False
 
         response = client.put("/api/vendors/me", json=payload)
-        assert response.status_code == 400
-
-        payload["district_key"] = district_key
-
-        response = client.put("/api/vendors/me", json=payload)
-        assert response.status_code == 200
+        assert response.status_code == 200, response.text
         updated = response.json()
         assert updated["company_name"] == payload["company_name"]
         assert updated["contact_name"] == payload["contact_name"]
+        assert updated["is_district_linked"] is False
+        assert updated["is_profile_complete"] is True
+
+        link_response = client.get("/api/vendors/me/district-key")
+        assert link_response.status_code == 200
+        link = link_response.json()
+        assert link["is_linked"] is False
+
+        registration = client.post(
+            "/api/vendors/me/district-key", json={"district_key": district_key}
+        )
+        assert registration.status_code == 200, registration.text
+        linked = registration.json()
+        assert linked["is_linked"] is True
+        assert linked["district_id"] == district.id
+        assert linked["district_name"] == district.company_name
+
+        refreshed = client.get("/api/vendors/me")
+        assert refreshed.status_code == 200
+        updated = refreshed.json()
         assert updated["district_company_name"] == district.company_name
         assert updated["is_district_linked"] is True
-        assert updated["is_profile_complete"] is True
     finally:
         app.dependency_overrides.pop(get_current_user, None)
 

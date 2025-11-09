@@ -18,7 +18,17 @@ export interface VendorProfilePayload {
   contact_email: string;
   phone_number: string;
   remit_to_address: string;
+}
+
+export interface VendorDistrictLink {
+  district_id: number | null;
+  district_name: string | null;
   district_key: string | null;
+  is_linked: boolean;
+}
+
+export interface VendorDistrictKeyPayload {
+  district_key: string;
 }
 
 async function vendorFetch<T>(
@@ -60,6 +70,22 @@ export async function updateVendorProfile(
 ): Promise<VendorProfile> {
   return vendorFetch<VendorProfile>("/vendors/me", accessToken, {
     method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function fetchVendorDistrictLink(
+  accessToken: string,
+): Promise<VendorDistrictLink> {
+  return vendorFetch<VendorDistrictLink>("/vendors/me/district-key", accessToken);
+}
+
+export async function registerVendorDistrictKey(
+  accessToken: string,
+  payload: VendorDistrictKeyPayload,
+): Promise<VendorDistrictLink> {
+  return vendorFetch<VendorDistrictLink>("/vendors/me/district-key", accessToken, {
+    method: "POST",
     body: JSON.stringify(payload),
   });
 }
