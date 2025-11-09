@@ -18,6 +18,7 @@ export interface VendorProfilePayload {
   contact_email: string;
   phone_number: string;
   remit_to_address: string;
+  districtKey?: string;
 }
 
 export interface VendorDistrictLink {

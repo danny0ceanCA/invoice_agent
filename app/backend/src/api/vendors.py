@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -16,7 +17,38 @@ from app.backend.src.schemas.vendor import (
     VendorProfileUpdate,
 )
 
+LOGGER = structlog.get_logger(__name__)
+
 router = APIRouter(prefix="/vendors", tags=["vendors"])
+
+
+def _link_vendor_to_district(
+    session: Session, vendor: Vendor, district_key: str
+) -> District:
+    """Link the vendor to the district matching the provided key."""
+
+    district = session.execute(
+        select(District).where(District.district_key == district_key)
+    ).scalar_one_or_none()
+    if district is None:
+        LOGGER.warning(
+            f"[link] Vendor '{vendor.company_name}' failed to link using key '{district_key}'",
+            vendor_id=vendor.id,
+            district_key=district_key,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Invalid district key",
+        )
+
+    vendor.district = district
+    LOGGER.info(
+        f"[link] Vendor '{vendor.company_name}' linked to district '{district.company_name}'",
+        vendor_id=vendor.id,
+        district_id=district.id,
+        district_key=district.district_key,
+    )
+    return district
 
 
 def _serialize_vendor(vendor: Vendor) -> VendorProfile:
@@ -99,6 +131,10 @@ def update_vendor_profile(
     vendor.phone_number = normalized.phone_number
     vendor.remit_to_address = normalized.remit_to_address
 
+    provided_key = normalized.district_key
+    if provided_key:
+        _link_vendor_to_district(session, vendor, provided_key)
+
     session.add(vendor)
     session.commit()
     session.refresh(vendor)
@@ -145,16 +181,7 @@ def register_vendor_district_key(
             detail="Enter a district access key to continue.",
         )
 
-    district = session.execute(
-        select(District).where(District.district_key == normalized_key)
-    ).scalar_one_or_none()
-    if district is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="We couldn't find a district with that access key.",
-        )
-
-    vendor.district = district
+    district = _link_vendor_to_district(session, vendor, normalized_key)
     session.add(vendor)
     session.commit()
     session.refresh(vendor)
