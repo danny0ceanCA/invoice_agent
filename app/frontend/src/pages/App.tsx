@@ -9,6 +9,7 @@ import VendorDashboard from "./VendorDashboard.jsx";
 import DistrictDashboard from "./DistrictDashboard.jsx";
 import AdminDashboard from "./AdminDashboard.jsx";
 import AdminUserDashboard from "./AdminUserDashboard.jsx";
+import AdminCreateDistrict from "./AdminCreateDistrict.jsx";
 import {
   fetchCurrentUser,
   type ApiError,
@@ -106,7 +107,11 @@ export function App() {
       />
       <Route
         path="/admin/users"
-        element={profile?.role === "admin" ? <AdminUserDashboard /> : <Navigate to="/" replace />} 
+        element={profile?.role === "admin" ? <AdminUserDashboard /> : <Navigate to="/" replace />}
+      />
+      <Route
+        path="/admin/districts/new"
+        element={profile?.role === "admin" ? <AdminCreateDistrict /> : <Navigate to="/" replace />}
       />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

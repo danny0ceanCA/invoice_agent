@@ -1,27 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { KeyRound, Plus, Users2 } from "lucide-react";
+import { KeyRound, Users2 } from "lucide-react";
 import { useAuth0 } from "@auth0/auth0-react";
-import toast from "react-hot-toast";
 
-import { createDistrict, listDistricts } from "../api/adminDistricts";
+import { listDistricts } from "../api/adminDistricts";
 
 export default function AdminDashboard({ currentUser }) {
   const { getAccessTokenSilently } = useAuth0();
   const [districts, setDistricts] = useState([]);
   const [districtsLoading, setDistrictsLoading] = useState(false);
   const [districtsError, setDistrictsError] = useState(null);
-  const [creating, setCreating] = useState(false);
-  const [formError, setFormError] = useState(null);
-  const [formValues, setFormValues] = useState({
-    company_name: "",
-    contact_name: "",
-    contact_email: "",
-    phone_number: "",
-    mailing_address: "",
-    district_key: "",
-  });
-
   const loadDistricts = useCallback(async () => {
     if (currentUser?.role !== "admin") {
       setDistricts([]);
@@ -49,60 +37,6 @@ export default function AdminDashboard({ currentUser }) {
   useEffect(() => {
     loadDistricts().catch(() => {});
   }, [loadDistricts]);
-
-  const handleFieldChange = useCallback((event) => {
-    const { name, value } = event.target;
-    setFormValues((prev) => ({ ...prev, [name]: value }));
-  }, []);
-
-  const handleCreateDistrict = useCallback(
-    async (event) => {
-      event.preventDefault();
-      if (creating) {
-        return;
-      }
-
-      const trimmedName = formValues.company_name.trim();
-      if (!trimmedName) {
-        setFormError("District name is required.");
-        return;
-      }
-
-      setCreating(true);
-      setFormError(null);
-      try {
-        const token = await getAccessTokenSilently();
-        await createDistrict(token, {
-          company_name: trimmedName,
-          contact_name: formValues.contact_name.trim(),
-          contact_email: formValues.contact_email.trim(),
-          phone_number: formValues.phone_number.trim(),
-          mailing_address: formValues.mailing_address.trim(),
-          district_key: formValues.district_key.trim() || undefined,
-        });
-        toast.success("District created successfully.");
-        setFormValues({
-          company_name: "",
-          contact_name: "",
-          contact_email: "",
-          phone_number: "",
-          mailing_address: "",
-          district_key: "",
-        });
-        await loadDistricts();
-      } catch (error) {
-        console.error("admin_create_district_failed", error);
-        setFormError(
-          error instanceof Error && error.message
-            ? error.message
-            : "We couldn't create the district. Please verify the details and try again.",
-        );
-      } finally {
-        setCreating(false);
-      }
-    },
-    [creating, formValues, getAccessTokenSilently, loadDistricts],
-  );
 
   const cards = [
     {
@@ -151,8 +85,8 @@ export default function AdminDashboard({ currentUser }) {
             </span>
           </Link>
 
-          <a
-            href="#district-keys"
+          <Link
+            to="/admin/districts/new"
             className="group flex h-full flex-col justify-between rounded-xl border border-amber-100 bg-gradient-to-r from-amber-50 via-orange-50 to-rose-50 p-6 text-amber-900 shadow-sm transition-transform duration-200 ease-out hover:-translate-y-1 hover:shadow-xl"
             aria-label="Jump to district creation form"
           >
@@ -174,7 +108,7 @@ export default function AdminDashboard({ currentUser }) {
                 →
               </span>
             </span>
-          </a>
+          </Link>
 
           {cards.map((card) => (
             <div
@@ -190,114 +124,6 @@ export default function AdminDashboard({ currentUser }) {
 
       {currentUser?.role === "admin" ? (
         <div className="space-y-6">
-          <section id="district-keys" className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h3 className="text-lg font-semibold text-slate-900">Create a district</h3>
-            <p className="mt-1 text-sm text-slate-600">
-              Generate new districts and share the generated access keys with trusted staff members.
-            </p>
-            <form className="mt-4 grid gap-4 md:grid-cols-2" onSubmit={handleCreateDistrict}>
-              <div className="md:col-span-2">
-                <label className="block text-xs font-semibold uppercase tracking-widest text-slate-500" htmlFor="company_name">
-                  District name
-                </label>
-                <input
-                  id="company_name"
-                  name="company_name"
-                  type="text"
-                  required
-                  value={formValues.company_name}
-                  onChange={handleFieldChange}
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-widest text-slate-500" htmlFor="contact_name">
-                  Primary contact
-                </label>
-                <input
-                  id="contact_name"
-                  name="contact_name"
-                  type="text"
-                  value={formValues.contact_name}
-                  onChange={handleFieldChange}
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-widest text-slate-500" htmlFor="contact_email">
-                  Contact email
-                </label>
-                <input
-                  id="contact_email"
-                  name="contact_email"
-                  type="email"
-                  value={formValues.contact_email}
-                  onChange={handleFieldChange}
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-widest text-slate-500" htmlFor="phone_number">
-                  Phone number
-                </label>
-                <input
-                  id="phone_number"
-                  name="phone_number"
-                  type="text"
-                  value={formValues.phone_number}
-                  onChange={handleFieldChange}
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200"
-                />
-              </div>
-
-              <div className="md:col-span-2">
-                <label className="block text-xs font-semibold uppercase tracking-widest text-slate-500" htmlFor="mailing_address">
-                  Mailing address
-                </label>
-                <textarea
-                  id="mailing_address"
-                  name="mailing_address"
-                  rows={3}
-                  value={formValues.mailing_address}
-                  onChange={handleFieldChange}
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-widest text-slate-500" htmlFor="district_key">
-                  Custom district key (optional)
-                </label>
-                <input
-                  id="district_key"
-                  name="district_key"
-                  type="text"
-                  value={formValues.district_key}
-                  onChange={handleFieldChange}
-                  placeholder="Leave blank to auto-generate"
-                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200"
-                />
-              </div>
-
-              <div className="md:col-span-2 flex items-center gap-3">
-                <button
-                  type="submit"
-                  className="inline-flex items-center gap-2 rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-amber-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/70 disabled:cursor-not-allowed disabled:opacity-60"
-                  disabled={creating}
-                >
-                  <Plus className="h-4 w-4" aria-hidden="true" />
-                  {creating ? "Creating…" : "Create district"}
-                </button>
-                {formError ? (
-                  <span className="text-sm font-medium text-red-600">{formError}</span>
-                ) : null}
-              </div>
-            </form>
-          </section>
-
           <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-semibold text-slate-900">Existing districts</h3>
