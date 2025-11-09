@@ -21,8 +21,11 @@ class Vendor(Base):
     contact_email: Mapped[str] = mapped_column(String(255), nullable=False)
     phone_number: Mapped[str | None] = mapped_column(String(50), nullable=True)
     remit_to_address: Mapped[str | None] = mapped_column(Text, nullable=True)
-    district_id: Mapped[int | None] = mapped_column(
-        ForeignKey("districts.id"), nullable=True, index=True
+    district_key: Mapped[str | None] = mapped_column(
+        String(64),
+        ForeignKey("districts.district_key"),
+        nullable=True,
+        index=True,
     )
 
     users: Mapped[list["User"]] = relationship("User", back_populates="vendor")
@@ -31,5 +34,8 @@ class Vendor(Base):
     invoices: Mapped[list["Invoice"]] = relationship("Invoice", back_populates="vendor")
     jobs: Mapped[list["Job"]] = relationship("Job", back_populates="vendor")
     district: Mapped["District | None"] = relationship(
-        "District", back_populates="vendors"
+        "District",
+        back_populates="vendors",
+        primaryjoin="Vendor.district_key == District.district_key",
+        foreign_keys="Vendor.district_key",
     )

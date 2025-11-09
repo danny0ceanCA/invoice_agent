@@ -111,8 +111,8 @@ def vendor_and_user() -> tuple[int, int]:
             session.add(district)
             session.flush()
 
-        if vendor.district_id is not None:
-            vendor.district_id = None
+        if vendor.district is not None:
+            vendor.district = None
             session.add(vendor)
             session.flush()
 
@@ -442,7 +442,7 @@ def test_vendor_profile_endpoints(
         assert vendor is not None
         assert vendor.company_name == payload["company_name"]
         assert vendor.contact_name == payload["contact_name"]
-        assert vendor.district_id == district.id
+        assert vendor.district_key == district.district_key
 
 
 def test_district_profile_endpoints(
@@ -562,7 +562,7 @@ def test_district_vendor_overview(
         )
         vendor = session.get(Vendor, vendor_id)
         assert vendor is not None
-        vendor.district_id = district.id
+        vendor.district = district
         session.add(vendor)
 
         invoice = Invoice(

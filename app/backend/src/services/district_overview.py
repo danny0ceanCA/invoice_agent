@@ -7,7 +7,7 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session, selectinload
 
-from app.backend.src.models import Invoice, Vendor
+from app.backend.src.models import District, Invoice, Vendor
 from app.backend.src.schemas.district import (
     DistrictVendorInvoice,
     DistrictVendorInvoiceStudent,
@@ -65,9 +65,16 @@ def fetch_district_vendor_overview(
 ) -> DistrictVendorOverview:
     """Return vendor data ready for district consumption."""
 
+    district = session.get(District, district_id)
+    if district is None or not district.district_key:
+        return DistrictVendorOverview(
+            generated_at=datetime.utcnow(),
+            vendors=[],
+        )
+
     vendors = (
         session.query(Vendor)
-        .filter(Vendor.district_id == district_id)
+        .filter(Vendor.district_key == district.district_key)
         .options(selectinload(Vendor.invoices).selectinload(Invoice.line_items))
         .order_by(Vendor.company_name.asc())
         .all()

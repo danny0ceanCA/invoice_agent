@@ -34,7 +34,12 @@ class District(Base):
         back_populates="district",
         cascade="all, delete-orphan",
     )
-    vendors: Mapped[list["Vendor"]] = relationship("Vendor", back_populates="district")
+    vendors: Mapped[list["Vendor"]] = relationship(
+        "Vendor",
+        back_populates="district",
+        primaryjoin="District.district_key == Vendor.district_key",
+        foreign_keys="Vendor.district_key",
+    )
 
 
 __all__ = ["District"]

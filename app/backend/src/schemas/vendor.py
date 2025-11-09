@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, EmailStr
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
 class VendorProfile(BaseModel):
@@ -29,9 +29,22 @@ class VendorProfileUpdate(BaseModel):
     contact_email: EmailStr
     phone_number: str
     remit_to_address: str
+    district_key: str | None = Field(default=None, alias="districtKey")
+
+    model_config = ConfigDict(populate_by_name=True)
 
     def normalized(self) -> "VendorProfileUpdate":
         """Return a copy of the payload with trimmed fields."""
+
+        normalized_key: str | None = None
+        if self.district_key:
+            normalized_key = (
+                VendorDistrictKeySubmission(district_key=self.district_key)
+                .normalized()
+                .strip()
+            )
+            if not normalized_key:
+                normalized_key = None
 
         return VendorProfileUpdate(
             company_name=self.company_name.strip(),
@@ -39,6 +52,7 @@ class VendorProfileUpdate(BaseModel):
             contact_email=self.contact_email,
             phone_number=self.phone_number.strip(),
             remit_to_address=self.remit_to_address.strip(),
+            district_key=normalized_key,
         )
 
 
