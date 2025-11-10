@@ -12,7 +12,12 @@ DEFAULT_VENDOR_NAME = "SCUSD Accounts Payable"
 DEFAULT_VENDOR_EMAIL = "ap@scusd.example"
 DEFAULT_VENDOR_CONTACT = "Regina Martinez"
 DEFAULT_VENDOR_PHONE = "916-555-0183"
-DEFAULT_VENDOR_REMIT_ADDRESS = "SCUSD Accounts Payable\n5735 47th Avenue\nSacramento, CA 95824"
+DEFAULT_VENDOR_REMIT = {
+    "street": "SCUSD Accounts Payable",
+    "city": "Sacramento",
+    "state": "CA",
+    "postal_code": "95824",
+}
 DEFAULT_USER_EMAIL = "daniel@responsivehcsolutions.com"
 DEFAULT_USER_NAME = "Daniel Ojeda"
 DEFAULT_USER_ROLE = "admin"
@@ -59,7 +64,10 @@ def seed_development_user(
             contact_email=vendor_email,
             contact_name=DEFAULT_VENDOR_CONTACT,
             phone_number=DEFAULT_VENDOR_PHONE,
-            remit_to_address=DEFAULT_VENDOR_REMIT_ADDRESS,
+            remit_to_street=DEFAULT_VENDOR_REMIT["street"],
+            remit_to_city=DEFAULT_VENDOR_REMIT["city"],
+            remit_to_state=DEFAULT_VENDOR_REMIT["state"],
+            remit_to_postal_code=DEFAULT_VENDOR_REMIT["postal_code"],
         )
         session.add(vendor)
         session.flush()
@@ -74,8 +82,16 @@ def seed_development_user(
         if vendor.phone_number != DEFAULT_VENDOR_PHONE:
             vendor.phone_number = DEFAULT_VENDOR_PHONE
             vendor_updated = True
-        if vendor.remit_to_address != DEFAULT_VENDOR_REMIT_ADDRESS:
-            vendor.remit_to_address = DEFAULT_VENDOR_REMIT_ADDRESS
+        if (
+            vendor.remit_to_street != DEFAULT_VENDOR_REMIT["street"]
+            or vendor.remit_to_city != DEFAULT_VENDOR_REMIT["city"]
+            or vendor.remit_to_state != DEFAULT_VENDOR_REMIT["state"]
+            or vendor.remit_to_postal_code != DEFAULT_VENDOR_REMIT["postal_code"]
+        ):
+            vendor.remit_to_street = DEFAULT_VENDOR_REMIT["street"]
+            vendor.remit_to_city = DEFAULT_VENDOR_REMIT["city"]
+            vendor.remit_to_state = DEFAULT_VENDOR_REMIT["state"]
+            vendor.remit_to_postal_code = DEFAULT_VENDOR_REMIT["postal_code"]
             vendor_updated = True
 
     user = session.query(User).filter(User.email == user_email).one_or_none()

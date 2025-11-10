@@ -5,7 +5,7 @@ from __future__ import annotations
 import secrets
 import string
 
-from sqlalchemy import String, Text
+from sqlalchemy import String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
@@ -23,7 +23,10 @@ class District(Base):
     contact_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     contact_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     phone_number: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    mailing_address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    mailing_street: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    mailing_city: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    mailing_state: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    mailing_postal_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
     district_key: Mapped[str] = mapped_column(
         String(32), unique=True, nullable=False, index=True, default=lambda: _generate_district_key()
     )

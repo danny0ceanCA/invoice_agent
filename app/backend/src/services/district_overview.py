@@ -8,6 +8,7 @@ from datetime import datetime
 from sqlalchemy.orm import Session, selectinload
 
 from app.backend.src.models import District, Invoice, Vendor
+from app.backend.src.schemas.address import PostalAddress, build_postal_address
 from app.backend.src.schemas.district import (
     DistrictVendorInvoice,
     DistrictVendorInvoiceStudent,
@@ -187,7 +188,7 @@ def fetch_district_vendor_overview(
             contact_name=vendor.contact_name,
             contact_email=vendor.contact_email,
             phone_number=vendor.phone_number,
-            remit_to_address=vendor.remit_to_address,
+            remit_to_address=_build_vendor_address(vendor),
             metrics=DistrictVendorMetrics(
                 latest_year=latest_year,
                 invoices_this_year=len(invoices_this_year),
@@ -205,6 +206,17 @@ def fetch_district_vendor_overview(
     return DistrictVendorOverview(
         generated_at=datetime.utcnow(),
         vendors=profiles,
+    )
+
+
+def _build_vendor_address(vendor: Vendor) -> PostalAddress | None:
+    """Return the vendor remit-to address as a structured object."""
+
+    return build_postal_address(
+        vendor.remit_to_street,
+        vendor.remit_to_city,
+        vendor.remit_to_state,
+        vendor.remit_to_postal_code,
     )
 
 

@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 
 const PHONE_DIGIT_LENGTH = 10;
 const PHONE_INPUT_PATTERN = /^\(\d{3}\)-\d{3}-\d{4}$/;
+const STATE_PATTERN = /^[A-Za-z]{2}$/;
+const POSTAL_CODE_PATTERN = /^\d{5}(?:-\d{4})?$/;
 
 const PROFILE_STEPS = [
   {
@@ -36,8 +38,8 @@ const PROFILE_STEPS = [
     id: "remitAddress",
     field: "remit_to_address",
     title: "Remit-to address",
-    description: "Where should districts send payment?",
-    placeholder: "123 Main St.\nSuite 200\nAustin, TX 78701",
+    description:
+      "Where should districts send payment? Enter the street, city, state, and ZIP.",
   },
 ];
 
@@ -68,14 +70,13 @@ function formatPhoneNumberForInput(value = "") {
   return `(${area})-${prefix}-${lineNumber}`;
 }
 
-function normalizeMultiline(value = "") {
-  return value
-    .replace(/\r\n/g, "\n")
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line, index, arr) => line.length > 0 || index === arr.length - 1)
-    .join("\n")
-    .trim();
+function normalizePostalAddress(address = {}) {
+  return {
+    street: (address.street ?? "").trim(),
+    city: (address.city ?? "").trim(),
+    state: (address.state ?? "").trim().toUpperCase(),
+    postal_code: (address.postal_code ?? "").trim(),
+  };
 }
 
 function normalizeProfileValues(values) {
@@ -86,7 +87,7 @@ function normalizeProfileValues(values) {
     contact_name: values.contact_name.trim(),
     contact_email: values.contact_email.trim().toLowerCase(),
     phone_number: phoneDigits,
-    remit_to_address: normalizeMultiline(values.remit_to_address),
+    remit_to_address: normalizePostalAddress(values.remit_to_address),
   };
 }
 
@@ -107,8 +108,21 @@ function validateProfileValues(values) {
     return "Enter a 10-digit phone number in the format (###)-###-####.";
   }
 
-  if (values.remit_to_address.length < 5) {
-    return "Remit-to address must be at least 5 characters.";
+  const address = values.remit_to_address ?? {};
+  if (!address.street || address.street.length < 3) {
+    return "Enter a valid street address.";
+  }
+
+  if (!address.city || address.city.length < 2) {
+    return "Enter a valid city.";
+  }
+
+  if (!address.state || !STATE_PATTERN.test(address.state)) {
+    return "Enter a two-letter state abbreviation.";
+  }
+
+  if (!address.postal_code || !POSTAL_CODE_PATTERN.test(address.postal_code)) {
+    return "Enter a valid ZIP code (##### or #####-####).";
   }
 
   return null;
@@ -139,8 +153,17 @@ function validateStep(stepId, values) {
       }
       return null;
     case "remitAddress":
-      if (normalized.remit_to_address.length === 0) {
-        return "Remit-to address is required.";
+      if (!normalized.remit_to_address.street) {
+        return "Street address is required.";
+      }
+      if (!normalized.remit_to_address.city) {
+        return "City is required.";
+      }
+      if (!normalized.remit_to_address.state) {
+        return "State is required.";
+      }
+      if (!normalized.remit_to_address.postal_code) {
+        return "ZIP code is required.";
       }
       return null;
     default:
@@ -155,14 +178,22 @@ export default function VendorProfileWizard({ initialValues, onSubmit, onClose }
       contact_name: initialValues?.contact_name ?? "",
       contact_email: initialValues?.contact_email ?? "",
       phone_number: formatPhoneNumberForInput(initialValues?.phone_number ?? ""),
-      remit_to_address: initialValues?.remit_to_address ?? "",
+      remit_to_address: {
+        street: initialValues?.remit_to_address?.street ?? "",
+        city: initialValues?.remit_to_address?.city ?? "",
+        state: initialValues?.remit_to_address?.state ?? "",
+        postal_code: initialValues?.remit_to_address?.postal_code ?? "",
+      },
     }),
     [
       initialValues?.company_name,
       initialValues?.contact_name,
       initialValues?.contact_email,
       initialValues?.phone_number,
-      initialValues?.remit_to_address,
+      initialValues?.remit_to_address?.street,
+      initialValues?.remit_to_address?.city,
+      initialValues?.remit_to_address?.state,
+      initialValues?.remit_to_address?.postal_code,
     ],
   );
 
@@ -190,6 +221,18 @@ export default function VendorProfileWizard({ initialValues, onSubmit, onClose }
       setFormValues((previous) => ({
         ...previous,
         [name]: formatPhoneNumberForInput(value),
+      }));
+      return;
+    }
+
+    if (name.startsWith("remit_to_address.")) {
+      const [, field] = name.split(".");
+      setFormValues((previous) => ({
+        ...previous,
+        remit_to_address: {
+          ...previous.remit_to_address,
+          [field]: value,
+        },
       }));
       return;
     }
@@ -358,20 +401,79 @@ export default function VendorProfileWizard({ initialValues, onSubmit, onClose }
             ) : null}
 
             {currentStepConfig.field === "remit_to_address" ? (
-              <div className="space-y-2">
-                <label className="block text-sm font-medium text-slate-700" htmlFor="remit_to_address">
-                  Remit-to address
-                </label>
-                <textarea
-                  id="remit_to_address"
-                  name="remit_to_address"
-                  value={formValues.remit_to_address}
-                  onChange={handleChange}
-                  rows={4}
-                  autoFocus
-                  placeholder={currentStepConfig.placeholder}
-                  className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-900 shadow-sm focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
-                />
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <label
+                    className="block text-sm font-medium text-slate-700"
+                    htmlFor="remit_to_address.street"
+                  >
+                    Street address
+                  </label>
+                  <input
+                    id="remit_to_address.street"
+                    type="text"
+                    name="remit_to_address.street"
+                    value={formValues.remit_to_address.street}
+                    onChange={handleChange}
+                    autoFocus
+                    placeholder="Responsive Healthcare Associates"
+                    className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-900 shadow-sm focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
+                  />
+                </div>
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <div className="space-y-2 sm:col-span-2">
+                    <label
+                      className="block text-sm font-medium text-slate-700"
+                      htmlFor="remit_to_address.city"
+                    >
+                      City
+                    </label>
+                    <input
+                      id="remit_to_address.city"
+                      type="text"
+                      name="remit_to_address.city"
+                      value={formValues.remit_to_address.city}
+                      onChange={handleChange}
+                      placeholder="Sacramento"
+                      className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-900 shadow-sm focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label
+                      className="block text-sm font-medium text-slate-700"
+                      htmlFor="remit_to_address.state"
+                    >
+                      State
+                    </label>
+                    <input
+                      id="remit_to_address.state"
+                      type="text"
+                      name="remit_to_address.state"
+                      value={formValues.remit_to_address.state}
+                      onChange={handleChange}
+                      placeholder="CA"
+                      maxLength={2}
+                      className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm uppercase text-slate-900 shadow-sm focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label
+                      className="block text-sm font-medium text-slate-700"
+                      htmlFor="remit_to_address.postal_code"
+                    >
+                      ZIP code
+                    </label>
+                    <input
+                      id="remit_to_address.postal_code"
+                      type="text"
+                      name="remit_to_address.postal_code"
+                      value={formValues.remit_to_address.postal_code}
+                      onChange={handleChange}
+                      placeholder="95824"
+                      className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-900 shadow-sm focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
+                    />
+                  </div>
+                </div>
               </div>
             ) : null}
 

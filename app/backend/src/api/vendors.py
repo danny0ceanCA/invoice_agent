@@ -10,11 +10,13 @@ from sqlalchemy.orm import Session
 from app.backend.src.core.security import require_vendor_user
 from ..db import get_session_dependency
 from app.backend.src.models import District, User, Vendor
+from app.backend.src.schemas.address import PostalAddress, build_postal_address
 from app.backend.src.schemas.vendor import (
     VendorDistrictKeySubmission,
     VendorDistrictLink,
     VendorProfile,
     VendorProfileUpdate,
+    VendorProfileUpdateNormalized,
 )
 
 LOGGER = structlog.get_logger(__name__)
@@ -59,7 +61,10 @@ def _serialize_vendor(vendor: Vendor) -> VendorProfile:
         vendor.contact_name,
         vendor.contact_email,
         vendor.phone_number,
-        vendor.remit_to_address,
+        vendor.remit_to_street,
+        vendor.remit_to_city,
+        vendor.remit_to_state,
+        vendor.remit_to_postal_code,
     ]
     is_complete = all(
         isinstance(value, str) and value.strip() for value in required_fields
@@ -72,10 +77,21 @@ def _serialize_vendor(vendor: Vendor) -> VendorProfile:
         contact_name=vendor.contact_name,
         contact_email=vendor.contact_email,
         phone_number=vendor.phone_number,
-        remit_to_address=vendor.remit_to_address,
+        remit_to_address=_build_vendor_address(vendor),
         is_profile_complete=is_complete,
         district_company_name=vendor.district.company_name if vendor.district else None,
         is_district_linked=is_district_linked,
+    )
+
+
+def _build_vendor_address(vendor: Vendor) -> PostalAddress | None:
+    """Return the vendor's remit-to address if complete."""
+
+    return build_postal_address(
+        vendor.remit_to_street,
+        vendor.remit_to_city,
+        vendor.remit_to_state,
+        vendor.remit_to_postal_code,
     )
 
 
@@ -123,13 +139,19 @@ def update_vendor_profile(
             detail="Vendor profile not found",
         )
 
-    normalized = payload.normalized()
+    try:
+        normalized: VendorProfileUpdateNormalized = payload.normalized()
+    except ValueError as exc:  # Invalid address details
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
 
     vendor.company_name = normalized.company_name
     vendor.contact_name = normalized.contact_name
     vendor.contact_email = normalized.contact_email
     vendor.phone_number = normalized.phone_number
-    vendor.remit_to_address = normalized.remit_to_address
+    _apply_remit_to_address(vendor, normalized.remit_to_address)
 
     provided_key = normalized.district_key
     if provided_key:
@@ -140,6 +162,15 @@ def update_vendor_profile(
     session.refresh(vendor)
 
     return _serialize_vendor(vendor)
+
+
+def _apply_remit_to_address(vendor: Vendor, address: PostalAddress) -> None:
+    """Persist the remit-to address components to the vendor model."""
+
+    vendor.remit_to_street = address.street
+    vendor.remit_to_city = address.city
+    vendor.remit_to_state = address.state
+    vendor.remit_to_postal_code = address.postal_code
 
 
 @router.get("/me/district-key", response_model=VendorDistrictLink)

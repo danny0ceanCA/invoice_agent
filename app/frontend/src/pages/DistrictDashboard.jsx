@@ -11,6 +11,7 @@ import {
   addDistrictMembership,
   activateDistrictMembership,
 } from "../api/districts";
+import { formatPostalAddress } from "../api/common";
 
 const menuItems = [
   {
@@ -197,18 +198,51 @@ function DistrictProfileForm({
   error,
   disableCancel,
 }) {
-  const hasProfileData = useMemo(
-    () =>
-      Object.values(initialValues).some((value) =>
-        typeof value === "string" ? value.trim().length > 0 : Boolean(value),
-      ),
-    [initialValues],
-  );
+  const hasProfileData = useMemo(() => {
+    const fields = [
+      initialValues.company_name,
+      initialValues.contact_name,
+      initialValues.contact_email,
+      initialValues.phone_number,
+      initialValues.mailing_address?.street,
+      initialValues.mailing_address?.city,
+      initialValues.mailing_address?.state,
+      initialValues.mailing_address?.postal_code,
+    ];
+    return fields.some((value) =>
+      typeof value === "string" ? value.trim().length > 0 : Boolean(value),
+    );
+  }, [
+    initialValues.company_name,
+    initialValues.contact_name,
+    initialValues.contact_email,
+    initialValues.phone_number,
+    initialValues.mailing_address?.street,
+    initialValues.mailing_address?.city,
+    initialValues.mailing_address?.state,
+    initialValues.mailing_address?.postal_code,
+  ]);
   const [isEditing, setIsEditing] = useState(() => !hasProfileData);
-  const [formValues, setFormValues] = useState(initialValues);
+  const [formValues, setFormValues] = useState(() => ({
+    ...initialValues,
+    mailing_address: {
+      street: initialValues.mailing_address?.street ?? "",
+      city: initialValues.mailing_address?.city ?? "",
+      state: initialValues.mailing_address?.state ?? "",
+      postal_code: initialValues.mailing_address?.postal_code ?? "",
+    },
+  }));
 
   useEffect(() => {
-    setFormValues(initialValues);
+    setFormValues({
+      ...initialValues,
+      mailing_address: {
+        street: initialValues.mailing_address?.street ?? "",
+        city: initialValues.mailing_address?.city ?? "",
+        state: initialValues.mailing_address?.state ?? "",
+        postal_code: initialValues.mailing_address?.postal_code ?? "",
+      },
+    });
   }, [initialValues]);
 
   useEffect(() => {
@@ -217,8 +251,30 @@ function DistrictProfileForm({
     }
   }, [hasProfileData]);
 
+  const displayMailingAddress = useMemo(
+    () => formatPostalAddress(initialValues.mailing_address ?? null),
+    [
+      initialValues.mailing_address?.street,
+      initialValues.mailing_address?.city,
+      initialValues.mailing_address?.state,
+      initialValues.mailing_address?.postal_code,
+    ],
+  );
+
   function handleChange(event) {
     const { name, value } = event.target;
+    if (name.startsWith("mailing_address.")) {
+      const [, field] = name.split(".");
+      setFormValues((previous) => ({
+        ...previous,
+        mailing_address: {
+          ...previous.mailing_address,
+          [field]: value,
+        },
+      }));
+      return;
+    }
+
     setFormValues((previous) => ({ ...previous, [name]: value }));
   }
 
@@ -229,7 +285,12 @@ function DistrictProfileForm({
       contact_name: formValues.contact_name.trim(),
       contact_email: formValues.contact_email.trim(),
       phone_number: formValues.phone_number.trim(),
-      mailing_address: formValues.mailing_address.trim(),
+      mailing_address: {
+        street: formValues.mailing_address?.street?.trim() ?? "",
+        city: formValues.mailing_address?.city?.trim() ?? "",
+        state: formValues.mailing_address?.state?.trim().toUpperCase() ?? "",
+        postal_code: formValues.mailing_address?.postal_code?.trim() ?? "",
+      },
     });
   }
 
@@ -327,19 +388,66 @@ function DistrictProfileForm({
               </div>
             </div>
 
-            <div>
-              <label className="text-sm font-medium text-slate-700" htmlFor="district-profile-mailing-address">
-                Mailing address
-              </label>
-              <textarea
-                id="district-profile-mailing-address"
-                name="mailing_address"
-                value={formValues.mailing_address}
-                onChange={handleChange}
-                required
-                rows={4}
-                className="mt-2 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200"
-              />
+            <div className="space-y-4">
+              <div>
+                <label className="text-sm font-medium text-slate-700" htmlFor="district-profile-mailing-street">
+                  Mailing street
+                </label>
+                <input
+                  id="district-profile-mailing-street"
+                  type="text"
+                  name="mailing_address.street"
+                  value={formValues.mailing_address.street}
+                  onChange={handleChange}
+                  required
+                  className="mt-2 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200"
+                />
+              </div>
+              <div className="grid gap-4 md:grid-cols-3">
+                <div className="md:col-span-2">
+                  <label className="text-sm font-medium text-slate-700" htmlFor="district-profile-mailing-city">
+                    City
+                  </label>
+                  <input
+                    id="district-profile-mailing-city"
+                    type="text"
+                    name="mailing_address.city"
+                    value={formValues.mailing_address.city}
+                    onChange={handleChange}
+                    required
+                    className="mt-2 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-slate-700" htmlFor="district-profile-mailing-state">
+                    State
+                  </label>
+                  <input
+                    id="district-profile-mailing-state"
+                    type="text"
+                    name="mailing_address.state"
+                    value={formValues.mailing_address.state}
+                    onChange={handleChange}
+                    required
+                    maxLength={2}
+                    className="mt-2 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm uppercase text-slate-900 shadow-sm focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-slate-700" htmlFor="district-profile-mailing-postal">
+                    ZIP code
+                  </label>
+                  <input
+                    id="district-profile-mailing-postal"
+                    type="text"
+                    name="mailing_address.postal_code"
+                    value={formValues.mailing_address.postal_code}
+                    onChange={handleChange}
+                    required
+                    className="mt-2 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200"
+                  />
+                </div>
+              </div>
             </div>
 
             {error ? <p className="text-sm font-medium text-red-600">{error}</p> : null}
@@ -406,8 +514,8 @@ function DistrictProfileForm({
             <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
               <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">Mailing address</p>
               <p className="mt-2 whitespace-pre-line text-sm text-slate-700">
-                {initialValues.mailing_address ? (
-                  initialValues.mailing_address
+                {displayMailingAddress ? (
+                  displayMailingAddress
                 ) : (
                   <span className="text-slate-400">Add a mailing address</span>
                 )}
@@ -553,7 +661,7 @@ export default function DistrictDashboard({
           outstandingSpend: metrics.outstanding_spend ?? 0,
         };
 
-        const remitToAddress = vendor.remit_to_address?.trim();
+        const remitToAddress = formatPostalAddress(vendor.remit_to_address ?? null);
 
         const rawContactName = vendor.contact_name?.trim() ?? "";
         const contactName = isEmailLike(rawContactName) ? "" : rawContactName;
@@ -804,14 +912,32 @@ export default function DistrictDashboard({
       contact_name: districtProfile?.contact_name ?? "",
       contact_email: districtProfile?.contact_email ?? "",
       phone_number: districtProfile?.phone_number ?? "",
-      mailing_address: districtProfile?.mailing_address ?? "",
+      mailing_address: {
+        street: districtProfile?.mailing_address?.street ?? "",
+        city: districtProfile?.mailing_address?.city ?? "",
+        state: districtProfile?.mailing_address?.state ?? "",
+        postal_code: districtProfile?.mailing_address?.postal_code ?? "",
+      },
     }),
     [
       districtProfile?.company_name,
       districtProfile?.contact_name,
       districtProfile?.contact_email,
       districtProfile?.phone_number,
-      districtProfile?.mailing_address,
+      districtProfile?.mailing_address?.street,
+      districtProfile?.mailing_address?.city,
+      districtProfile?.mailing_address?.state,
+      districtProfile?.mailing_address?.postal_code,
+    ],
+  );
+
+  const formattedDistrictMailing = useMemo(
+    () => formatPostalAddress(districtProfile?.mailing_address ?? null),
+    [
+      districtProfile?.mailing_address?.street,
+      districtProfile?.mailing_address?.city,
+      districtProfile?.mailing_address?.state,
+      districtProfile?.mailing_address?.postal_code,
     ],
   );
   useEffect(() => {
@@ -1442,9 +1568,9 @@ export default function DistrictDashboard({
                               " • " +
                               (districtProfile.phone_number || "Add a phone number")}
                           </p>
-                          {districtProfile.mailing_address ? (
+                          {formattedDistrictMailing ? (
                             <p className="whitespace-pre-line">
-                              {districtProfile.mailing_address}
+                              {formattedDistrictMailing}
                             </p>
                           ) : (
                             <p>Add a mailing address</p>

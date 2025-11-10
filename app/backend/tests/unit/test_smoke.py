@@ -90,7 +90,10 @@ def vendor_and_user() -> tuple[int, int]:
                 contact_email="vendor@example.com",
                 contact_name="Vendor Owner",
                 phone_number="555-555-5555",
-                remit_to_address="123 Main St\nSacramento, CA 95814",
+                remit_to_street="123 Main St",
+                remit_to_city="Sacramento",
+                remit_to_state="CA",
+                remit_to_postal_code="95814",
             )
             session.add(vendor)
             session.flush()
@@ -106,7 +109,10 @@ def vendor_and_user() -> tuple[int, int]:
                 contact_email="district@example.com",
                 contact_name="District Admin",
                 phone_number="555-555-0000",
-                mailing_address="200 District Ave\nSacramento, CA 95814",
+                mailing_street="200 District Ave",
+                mailing_city="Sacramento",
+                mailing_state="CA",
+                mailing_postal_code="95814",
             )
             session.add(district)
             session.flush()
@@ -158,7 +164,10 @@ def district_and_user() -> tuple[int, int]:
                 contact_email="district@example.com",
                 contact_name="District Admin",
                 phone_number="555-555-0000",
-                mailing_address="200 District Ave\nSacramento, CA 95814",
+                mailing_street="200 District Ave",
+                mailing_city="Sacramento",
+                mailing_state="CA",
+                mailing_postal_code="95814",
             )
             session.add(district)
             session.flush()
@@ -228,7 +237,12 @@ def test_admin_can_create_district(
         "contact_name": "Integration Admin",
         "contact_email": f"integration-{unique_suffix}@example.com",
         "phone_number": "555-000-1234",
-        "mailing_address": "100 Integration Way\nSacramento, CA 95824",
+        "mailing_address": {
+            "street": "100 Integration Way",
+            "city": "Sacramento",
+            "state": "CA",
+            "postal_code": "95824",
+        },
         "district_key": "INTG-1234-5678",
     }
 
@@ -271,7 +285,10 @@ def test_district_user_can_add_and_activate_memberships(
             contact_name="Expansion Admin",
             contact_email=f"expansion-{unique_suffix}@example.com",
             phone_number="555-123-4567",
-            mailing_address="400 Expansion Way\nSacramento, CA 95838",
+            mailing_street="400 Expansion Way",
+            mailing_city="Sacramento",
+            mailing_state="CA",
+            mailing_postal_code="95838",
         )
         new_district.district_key = new_key
         session.add(new_district)
@@ -397,7 +414,12 @@ def test_vendor_profile_endpoints(
         "contact_name": "Regina Martinez",
         "contact_email": "regina@responsivehc.com",
         "phone_number": "916-555-0102",
-        "remit_to_address": "Responsive Healthcare Associates\nPO Box 1234\nSacramento, CA 95824",
+        "remit_to_address": {
+            "street": "Responsive Healthcare Associates",
+            "city": "Sacramento",
+            "state": "ca",
+            "postal_code": "95824-1234",
+        },
     }
 
     try:
@@ -414,6 +436,12 @@ def test_vendor_profile_endpoints(
         assert updated["contact_name"] == payload["contact_name"]
         assert updated["is_district_linked"] is False
         assert updated["is_profile_complete"] is True
+        assert updated["remit_to_address"] == {
+            "street": "Responsive Healthcare Associates",
+            "city": "Sacramento",
+            "state": "CA",
+            "postal_code": "95824-1234",
+        }
 
         link_response = client.get("/api/vendors/me/district-key")
         assert link_response.status_code == 200
@@ -443,6 +471,10 @@ def test_vendor_profile_endpoints(
         assert vendor.company_name == payload["company_name"]
         assert vendor.contact_name == payload["contact_name"]
         assert vendor.district_key == district.district_key
+        assert vendor.remit_to_street == payload["remit_to_address"]["street"]
+        assert vendor.remit_to_city == payload["remit_to_address"]["city"]
+        assert vendor.remit_to_state == "CA"
+        assert vendor.remit_to_postal_code == "95824-1234"
 
 
 def test_district_profile_endpoints(
@@ -464,7 +496,12 @@ def test_district_profile_endpoints(
         "contact_name": "Jordan Ellis",
         "contact_email": "jordan.ellis@example.com",
         "phone_number": "916-555-2020",
-        "mailing_address": "5735 47th Avenue\nSacramento, CA 95824",
+        "mailing_address": {
+            "street": "5735 47th Avenue",
+            "city": "Sacramento",
+            "state": "CA",
+            "postal_code": "95824",
+        },
     }
 
     try:
@@ -480,6 +517,7 @@ def test_district_profile_endpoints(
         assert updated["company_name"] == payload["company_name"]
         assert updated["is_profile_complete"] is True
         assert updated["district_key"] == data["district_key"]
+        assert updated["mailing_address"] == payload["mailing_address"]
     finally:
         app.dependency_overrides.pop(get_current_user, None)
 
@@ -488,6 +526,10 @@ def test_district_profile_endpoints(
         assert district is not None
         assert district.company_name == payload["company_name"]
         assert district.contact_name == payload["contact_name"]
+        assert district.mailing_street == payload["mailing_address"]["street"]
+        assert district.mailing_city == payload["mailing_address"]["city"]
+        assert district.mailing_state == payload["mailing_address"]["state"]
+        assert district.mailing_postal_code == payload["mailing_address"]["postal_code"]
 
 
 def test_district_membership_management(
@@ -501,7 +543,10 @@ def test_district_membership_management(
             contact_email="secondary@example.com",
             contact_name="Secondary Admin",
             phone_number="555-555-1111",
-            mailing_address="201 District Ave\nSacramento, CA 95814",
+            mailing_street="201 District Ave",
+            mailing_city="Sacramento",
+            mailing_state="CA",
+            mailing_postal_code="95814",
         )
         session.add(additional)
         session.flush()
