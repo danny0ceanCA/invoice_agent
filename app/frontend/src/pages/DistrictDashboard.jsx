@@ -446,7 +446,6 @@ export default function DistrictDashboard({
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileFormError, setProfileFormError] = useState(null);
   const [showProfileForm, setShowProfileForm] = useState(false);
-  const [profilePromptDismissed, setProfilePromptDismissed] = useState(false);
   const [memberships, setMemberships] = useState(initialMemberships);
   const [membershipLoading, setMembershipLoading] = useState(false);
   const [membershipError, setMembershipError] = useState(null);
@@ -771,7 +770,6 @@ export default function DistrictDashboard({
         const profile = await updateDistrictProfile(token, values);
         setDistrictProfile(profile);
         setShowProfileForm(false);
-        setProfilePromptDismissed(false);
         toast.success("District profile updated.");
       } catch (error) {
         console.error("district_profile_update_failed", error);
@@ -790,7 +788,6 @@ export default function DistrictDashboard({
   const handleProfileCancel = useCallback(() => {
     setShowProfileForm(false);
     setProfileFormError(null);
-    setProfilePromptDismissed(true);
   }, []);
 
   const initialProfileValues = useMemo(
@@ -816,7 +813,6 @@ export default function DistrictDashboard({
       setDistrictProfile(null);
       setProfileError(null);
       setShowProfileForm(false);
-      setProfilePromptDismissed(false);
       setMemberships([]);
       setActiveDistrictId(null);
       setMembershipError(null);
@@ -844,18 +840,8 @@ export default function DistrictDashboard({
   }, [activeDistrictId, isAuthenticated, loadDistrictProfile, loadVendors]);
 
   useEffect(() => {
-    setProfilePromptDismissed(false);
+    setShowProfileForm(false);
   }, [districtProfile?.id]);
-
-  useEffect(() => {
-    if (
-      districtProfile &&
-      !districtProfile.is_profile_complete &&
-      !profilePromptDismissed
-    ) {
-      setShowProfileForm(true);
-    }
-  }, [districtProfile, profilePromptDismissed]);
 
   useEffect(() => {
     if (
