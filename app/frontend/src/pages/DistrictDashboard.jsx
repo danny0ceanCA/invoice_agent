@@ -949,7 +949,7 @@ export default function DistrictDashboard({
       segments.push(primaryContact);
     }
 
-    const contactDetails = [selectedVendor.email, selectedVendor.phone].filter(Boolean);
+    const contactDetails = [selectedVendor.phone].filter(Boolean);
     if (contactDetails.length) {
       segments.push(contactDetails.join(" • "));
     }
@@ -962,7 +962,7 @@ export default function DistrictDashboard({
       return null;
     }
 
-    const segments = [selectedVendor.manager, selectedVendor.email, selectedVendor.phone]
+    const segments = [selectedVendor.manager, selectedVendor.phone]
       .map((value) => (value ? value.trim() : ""))
       .filter(Boolean);
 
