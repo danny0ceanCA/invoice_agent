@@ -1125,9 +1125,6 @@ export default function DistrictDashboard({
                 District Console
               </p>
               <h2 className="mt-2 text-2xl font-bold text-white">Operations Menu</h2>
-              <p className="mt-3 text-sm text-slate-300">
-                Navigate the tools your district teams use every day.
-              </p>
             </div>
             <nav className="space-y-1 px-2 pb-4">
               {menuItems.map((item) => {
