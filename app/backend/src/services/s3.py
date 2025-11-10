@@ -87,10 +87,8 @@ def _client() -> BaseClient:
         ),
     }
 
-    if settings.aws_region:
-        client_kwargs["region_name"] = settings.aws_region
-    else:
-        client_kwargs["region_name"] = "us-east-2"
+    resolved_region = settings.aws_region or _resolve_bucket_region() or "us-east-2"
+    client_kwargs["region_name"] = resolved_region
 
     if settings.aws_access_key_id and settings.aws_secret_access_key:
         client_kwargs["aws_access_key_id"] = settings.aws_access_key_id
@@ -189,14 +187,24 @@ def upload_bytes(
         raise
 
 
+def sanitize_object_key(key: str) -> str:
+    """Return a consistently formatted S3 object key suitable for signing."""
+
+    raw_key = str(key)
+    trimmed = raw_key.strip().strip("'").strip('"')
+    decoded = urllib.parse.unquote(trimmed)
+    sanitized = decoded.strip().strip("'").strip('"')
+    return sanitized
+
+
 def generate_presigned_url(key: str, expires_in: int = 3600) -> str:
     """Generate a presigned URL for the provided object key."""
-    key = key.strip().strip("'").strip('"')
+    sanitized_key = sanitize_object_key(key)
     settings = get_settings()
 
     # Local development mode
     if _is_local_mode():
-        path = _local_bucket_root() / key
+        path = _local_bucket_root() / sanitized_key
         # Ensure absolute path for as_uri()
         path = path.resolve()
         return path.as_uri()
@@ -204,16 +212,31 @@ def generate_presigned_url(key: str, expires_in: int = 3600) -> str:
     # AWS S3 mode
     try:
         client = _client()
-        decoded_key = urllib.parse.unquote(key).strip()
-        LOGGER.info("presign_debug", key=repr(decoded_key))
+        LOGGER.info(
+            "presign_debug",
+            raw_key=repr(key),
+            sanitized_key=repr(sanitized_key),
+            bucket=settings.aws_s3_bucket,
+            region=client.meta.region_name,
+        )
         return client.generate_presigned_url(
             "get_object",
-            Params={"Bucket": settings.aws_s3_bucket, "Key": decoded_key},
+            Params={"Bucket": settings.aws_s3_bucket, "Key": sanitized_key},
             ExpiresIn=expires_in,
         )
     except Exception as exc:
-        LOGGER.error("presign_failed", error=str(exc), key=key)
+        LOGGER.error(
+            "presign_failed",
+            error=str(exc),
+            raw_key=repr(key),
+            sanitized_key=repr(sanitized_key),
+        )
         raise
 
 
-__all__ = ["upload_file", "upload_bytes", "generate_presigned_url"]
+__all__ = [
+    "upload_file",
+    "upload_bytes",
+    "generate_presigned_url",
+    "sanitize_object_key",
+]
