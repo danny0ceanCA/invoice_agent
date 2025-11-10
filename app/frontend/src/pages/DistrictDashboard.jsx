@@ -17,7 +17,7 @@ const menuItems = [
   {
     key: "vendors",
     label: "Vendors",
-    description: "Monitor invoice activity across your approved partners.",
+    description: null,
   },
   {
     key: "approvals",
@@ -1430,17 +1430,6 @@ export default function DistrictDashboard({
                   <div>
                     <p className="text-xs uppercase tracking-widest text-amber-500">{selectedVendor.name}</p>
                     <h4 className="mt-1 text-2xl font-semibold text-slate-900">Select a month</h4>
-                    <p className="mt-1 text-sm text-slate-500">Choose a billing month to review detailed student services.</p>
-                    {vendorHeaderContactLine ? (
-                      <p className="mt-2 text-xs text-slate-500">{vendorHeaderContactLine}</p>
-                    ) : null}
-                    {vendorRemitTo ? (
-                      <p className="mt-2 text-xs text-slate-500">
-                        <span className="font-semibold text-slate-700">Remit to:</span>
-                        <br />
-                        <span className="whitespace-pre-line text-slate-700">{vendorRemitTo}</span>
-                      </p>
-                    ) : null}
                   </div>
                   <button
                     onClick={() => setSelectedVendorId(null)}
@@ -1451,50 +1440,6 @@ export default function DistrictDashboard({
                     Back to vendors
                   </button>
                 </div>
-
-                {vendorOverviewHighlights.length ? (
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">
-                        Partner Snapshot
-                      </p>
-                      {selectedVendor.health ? (
-                        <span
-                          className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${getHealthBadgeClasses(
-                            selectedVendor.health
-                          )}`}
-                        >
-                          {selectedVendor.health}
-                        </span>
-                      ) : null}
-                    </div>
-                    {selectedVendor.summary ? (
-                      <p className="mt-3 text-sm leading-relaxed text-slate-600">{selectedVendor.summary}</p>
-                    ) : null}
-                    <dl className="mt-4 grid gap-3 sm:grid-cols-3">
-                      {vendorOverviewHighlights.map((item) => (
-                        <div
-                          key={`${item.label}-${item.value}`}
-                          className="rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm"
-                        >
-                          <dt className="text-[0.65rem] uppercase tracking-widest text-slate-500">{item.label}</dt>
-                          <dd className="mt-1 text-sm font-semibold text-slate-900">{item.value}</dd>
-                        </div>
-                      ))}
-                    </dl>
-                    {vendorContactSummary ? (
-                      <p className="mt-4 text-xs text-slate-500">{vendorContactSummary}</p>
-                    ) : null}
-                    {vendorRemitTo ? (
-                      <p className="mt-3 text-xs text-slate-500">
-                        <span className="font-semibold text-slate-700">Remit to:</span>
-                        <br />
-                        <span className="whitespace-pre-line text-slate-700">{vendorRemitTo}</span>
-                      </p>
-                    ) : null}
-                  </div>
-                ) : null}
-
                 <div className="space-y-6">
                   {Object.entries(selectedVendor.invoices)
                     .sort(([yearA], [yearB]) => Number(yearB) - Number(yearA))
