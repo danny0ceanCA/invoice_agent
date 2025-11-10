@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import mimetypes
+import re
 import shutil
 import urllib.parse
 from functools import lru_cache
@@ -99,10 +100,15 @@ def _client() -> BaseClient:
 
 
 def _resolve_object_key(filename: str, key: str | None = None) -> str:
-    """Return a deterministic object key for the provided filename."""
+    """Return an S3-safe key for this file."""
     if key:
         return key
-    return f"invoices/{uuid4()}/{filename}"
+
+    # ✅ Remove all forward/back slashes and collapse spaces
+    safe_name = re.sub(r"[\\/]+", "_", filename).strip()
+
+    # Keep plain spaces (S3 handles them fine), or optionally encode as %20 if needed
+    return f"invoices/{uuid4()}/{safe_name}"
 
 
 def _determine_content_type(filename: str, content_type: str | None = None) -> str:
