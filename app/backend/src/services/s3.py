@@ -40,25 +40,39 @@ def _resolve_bucket_region() -> str | None:
     if _is_local_mode():
         return None
 
-    if settings.aws_region:
-        return settings.aws_region
-
     session_kwargs: dict[str, str] = {}
     if settings.aws_access_key_id and settings.aws_secret_access_key:
         session_kwargs["aws_access_key_id"] = settings.aws_access_key_id
         session_kwargs["aws_secret_access_key"] = settings.aws_secret_access_key
+    if settings.aws_region:
+        session_kwargs["region_name"] = settings.aws_region
 
     try:
         session = boto3.session.Session(**session_kwargs)
         client = session.client("s3", config=Config(signature_version="s3v4"))
         response = client.get_bucket_location(Bucket=settings.aws_s3_bucket)
         region = response.get("LocationConstraint") or "us-east-1"
-        LOGGER.info(
-            "resolved_s3_region", bucket=settings.aws_s3_bucket, region=region
-        )
+        if settings.aws_region and settings.aws_region != region:
+            LOGGER.warning(
+                "s3_region_mismatch",
+                bucket=settings.aws_s3_bucket,
+                configured=settings.aws_region,
+                resolved=region,
+            )
+        else:
+            LOGGER.info(
+                "resolved_s3_region", bucket=settings.aws_s3_bucket, region=region
+            )
         return region
     except (BotoCoreError, NoCredentialsError, ClientError) as exc:
         LOGGER.warning("resolve_s3_region_failed", error=str(exc))
+        if settings.aws_region:
+            LOGGER.info(
+                "using_configured_region_fallback",
+                bucket=settings.aws_s3_bucket,
+                region=settings.aws_region,
+            )
+            return settings.aws_region
         return None
 
 
