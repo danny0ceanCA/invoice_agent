@@ -194,11 +194,25 @@ function DistrictProfileForm({
   error,
   disableCancel,
 }) {
+  const hasProfileData = useMemo(
+    () =>
+      Object.values(initialValues).some((value) =>
+        typeof value === "string" ? value.trim().length > 0 : Boolean(value),
+      ),
+    [initialValues],
+  );
+  const [isEditing, setIsEditing] = useState(() => !hasProfileData);
   const [formValues, setFormValues] = useState(initialValues);
 
   useEffect(() => {
     setFormValues(initialValues);
   }, [initialValues]);
+
+  useEffect(() => {
+    if (!hasProfileData) {
+      setIsEditing(true);
+    }
+  }, [hasProfileData]);
 
   function handleChange(event) {
     const { name, value } = event.target;
@@ -216,97 +230,198 @@ function DistrictProfileForm({
     });
   }
 
+  function handleStartEditing() {
+    setFormValues(initialValues);
+    setIsEditing(true);
+  }
+
+  function handleCancelEditing() {
+    setFormValues(initialValues);
+    setIsEditing(false);
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 px-4 py-6">
-      <div className="w-full max-w-2xl rounded-2xl bg-white p-6 shadow-xl">
-        <h2 className="text-lg font-semibold text-slate-900">District profile</h2>
-        <p className="mt-1 text-sm text-slate-600">
-          Keep your district contact information current so vendors and admins know how to reach you.
-        </p>
-
-        <form className="mt-6 space-y-5" onSubmit={handleSubmit}>
-          <div className="grid gap-4 md:grid-cols-2">
-            <label className="block text-sm font-medium text-slate-700">
-              District name
-              <input
-                type="text"
-                name="company_name"
-                value={formValues.company_name}
-                onChange={handleChange}
-                required
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
-              />
-            </label>
-            <label className="block text-sm font-medium text-slate-700">
-              Primary contact name
-              <input
-                type="text"
-                name="contact_name"
-                value={formValues.contact_name}
-                onChange={handleChange}
-                required
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
-              />
-            </label>
+      <div className="w-full max-w-3xl rounded-2xl bg-white p-6 shadow-xl">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">District profile</h2>
+            <p className="mt-1 text-sm text-slate-600">
+              Keep your district contact information current so vendors and admins know how to reach you.
+            </p>
           </div>
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={disableCancel || saving}
+            className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Close
+          </button>
+        </div>
 
-          <div className="grid gap-4 md:grid-cols-2">
-            <label className="block text-sm font-medium text-slate-700">
-              Primary contact email
-              <input
-                type="email"
-                name="contact_email"
-                value={formValues.contact_email}
+        {isEditing ? (
+          <form className="mt-6 space-y-6" onSubmit={handleSubmit}>
+            <div className="grid gap-5 md:grid-cols-2">
+              <div>
+                <label className="text-sm font-medium text-slate-700" htmlFor="district-profile-company-name">
+                  District name
+                </label>
+                <input
+                  id="district-profile-company-name"
+                  type="text"
+                  name="company_name"
+                  value={formValues.company_name}
+                  onChange={handleChange}
+                  required
+                  className="mt-2 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-slate-700" htmlFor="district-profile-contact-name">
+                  Primary contact name
+                </label>
+                <input
+                  id="district-profile-contact-name"
+                  type="text"
+                  name="contact_name"
+                  value={formValues.contact_name}
+                  onChange={handleChange}
+                  required
+                  className="mt-2 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200"
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-5 md:grid-cols-2">
+              <div>
+                <label className="text-sm font-medium text-slate-700" htmlFor="district-profile-contact-email">
+                  Primary contact email
+                </label>
+                <input
+                  id="district-profile-contact-email"
+                  type="email"
+                  name="contact_email"
+                  value={formValues.contact_email}
+                  onChange={handleChange}
+                  required
+                  className="mt-2 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-slate-700" htmlFor="district-profile-phone-number">
+                  Phone number
+                </label>
+                <input
+                  id="district-profile-phone-number"
+                  type="tel"
+                  name="phone_number"
+                  value={formValues.phone_number}
+                  onChange={handleChange}
+                  required
+                  className="mt-2 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-sm font-medium text-slate-700" htmlFor="district-profile-mailing-address">
+                Mailing address
+              </label>
+              <textarea
+                id="district-profile-mailing-address"
+                name="mailing_address"
+                value={formValues.mailing_address}
                 onChange={handleChange}
                 required
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
+                rows={4}
+                className="mt-2 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200"
               />
-            </label>
-            <label className="block text-sm font-medium text-slate-700">
-              Phone number
-              <input
-                type="tel"
-                name="phone_number"
-                value={formValues.phone_number}
-                onChange={handleChange}
-                required
-                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
-              />
-            </label>
+            </div>
+
+            {error ? <p className="text-sm font-medium text-red-600">{error}</p> : null}
+
+            <div className="flex flex-wrap justify-end gap-3">
+              <button
+                type="button"
+                onClick={handleCancelEditing}
+                disabled={saving}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={saving}
+                className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white shadow transition hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {saving ? "Saving…" : "Save details"}
+              </button>
+            </div>
+          </form>
+        ) : (
+          <div className="mt-6 space-y-5">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">District name</p>
+                <p className="mt-2 text-sm font-medium text-slate-900">
+                  {initialValues.company_name ? (
+                    initialValues.company_name
+                  ) : (
+                    <span className="font-normal text-slate-400">Add a district name</span>
+                  )}
+                </p>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">Primary contact</p>
+                <div className="mt-2 space-y-1 text-sm text-slate-600">
+                  <p className="font-medium text-slate-900">
+                    {initialValues.contact_name ? (
+                      initialValues.contact_name
+                    ) : (
+                      <span className="font-normal text-slate-400">Add a contact name</span>
+                    )}
+                  </p>
+                  <p>
+                    {initialValues.contact_email ? (
+                      <span className="text-slate-700">{initialValues.contact_email}</span>
+                    ) : (
+                      <span className="text-slate-400">Add an email</span>
+                    )}
+                  </p>
+                  <p>
+                    {initialValues.phone_number ? (
+                      <span className="text-slate-700">{initialValues.phone_number}</span>
+                    ) : (
+                      <span className="text-slate-400">Add a phone number</span>
+                    )}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">Mailing address</p>
+              <p className="mt-2 whitespace-pre-line text-sm text-slate-700">
+                {initialValues.mailing_address ? (
+                  initialValues.mailing_address
+                ) : (
+                  <span className="text-slate-400">Add a mailing address</span>
+                )}
+              </p>
+            </div>
+
+            <div className="flex flex-wrap justify-end gap-3">
+              <button
+                type="button"
+                onClick={handleStartEditing}
+                className="inline-flex items-center rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white shadow transition hover:bg-amber-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/70"
+              >
+                Edit profile
+              </button>
+            </div>
           </div>
-
-          <label className="block text-sm font-medium text-slate-700">
-            Mailing address
-            <textarea
-              name="mailing_address"
-              value={formValues.mailing_address}
-              onChange={handleChange}
-              required
-              rows={4}
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-200"
-            />
-          </label>
-
-          {error ? <p className="text-sm text-red-600">{error}</p> : null}
-
-          <div className="flex flex-wrap justify-end gap-3">
-            <button
-              type="button"
-              onClick={onCancel}
-              disabled={disableCancel || saving}
-              className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              Close
-            </button>
-            <button
-              type="submit"
-              disabled={saving}
-              className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white shadow transition hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {saving ? "Saving…" : "Save details"}
-            </button>
-          </div>
-        </form>
+        )}
       </div>
     </div>
   );
