@@ -78,17 +78,18 @@ def _resolve_bucket_region() -> str | None:
 
 def _client() -> BaseClient:
     settings = get_settings()
-    region = _resolve_bucket_region()
-
-    region_name = region or settings.aws_region or None
+    region_name = settings.aws_region or "us-east-2"
     aws_access_key_id = settings.aws_access_key_id or None
     aws_secret_access_key = settings.aws_secret_access_key or None
+
+    endpoint_url = f"https://s3.{region_name}.amazonaws.com"
 
     return boto3.client(
         "s3",
         region_name=region_name,
         aws_access_key_id=aws_access_key_id,
         aws_secret_access_key=aws_secret_access_key,
+        endpoint_url=endpoint_url,
         config=Config(signature_version="s3v4"),
     )
 
