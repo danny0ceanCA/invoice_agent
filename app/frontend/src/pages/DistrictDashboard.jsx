@@ -999,19 +999,14 @@ export default function DistrictDashboard({
                   <button
                     key={item.key}
                     onClick={() => setActiveKey(item.key)}
-                    className={`group flex w-full items-center justify-between rounded-xl px-4 py-3 text-left text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/70 ${
+                    className={`group flex w-full items-center rounded-xl px-4 py-3 text-left text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/70 ${
                       isActive
-                        ? "bg-slate-200 text-slate-900 shadow-inner"
+                        ? "bg-slate-100 text-slate-900"
                         : "text-slate-200 hover:bg-white/10 hover:text-white"
                     }`}
                     type="button"
                   >
                     <span>{item.label}</span>
-                    {isActive && (
-                      <span className="rounded-full bg-amber-400/90 px-2 py-0.5 text-xs font-semibold text-slate-900">
-                        Active
-                      </span>
-                    )}
                   </button>
                 );
               })}
