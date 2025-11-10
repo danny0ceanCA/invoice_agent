@@ -78,16 +78,23 @@ def _resolve_bucket_region() -> str | None:
 
 def _client() -> BaseClient:
     settings = get_settings()
-    return boto3.client(
-        "s3",
-        region_name=settings.aws_region or "us-east-2",
-        aws_access_key_id=settings.aws_access_key_id,
-        aws_secret_access_key=settings.aws_secret_access_key,
-        config=Config(
+    client_kwargs: dict[str, object] = {
+        "config": Config(
             signature_version="s3v4",
             s3={"addressing_style": "virtual"},
         ),
-    )
+    }
+
+    if settings.aws_region:
+        client_kwargs["region_name"] = settings.aws_region
+    else:
+        client_kwargs["region_name"] = "us-east-2"
+
+    if settings.aws_access_key_id and settings.aws_secret_access_key:
+        client_kwargs["aws_access_key_id"] = settings.aws_access_key_id
+        client_kwargs["aws_secret_access_key"] = settings.aws_secret_access_key
+
+    return boto3.client("s3", **client_kwargs)
 
 
 def _resolve_object_key(filename: str, key: str | None = None) -> str:
