@@ -65,7 +65,8 @@ const MONTH_INDEX = MONTH_ORDER.reduce((acc, month, index) => {
 const currencyFormatter = new Intl.NumberFormat("en-US", {
   style: "currency",
   currency: "USD",
-  maximumFractionDigits: 0,
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
 });
 
 const parseCurrencyValue = (value) => {
@@ -93,18 +94,43 @@ const aggregateStudentEntries = (entries) => {
   const groups = new Map();
 
   entries.forEach((entry, index) => {
+    const normalizedStudentKey =
+      typeof entry.studentKey === "string" && entry.studentKey.trim().length
+        ? entry.studentKey.trim().toLowerCase()
+        : null;
+    const normalizedName =
+      typeof entry.name === "string" && entry.name.trim().length
+        ? entry.name.trim().toLowerCase()
+        : null;
+    const fallbackId =
+      typeof entry.originalLineItemId === "number" &&
+      Number.isFinite(entry.originalLineItemId)
+        ? `line:${entry.originalLineItemId}`
+        : null;
     const key =
-      entry.id ??
-      (entry.name ? `name:${entry.name}` : `index:${index}`);
+      normalizedStudentKey ??
+      fallbackId ??
+      normalizedName ??
+      (typeof entry.id === "string" && entry.id.trim().length
+        ? entry.id.trim()
+        : `index:${index}`);
     const amountValue =
       typeof entry.amountValue === "number"
         ? entry.amountValue
         : parseCurrencyValue(entry.amount ?? "");
-    const displayName = entry.name ?? "Unknown student";
+    const displayName =
+      typeof entry.name === "string" && entry.name.trim().length
+        ? entry.name.trim()
+        : "Unknown student";
 
     if (!groups.has(key)) {
       groups.set(key, {
-        id: entry.id ?? key,
+        id:
+          (typeof entry.id === "string" && entry.id.trim().length
+            ? entry.id.trim()
+            : null) ??
+          fallbackId ??
+          `aggregated-${index}`,
         name: displayName,
         amountValue: 0,
         services: new Map(),
@@ -692,15 +718,36 @@ export default function DistrictDashboard({
                   typeof invoice.month_index === "number"
                     ? invoice.month_index
                     : MONTH_INDEX[invoice.month] ?? -1;
-                const students = (invoice.students ?? []).map((student) => ({
-                  id: `student-${student.id}`,
-                  name: student.name,
-                  service: student.service ?? null,
-                  amount: currencyFormatter.format(student.amount ?? 0),
-                  amountValue: student.amount ?? 0,
-                  pdfUrl: student.pdf_url ?? null,
-                  timesheetUrl: student.timesheet_url ?? null,
-                }));
+                const students = (invoice.students ?? []).map((student) => {
+                  const trimmedName =
+                    typeof student.name === "string" && student.name.trim().length
+                      ? student.name.trim()
+                      : "Unknown student";
+                  const normalizedKey =
+                    trimmedName !== "Unknown student"
+                      ? trimmedName.toLowerCase()
+                      : null;
+                  const amountValue =
+                    typeof student.amount === "number"
+                      ? student.amount
+                      : Number(student.amount) || 0;
+                  const serviceLabel =
+                    typeof student.service === "string" && student.service.trim().length
+                      ? student.service.trim()
+                      : null;
+
+                  return {
+                    id: `student-${student.id}`,
+                    originalLineItemId: student.id,
+                    name: trimmedName,
+                    studentKey: normalizedKey,
+                    service: serviceLabel,
+                    amount: currencyFormatter.format(amountValue),
+                    amountValue,
+                    pdfUrl: student.pdf_url ?? null,
+                    timesheetUrl: student.timesheet_url ?? null,
+                  };
+                });
                 return {
                   month: invoice.month,
                   monthIndex,
@@ -1643,7 +1690,7 @@ export default function DistrictDashboard({
                         </div>
                       </div>
                       {filteredStudents.length ? (
-                        <div className="mt-4 max-h-[28rem] overflow-y-auto pr-1">
+                        <div className="mt-4 max-h-[65vh] overflow-y-auto pr-1">
                           <ul className="space-y-3">
                             {filteredStudents.map((entry) => {
                               const studentInvoiceUrl = entry.pdfUrl
