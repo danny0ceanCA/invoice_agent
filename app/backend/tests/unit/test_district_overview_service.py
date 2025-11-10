@@ -2,10 +2,49 @@ import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+import types
+import importlib.metadata as importlib_metadata
 
 sys.path.append(str(Path(__file__).resolve().parents[4]))
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///./test_invoice.db")
+
+email_validator_stub = types.ModuleType("email_validator")
+
+
+class EmailNotValidError(ValueError):
+    """Fallback error used when email_validator isn't installed."""
+
+
+def validate_email(address: str, **_: object) -> types.SimpleNamespace:
+    local_part = address.split("@", 1)[0]
+    return types.SimpleNamespace(
+        email=address,
+        normalized=address,
+        local_part=local_part,
+    )
+
+
+email_validator_stub.EmailNotValidError = EmailNotValidError
+email_validator_stub.validate_email = validate_email
+email_validator_stub.caching_resolver = None
+sys.modules.setdefault("email_validator", email_validator_stub)
+
+
+class _FakeDistribution:
+    version = "2.0.0"
+
+
+_original_distribution = importlib_metadata.distribution
+
+
+def _fake_distribution(name: str) -> importlib_metadata.Distribution:  # type: ignore[type-arg]
+    if name == "email-validator":
+        return _FakeDistribution()  # type: ignore[return-value]
+    return _original_distribution(name)
+
+
+importlib_metadata.distribution = _fake_distribution  # type: ignore[assignment]
 
 import pytest
 

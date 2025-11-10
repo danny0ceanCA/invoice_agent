@@ -10,6 +10,7 @@ from uuid import uuid4
 
 import boto3
 from botocore.client import BaseClient
+from botocore.config import Config
 from botocore.exceptions import BotoCoreError, NoCredentialsError
 import structlog
 
@@ -36,6 +37,7 @@ def _client() -> BaseClient:
         region_name=settings.aws_region,
         aws_access_key_id=settings.aws_access_key_id,
         aws_secret_access_key=settings.aws_secret_access_key,
+        config=Config(signature_version="s3v4"),
     )
 
 
