@@ -104,10 +104,8 @@ def _resolve_object_key(filename: str, key: str | None = None) -> str:
     if key:
         return key
 
-    # ✅ Remove all forward/back slashes and collapse multiple underscores
     safe_name = re.sub(r"[\\/]+", "_", filename).strip()
     safe_name = re.sub(r"_+", "_", safe_name)
-
     return f"invoices/{uuid4()}/{safe_name}"
 
 
