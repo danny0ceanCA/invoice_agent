@@ -114,7 +114,7 @@ def upload_file(
     """Upload a file to S3 or local storage and return the object key."""
     settings = get_settings()
     safe_filename = file_path.name.replace("/", "_")
-    object_key = _resolve_object_key(safe_filename, key=key)
+    object_key = _resolve_object_key(filename=safe_filename, key=key)
     resolved_content_type = _determine_content_type(safe_filename, content_type)
 
     if _is_local_mode():
@@ -149,7 +149,7 @@ def upload_bytes(
     """Upload in-memory data to storage and return the object key."""
     settings = get_settings()
     safe_filename = filename.replace("/", "_")
-    object_key = _resolve_object_key(safe_filename, key=key)
+    object_key = _resolve_object_key(filename=safe_filename, key=key)
     resolved_content_type = _determine_content_type(safe_filename, content_type)
 
     if _is_local_mode():
