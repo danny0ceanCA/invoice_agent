@@ -79,24 +79,18 @@ def _resolve_bucket_region() -> str | None:
 def _client() -> BaseClient:
     settings = get_settings()
     region_name = settings.aws_region or "us-east-2"
-    aws_access_key_id = settings.aws_access_key_id or None
-    aws_secret_access_key = settings.aws_secret_access_key or None
 
     s3_config = Config(
         signature_version="s3v4",
-        s3={"addressing_style": "virtual"},
-    )
-
-    endpoint_url = (
-        f"https://{settings.aws_s3_bucket}.s3.{region_name}.amazonaws.com"
+        s3={"addressing_style": "virtual"}
     )
 
     return boto3.client(
         "s3",
         region_name=region_name,
-        aws_access_key_id=aws_access_key_id,
-        aws_secret_access_key=aws_secret_access_key,
-        endpoint_url=endpoint_url,
+        aws_access_key_id=settings.aws_access_key_id,
+        aws_secret_access_key=settings.aws_secret_access_key,
+        endpoint_url=f"https://s3.{region_name}.amazonaws.com",
         config=s3_config,
     )
 
