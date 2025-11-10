@@ -41,7 +41,6 @@ def _client() -> BaseClient:
 
 def _resolve_object_key(filename: str, key: str | None = None) -> str:
     """Return a deterministic object key for the provided filename."""
-
     if key:
         return key
     return f"invoices/{uuid4()}/{filename}"
@@ -49,7 +48,6 @@ def _resolve_object_key(filename: str, key: str | None = None) -> str:
 
 def _determine_content_type(filename: str, content_type: str | None = None) -> str:
     """Infer a best-effort content type for uploads."""
-
     return (
         content_type
         or mimetypes.guess_type(filename)[0]
@@ -64,7 +62,6 @@ def upload_file(
     content_type: str | None = None,
 ) -> str:
     """Upload a file to S3 or local storage and return the object key."""
-
     settings = get_settings()
     object_key = _resolve_object_key(file_path.name, key=key)
     resolved_content_type = _determine_content_type(file_path.name, content_type)
@@ -99,7 +96,6 @@ def upload_bytes(
     content_type: str | None = None,
 ) -> str:
     """Upload in-memory data to storage and return the object key."""
-
     settings = get_settings()
     object_key = _resolve_object_key(filename, key=key)
     resolved_content_type = _determine_content_type(filename, content_type)
@@ -128,12 +124,16 @@ def upload_bytes(
 
 def generate_presigned_url(key: str, expires_in: int = 3600) -> str:
     """Generate a presigned URL for the provided object key."""
-
     settings = get_settings()
+
+    # Local development mode
     if _is_local_mode():
         path = _local_bucket_root() / key
+        # Ensure absolute path for as_uri()
+        path = path.resolve()
         return path.as_uri()
 
+    # AWS S3 mode
     client = _client()
     try:
         return client.generate_presigned_url(

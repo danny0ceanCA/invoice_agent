@@ -6,7 +6,8 @@ from collections.abc import Sequence
 
 from sqlalchemy import MetaData, inspect, select, text
 
-from .. import get_engine
+from app.backend.src.db import get_engine
+
 
 
 def _parse_address(value: str | None) -> tuple[str | None, str | None, str | None, str | None]:
