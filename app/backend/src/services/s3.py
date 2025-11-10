@@ -7,6 +7,7 @@ from io import BytesIO
 import mimetypes
 import shutil
 from pathlib import Path
+import urllib.parse
 from uuid import uuid4
 
 import boto3
@@ -174,6 +175,7 @@ def upload_bytes(
 
 def generate_presigned_url(key: str, expires_in: int = 3600) -> str:
     """Generate a presigned URL for the provided object key."""
+    key = urllib.parse.quote(key, safe="/")
     settings = get_settings()
 
     # Local development mode
