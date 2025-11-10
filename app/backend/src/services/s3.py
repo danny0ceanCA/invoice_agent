@@ -78,14 +78,15 @@ def _resolve_bucket_region() -> str | None:
 
 def _client() -> BaseClient:
     settings = get_settings()
-    s3_config = Config(signature_version="s3v4", s3={"addressing_style": "virtual"})
     return boto3.client(
         "s3",
-        region_name=settings.aws_region,
+        region_name=settings.aws_region or "us-east-2",
         aws_access_key_id=settings.aws_access_key_id,
         aws_secret_access_key=settings.aws_secret_access_key,
-        endpoint_url=f"https://s3.{settings.aws_region}.amazonaws.com",
-        config=s3_config,
+        config=Config(
+            signature_version="s3v4",
+            s3={"addressing_style": "virtual"},
+        ),
     )
 
 
@@ -193,7 +194,6 @@ def generate_presigned_url(key: str, expires_in: int = 3600) -> str:
             "get_object",
             Params={"Bucket": settings.aws_s3_bucket, "Key": key},
             ExpiresIn=expires_in,
-            HttpMethod="GET",
         )
     except (BotoCoreError, NoCredentialsError) as exc:
         LOGGER.error("presign_failed", error=str(exc), key=key)
