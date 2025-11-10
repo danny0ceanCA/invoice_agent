@@ -82,7 +82,14 @@ def _client() -> BaseClient:
     aws_access_key_id = settings.aws_access_key_id or None
     aws_secret_access_key = settings.aws_secret_access_key or None
 
-    endpoint_url = f"https://s3.{region_name}.amazonaws.com"
+    s3_config = Config(
+        signature_version="s3v4",
+        s3={"addressing_style": "virtual"},
+    )
+
+    endpoint_url = (
+        f"https://{settings.aws_s3_bucket}.s3.{region_name}.amazonaws.com"
+    )
 
     return boto3.client(
         "s3",
@@ -90,7 +97,7 @@ def _client() -> BaseClient:
         aws_access_key_id=aws_access_key_id,
         aws_secret_access_key=aws_secret_access_key,
         endpoint_url=endpoint_url,
-        config=Config(signature_version="s3v4"),
+        config=s3_config,
     )
 
 
