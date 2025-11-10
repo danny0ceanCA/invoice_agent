@@ -197,7 +197,10 @@ def generate_presigned_url(key: str, expires_in: int = 3600) -> str:
     # AWS S3 mode
     try:
         client = _client()
-        safe_key = urllib.parse.quote(key, safe="/")
+        if "%" in key:
+            safe_key = key
+        else:
+            safe_key = urllib.parse.quote(key, safe="/")
         return client.generate_presigned_url(
             "get_object",
             Params={"Bucket": settings.aws_s3_bucket, "Key": safe_key},
