@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import lru_cache
 from io import BytesIO
 import mimetypes
 import shutil
@@ -11,7 +12,7 @@ from uuid import uuid4
 import boto3
 from botocore.client import BaseClient
 from botocore.config import Config
-from botocore.exceptions import BotoCoreError, NoCredentialsError
+from botocore.exceptions import BotoCoreError, ClientError, NoCredentialsError
 import structlog
 
 from app.backend.src.core.config import get_settings
@@ -30,15 +31,52 @@ def _is_local_mode() -> bool:
     return get_settings().aws_s3_bucket.lower() == "local"
 
 
+@lru_cache()
+def _resolve_bucket_region() -> str | None:
+    """Return the region for the configured S3 bucket."""
+
+    settings = get_settings()
+
+    if _is_local_mode():
+        return None
+
+    if settings.aws_region:
+        return settings.aws_region
+
+    session_kwargs: dict[str, str] = {}
+    if settings.aws_access_key_id and settings.aws_secret_access_key:
+        session_kwargs["aws_access_key_id"] = settings.aws_access_key_id
+        session_kwargs["aws_secret_access_key"] = settings.aws_secret_access_key
+
+    try:
+        session = boto3.session.Session(**session_kwargs)
+        client = session.client("s3", config=Config(signature_version="s3v4"))
+        response = client.get_bucket_location(Bucket=settings.aws_s3_bucket)
+        region = response.get("LocationConstraint") or "us-east-1"
+        LOGGER.info(
+            "resolved_s3_region", bucket=settings.aws_s3_bucket, region=region
+        )
+        return region
+    except (BotoCoreError, NoCredentialsError, ClientError) as exc:
+        LOGGER.warning("resolve_s3_region_failed", error=str(exc))
+        return None
+
+
 def _client() -> BaseClient:
     settings = get_settings()
-    return boto3.client(
-        "s3",
-        region_name=settings.aws_region,
-        aws_access_key_id=settings.aws_access_key_id,
-        aws_secret_access_key=settings.aws_secret_access_key,
-        config=Config(signature_version="s3v4"),
-    )
+    region = _resolve_bucket_region()
+
+    client_kwargs: dict[str, object] = {
+        "config": Config(signature_version="s3v4"),
+    }
+
+    if region:
+        client_kwargs["region_name"] = region
+    if settings.aws_access_key_id and settings.aws_secret_access_key:
+        client_kwargs["aws_access_key_id"] = settings.aws_access_key_id
+        client_kwargs["aws_secret_access_key"] = settings.aws_secret_access_key
+
+    return boto3.client("s3", **client_kwargs)
 
 
 def _resolve_object_key(filename: str, key: str | None = None) -> str:
