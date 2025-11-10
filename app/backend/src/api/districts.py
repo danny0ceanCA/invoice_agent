@@ -8,12 +8,14 @@ from sqlalchemy.orm import Session, selectinload
 from app.backend.src.core.security import require_district_user
 from ..db import get_session_dependency
 from app.backend.src.models import District, DistrictMembership, User
+from app.backend.src.schemas.address import PostalAddress, build_postal_address
 from app.backend.src.schemas.district import (
     DistrictKeySubmission,
     DistrictMembershipCollection,
     DistrictMembershipEntry,
     DistrictProfile,
     DistrictProfileUpdate,
+    DistrictProfileUpdateNormalized,
     DistrictVendorOverview,
 )
 from app.backend.src.services.district_overview import fetch_district_vendor_overview
@@ -29,7 +31,10 @@ def _serialize_district(district: District) -> DistrictProfile:
         district.contact_name,
         district.contact_email,
         district.phone_number,
-        district.mailing_address,
+        district.mailing_street,
+        district.mailing_city,
+        district.mailing_state,
+        district.mailing_postal_code,
         district.district_key,
     ]
     is_complete = all(
@@ -42,9 +47,20 @@ def _serialize_district(district: District) -> DistrictProfile:
         contact_name=district.contact_name,
         contact_email=district.contact_email,
         phone_number=district.phone_number,
-        mailing_address=district.mailing_address,
+        mailing_address=_build_district_address(district),
         district_key=district.district_key,
         is_profile_complete=is_complete,
+    )
+
+
+def _build_district_address(district: District) -> PostalAddress | None:
+    """Return the district's mailing address if available."""
+
+    return build_postal_address(
+        district.mailing_street,
+        district.mailing_city,
+        district.mailing_state,
+        district.mailing_postal_code,
     )
 
 
@@ -156,19 +172,34 @@ def update_district_profile(
             detail="District profile not found",
         )
 
-    normalized = payload.normalized()
+    try:
+        normalized: DistrictProfileUpdateNormalized = payload.normalized()
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
 
     district.company_name = normalized.company_name
     district.contact_name = normalized.contact_name
     district.contact_email = normalized.contact_email
     district.phone_number = normalized.phone_number
-    district.mailing_address = normalized.mailing_address
+    _apply_mailing_address(district, normalized.mailing_address)
 
     session.add(district)
     session.commit()
     session.refresh(district)
 
     return _serialize_district(district)
+
+
+def _apply_mailing_address(district: District, address: PostalAddress) -> None:
+    """Persist mailing address components for the district."""
+
+    district.mailing_street = address.street
+    district.mailing_city = address.city
+    district.mailing_state = address.state
+    district.mailing_postal_code = address.postal_code
 
 
 @router.get("/vendors", response_model=DistrictVendorOverview)

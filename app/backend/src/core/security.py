@@ -171,7 +171,10 @@ def _ensure_vendor_record(session: Session, user: User) -> None:
                 contact_name=user.name or user.email,
                 contact_email=user.email,
                 phone_number="N/A",
-                remit_to_address="N/A",
+                remit_to_street="N/A",
+                remit_to_city="N/A",
+                remit_to_state="NA",
+                remit_to_postal_code="00000",
             )
             session.add(vendor)
             session.flush()

@@ -1,12 +1,13 @@
 import { API_BASE, type ApiError } from "./auth";
 import type { DistrictProfile } from "./districts";
+import type { PostalAddress } from "./common";
 
 export interface AdminDistrictPayload {
   company_name: string;
   contact_name: string;
   contact_email: string;
   phone_number: string;
-  mailing_address: string;
+  mailing_address: PostalAddress;
   district_key?: string;
 }
 

@@ -6,6 +6,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, EmailStr
 
+from .address import PostalAddress, PostalAddressInput
+
 
 class DistrictProfile(BaseModel):
     """Serialized district profile details for the portal."""
@@ -15,11 +17,21 @@ class DistrictProfile(BaseModel):
     contact_name: str | None
     contact_email: EmailStr | None
     phone_number: str | None
-    mailing_address: str | None
+    mailing_address: PostalAddress | None
     district_key: str
     is_profile_complete: bool
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class DistrictProfileUpdateNormalized(BaseModel):
+    """Normalized district profile update payload."""
+
+    company_name: str
+    contact_name: str
+    contact_email: EmailStr
+    phone_number: str
+    mailing_address: PostalAddress
 
 
 class DistrictProfileUpdate(BaseModel):
@@ -29,17 +41,19 @@ class DistrictProfileUpdate(BaseModel):
     contact_name: str
     contact_email: EmailStr
     phone_number: str
-    mailing_address: str
+    mailing_address: PostalAddressInput
 
-    def normalized(self) -> "DistrictProfileUpdate":
+    def normalized(self) -> DistrictProfileUpdateNormalized:
         """Return a copy of the payload with trimmed fields."""
 
-        return DistrictProfileUpdate(
+        normalized_address = self.mailing_address.normalized()
+
+        return DistrictProfileUpdateNormalized(
             company_name=self.company_name.strip(),
             contact_name=self.contact_name.strip(),
             contact_email=self.contact_email,
             phone_number=self.phone_number.strip(),
-            mailing_address=self.mailing_address.strip(),
+            mailing_address=normalized_address,
         )
 
 
@@ -132,7 +146,7 @@ class DistrictVendorProfile(BaseModel):
     contact_name: str | None
     contact_email: EmailStr | None
     phone_number: str | None
-    remit_to_address: str | None
+    remit_to_address: PostalAddress | None
     metrics: DistrictVendorMetrics
     health_label: str | None
     latest_invoice: DistrictVendorLatestInvoice | None
@@ -149,6 +163,7 @@ class DistrictVendorOverview(BaseModel):
 __all__ = [
     "DistrictProfile",
     "DistrictProfileUpdate",
+    "DistrictProfileUpdateNormalized",
     "DistrictMembershipCollection",
     "DistrictMembershipEntry",
     "DistrictKeySubmission",

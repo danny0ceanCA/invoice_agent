@@ -9,6 +9,7 @@ import {
   fetchVendorProfile,
   updateVendorProfile,
 } from "../api/vendors";
+import { formatPostalAddress } from "../api/common";
 import JobStatusCard from "./JobStatusCard";
 import VendorProfileWizard from "../components/VendorProfileWizard";
 
@@ -216,14 +217,32 @@ export default function VendorDashboard({ vendorId }) {
       phone_number: formatPhoneNumberForDisplay(
         vendorProfile?.phone_number ?? "",
       ),
-      remit_to_address: vendorProfile?.remit_to_address ?? "",
+      remit_to_address: {
+        street: vendorProfile?.remit_to_address?.street ?? "",
+        city: vendorProfile?.remit_to_address?.city ?? "",
+        state: vendorProfile?.remit_to_address?.state ?? "",
+        postal_code: vendorProfile?.remit_to_address?.postal_code ?? "",
+      },
     }),
     [
       vendorProfile?.company_name,
       vendorProfile?.contact_name,
       vendorProfile?.contact_email,
       vendorProfile?.phone_number,
-      vendorProfile?.remit_to_address,
+      vendorProfile?.remit_to_address?.street,
+      vendorProfile?.remit_to_address?.city,
+      vendorProfile?.remit_to_address?.state,
+      vendorProfile?.remit_to_address?.postal_code,
+    ],
+  );
+
+  const formattedRemitAddress = useMemo(
+    () => formatPostalAddress(vendorProfile?.remit_to_address ?? null),
+    [
+      vendorProfile?.remit_to_address?.street,
+      vendorProfile?.remit_to_address?.city,
+      vendorProfile?.remit_to_address?.state,
+      vendorProfile?.remit_to_address?.postal_code,
     ],
   );
 
@@ -283,9 +302,9 @@ export default function VendorDashboard({ vendorId }) {
                     <p className="text-xs uppercase tracking-wide text-slate-500">
                       Remit-to address
                     </p>
-                    {vendorProfile.remit_to_address ? (
+                    {formattedRemitAddress ? (
                       <address className="mt-1 whitespace-pre-line not-italic text-slate-900">
-                        {vendorProfile.remit_to_address}
+                        {formattedRemitAddress}
                       </address>
                     ) : (
                       <p>Add a remit-to address</p>

@@ -9,7 +9,12 @@ from sqlalchemy.orm import Session
 from app.backend.src.core.security import require_admin_user
 from ..db import get_session_dependency
 from app.backend.src.models import District
-from app.backend.src.schemas.district import DistrictProfile, DistrictProfileUpdate
+from app.backend.src.schemas.address import PostalAddress, build_postal_address
+from app.backend.src.schemas.district import (
+    DistrictProfile,
+    DistrictProfileUpdate,
+    DistrictProfileUpdateNormalized,
+)
 
 router = APIRouter(prefix="/admin/districts", tags=["admin-districts"])
 
@@ -22,7 +27,10 @@ def _serialize_district(district: District) -> DistrictProfile:
         district.contact_name,
         district.contact_email,
         district.phone_number,
-        district.mailing_address,
+        district.mailing_street,
+        district.mailing_city,
+        district.mailing_state,
+        district.mailing_postal_code,
         district.district_key,
     ]
     is_complete = all(
@@ -35,9 +43,20 @@ def _serialize_district(district: District) -> DistrictProfile:
         contact_name=district.contact_name,
         contact_email=district.contact_email,
         phone_number=district.phone_number,
-        mailing_address=district.mailing_address,
+        mailing_address=_build_district_address(district),
         district_key=district.district_key,
         is_profile_complete=is_complete,
+    )
+
+
+def _build_district_address(district: District) -> PostalAddress | None:
+    """Construct the district mailing address if all fields are present."""
+
+    return build_postal_address(
+        district.mailing_street,
+        district.mailing_city,
+        district.mailing_state,
+        district.mailing_postal_code,
     )
 
 
@@ -60,7 +79,7 @@ class DistrictCreatePayload(DistrictProfileUpdate):
     def normalized(self) -> "DistrictCreatePayload":
         """Return a sanitized payload with trimmed values."""
 
-        normalized_base = super().normalized()
+        normalized_base: DistrictProfileUpdateNormalized = super().normalized()
         key_characters = "".join(
             char for char in (self.district_key or "") if char.isalnum()
         ).upper()
@@ -89,7 +108,13 @@ def create_district(
 ) -> DistrictProfile:
     """Create a new district and optionally assign a specific access key."""
 
-    normalized = payload.normalized()
+    try:
+        normalized = payload.normalized()
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
 
     if normalized.district_key:
         duplicate = (
@@ -108,8 +133,8 @@ def create_district(
         contact_name=normalized.contact_name or None,
         contact_email=normalized.contact_email or None,
         phone_number=normalized.phone_number or None,
-        mailing_address=normalized.mailing_address or None,
     )
+    _apply_mailing_address(district, normalized.mailing_address)
     if normalized.district_key:
         district.district_key = normalized.district_key
 
@@ -118,6 +143,15 @@ def create_district(
     session.refresh(district)
 
     return _serialize_district(district)
+
+
+def _apply_mailing_address(district: District, address: PostalAddress) -> None:
+    """Persist mailing address components for an admin-created district."""
+
+    district.mailing_street = address.street
+    district.mailing_city = address.city
+    district.mailing_state = address.state
+    district.mailing_postal_code = address.postal_code
 
 
 __all__ = ["router"]

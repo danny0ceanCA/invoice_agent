@@ -1,4 +1,5 @@
 import { API_BASE, type ApiError } from "./auth";
+import type { PostalAddress } from "./common";
 
 export interface VendorProfile {
   id: number;
@@ -6,7 +7,7 @@ export interface VendorProfile {
   contact_name: string | null;
   contact_email: string | null;
   phone_number: string | null;
-  remit_to_address: string | null;
+  remit_to_address: PostalAddress | null;
   is_profile_complete: boolean;
   district_company_name: string | null;
   is_district_linked: boolean;
@@ -17,7 +18,7 @@ export interface VendorProfilePayload {
   contact_name: string;
   contact_email: string;
   phone_number: string;
-  remit_to_address: string;
+  remit_to_address: PostalAddress;
   districtKey?: string;
 }
 

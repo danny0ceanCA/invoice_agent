@@ -1,4 +1,5 @@
 import { API_BASE, type ApiError } from "./auth";
+import type { PostalAddress } from "./common";
 
 export interface DistrictProfile {
   id: number;
@@ -6,7 +7,7 @@ export interface DistrictProfile {
   contact_name: string | null;
   contact_email: string | null;
   phone_number: string | null;
-  mailing_address: string | null;
+  mailing_address: PostalAddress | null;
   district_key: string;
   is_profile_complete: boolean;
 }
@@ -16,7 +17,7 @@ export interface DistrictProfilePayload {
   contact_name: string;
   contact_email: string;
   phone_number: string;
-  mailing_address: string;
+  mailing_address: PostalAddress;
 }
 
 export interface DistrictMembershipEntry {
@@ -75,7 +76,7 @@ export interface DistrictVendorProfile {
   contact_name: string | null;
   contact_email: string | null;
   phone_number: string | null;
-  remit_to_address: string | null;
+  remit_to_address: PostalAddress | null;
   metrics: DistrictVendorMetrics;
   health_label: string | null;
   latest_invoice: DistrictVendorLatestInvoice | null;

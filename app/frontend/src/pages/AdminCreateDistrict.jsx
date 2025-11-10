@@ -11,7 +11,12 @@ const initialFormValues = {
   contact_name: "",
   contact_email: "",
   phone_number: "",
-  mailing_address: "",
+  mailing_address: {
+    street: "",
+    city: "",
+    state: "",
+    postal_code: "",
+  },
   district_key: "",
 };
 
@@ -24,6 +29,18 @@ export default function AdminCreateDistrict() {
 
   const handleFieldChange = useCallback((event) => {
     const { name, value } = event.target;
+    if (name.startsWith("mailing_address.")) {
+      const [, field] = name.split(".");
+      setFormValues((prev) => ({
+        ...prev,
+        mailing_address: {
+          ...prev.mailing_address,
+          [field]: value,
+        },
+      }));
+      return;
+    }
+
     setFormValues((prev) => ({ ...prev, [name]: value }));
   }, []);
 
@@ -49,7 +66,12 @@ export default function AdminCreateDistrict() {
           contact_name: formValues.contact_name.trim(),
           contact_email: formValues.contact_email.trim(),
           phone_number: formValues.phone_number.trim(),
-          mailing_address: formValues.mailing_address.trim(),
+          mailing_address: {
+            street: formValues.mailing_address.street.trim(),
+            city: formValues.mailing_address.city.trim(),
+            state: formValues.mailing_address.state.trim().toUpperCase(),
+            postal_code: formValues.mailing_address.postal_code.trim(),
+          },
           district_key: formValues.district_key.trim() || undefined,
         });
         toast.success("District created successfully.");
@@ -143,18 +165,60 @@ export default function AdminCreateDistrict() {
           />
         </div>
 
-        <div className="md:col-span-2">
-          <label className="block text-xs font-semibold uppercase tracking-widest text-slate-500" htmlFor="mailing_address">
-            Mailing address
-          </label>
-          <textarea
-            id="mailing_address"
-            name="mailing_address"
-            rows={3}
-            value={formValues.mailing_address}
-            onChange={handleFieldChange}
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200"
-          />
+        <div className="md:col-span-2 grid gap-4 sm:grid-cols-2">
+          <div className="sm:col-span-2">
+            <label className="block text-xs font-semibold uppercase tracking-widest text-slate-500" htmlFor="mailing_street">
+              Mailing street
+            </label>
+            <input
+              id="mailing_street"
+              name="mailing_address.street"
+              type="text"
+              value={formValues.mailing_address.street}
+              onChange={handleFieldChange}
+              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-widest text-slate-500" htmlFor="mailing_city">
+              City
+            </label>
+            <input
+              id="mailing_city"
+              name="mailing_address.city"
+              type="text"
+              value={formValues.mailing_address.city}
+              onChange={handleFieldChange}
+              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-widest text-slate-500" htmlFor="mailing_state">
+              State
+            </label>
+            <input
+              id="mailing_state"
+              name="mailing_address.state"
+              type="text"
+              value={formValues.mailing_address.state}
+              onChange={handleFieldChange}
+              maxLength={2}
+              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm uppercase text-slate-900 shadow-sm focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-widest text-slate-500" htmlFor="mailing_postal">
+              ZIP code
+            </label>
+            <input
+              id="mailing_postal"
+              name="mailing_address.postal_code"
+              type="text"
+              value={formValues.mailing_address.postal_code}
+              onChange={handleFieldChange}
+              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200"
+            />
+          </div>
         </div>
 
         <div>
