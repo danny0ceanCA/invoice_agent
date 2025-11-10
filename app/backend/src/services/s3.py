@@ -193,6 +193,7 @@ def upload_bytes(
 
 def generate_presigned_url(key: str, expires_in: int = 3600) -> str:
     """Generate a presigned URL for the provided object key."""
+    key = key.strip().strip("'").strip('"')
     settings = get_settings()
 
     # Local development mode
