@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     celery_result_backend: str | None = Field(
         default=None, alias="CELERY_RESULT_BACKEND"
     )
-    aws_region: str = Field(default="us-west-1", alias="AWS_REGION")
+    aws_region: str | None = Field(default=None, alias="AWS_REGION")
     aws_s3_bucket: str = Field(default="local", alias="AWS_S3_BUCKET")
     aws_access_key_id: str | None = Field(
         default=None, alias="AWS_ACCESS_KEY_ID"
