@@ -18,6 +18,7 @@ from app.backend.src.schemas.district import (
     DistrictVendorOverview,
     DistrictVendorProfile,
 )
+from app.backend.src.services.s3 import generate_presigned_url
 
 MONTH_ORDER = [
     "January",
@@ -132,6 +133,7 @@ def fetch_district_vendor_overview(
                     "latest_invoice_date": invoice_date,
                     "status_values": {status_value} if status_value else set(),
                     "students": list(students),
+                    "pdf_s3_key": invoice.pdf_s3_key,
                 }
             else:
                 existing["total"] = float(existing["total"]) + float(
@@ -153,6 +155,7 @@ def fetch_district_vendor_overview(
                 ):
                     existing["latest_invoice_date"] = invoice_date
                     existing["processed_on"] = processed_on
+                    existing["pdf_s3_key"] = invoice.pdf_s3_key
                 if invoice.id < existing["id"]:
                     existing["id"] = invoice.id
 
@@ -174,7 +177,9 @@ def fetch_district_vendor_overview(
                 status=status_label,
                 total=float(data["total"]),
                 processed_on=data["processed_on"],
-                pdf_url=None,
+                pdf_url=generate_presigned_url(data["pdf_s3_key"])
+                if data.get("pdf_s3_key")
+                else None,
                 timesheet_csv_url=None,
                 students=data["students"],
             )
