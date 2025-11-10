@@ -188,50 +188,56 @@ def upload_bytes(
 
 
 def sanitize_object_key(key: str) -> str:
-    """Return a consistently formatted S3 object key suitable for signing."""
+    """Minimal, safe normalization that preserves exact S3 key semantics."""
 
-    raw_key = str(key)
-    trimmed = raw_key.strip().strip("'").strip('"')
-    decoded = urllib.parse.unquote(trimmed)
-    sanitized = decoded.strip().strip("'").strip('"')
+    if not key:
+        return ""
+
+    sanitized = str(key).strip().strip('"').strip("'")
+    sanitized = urllib.parse.unquote(sanitized)
+    sanitized = re.sub(r"/+", "/", sanitized)
+    if sanitized.startswith("/"):
+        sanitized = sanitized[1:]
     return sanitized
 
 
-def generate_presigned_url(key: str, expires_in: int = 3600) -> str:
-    """Generate a presigned URL for the provided object key."""
-    sanitized_key = sanitize_object_key(key)
+def generate_presigned_url(
+    key: str,
+    *,
+    expires_in: int = 3600,
+    download_name: str | None = None,
+    response_content_type: str | None = None,
+) -> str:
+    """Generate a presigned URL; optionally control the downloaded filename."""
+
     settings = get_settings()
+    sanitized_key = sanitize_object_key(key)
 
-    # Local development mode
     if _is_local_mode():
-        path = _local_bucket_root() / sanitized_key
-        # Ensure absolute path for as_uri()
-        path = path.resolve()
-        return path.as_uri()
+        return (_local_bucket_root() / sanitized_key).resolve().as_uri()
 
-    # AWS S3 mode
-    try:
-        client = _client()
-        LOGGER.info(
-            "presign_debug",
-            raw_key=repr(key),
-            sanitized_key=repr(sanitized_key),
-            bucket=settings.aws_s3_bucket,
-            region=client.meta.region_name,
-        )
-        return client.generate_presigned_url(
-            "get_object",
-            Params={"Bucket": settings.aws_s3_bucket, "Key": sanitized_key},
-            ExpiresIn=expires_in,
-        )
-    except Exception as exc:
-        LOGGER.error(
-            "presign_failed",
-            error=str(exc),
-            raw_key=repr(key),
-            sanitized_key=repr(sanitized_key),
-        )
-        raise
+    params: dict[str, str] = {"Bucket": settings.aws_s3_bucket, "Key": sanitized_key}
+
+    if download_name:
+        safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", download_name)
+        params["ResponseContentDisposition"] = f'attachment; filename="{safe_name}"'
+
+    if response_content_type:
+        params["ResponseContentType"] = response_content_type
+
+    client = _client()
+    LOGGER.info(
+        "presign_debug",
+        bucket=settings.aws_s3_bucket,
+        region=settings.aws_region or client.meta.region_name,
+        sanitized_key=sanitized_key,
+        response_headers={k: v for k, v in params.items() if k.startswith("Response")},
+    )
+    return client.generate_presigned_url(
+        "get_object",
+        Params=params,
+        ExpiresIn=expires_in,
+    )
 
 
 __all__ = [
