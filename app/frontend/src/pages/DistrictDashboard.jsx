@@ -1030,6 +1030,70 @@ export default function DistrictDashboard({
     };
   }, [selectedInvoiceKey, selectedVendor]);
 
+  const studentAggregates = useMemo(() => {
+    if (!activeInvoiceDetails) {
+      return null;
+    }
+
+    const students = activeInvoiceDetails.students ?? [];
+    const totalStudents = students.length;
+    const totals = students.reduce(
+      (acc, entry) => {
+        const amountValue =
+          typeof entry.amountValue === "number"
+            ? entry.amountValue
+            : parseCurrencyValue(entry.amount ?? "");
+
+        acc.totalAmount += amountValue;
+        if (entry.service) {
+          const key = entry.service.trim();
+          if (key.length) {
+            const current = acc.services.get(key) ?? {
+              count: 0,
+              amount: 0,
+            };
+            current.count += 1;
+            current.amount += amountValue;
+            acc.services.set(key, current);
+          }
+        }
+
+        return acc;
+      },
+      { totalAmount: 0, services: new Map() },
+    );
+
+    const serviceHighlights = Array.from(totals.services.entries())
+      .map(([service, data]) => ({
+        service,
+        count: data.count,
+        amount: data.amount,
+      }))
+      .sort((a, b) => {
+        if (b.amount !== a.amount) {
+          return b.amount - a.amount;
+        }
+        return b.count - a.count;
+      });
+
+    return {
+      totalStudents,
+      totalAmount: totals.totalAmount,
+      averagePerStudent: totalStudents ? totals.totalAmount / totalStudents : 0,
+      uniqueServices: serviceHighlights.length,
+      topService: serviceHighlights[0] ?? null,
+    };
+  }, [activeInvoiceDetails]);
+
+  const handleStudentInvoiceOpen = useCallback((url) => {
+    if (!url) {
+      toast.error("Invoice file not available for this student.");
+      return;
+    }
+
+    window.open(url, "_blank", "noopener,noreferrer");
+  }, []);
+
   const vendorOverviewHighlights = useMemo(() => {
     if (!selectedVendor) {
       return [];
@@ -1316,7 +1380,7 @@ export default function DistrictDashboard({
                   </div>
                 </div>
 
-                {vendorOverviewHighlights.length ? (
+                {vendorOverviewHighlights.length && !activeInvoiceDetails ? (
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">
@@ -1359,15 +1423,66 @@ export default function DistrictDashboard({
                   </div>
                 ) : null}
 
+                {activeInvoiceDetails && studentAggregates ? (
+                  <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                      <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">
+                        Students Served
+                      </p>
+                      <p className="mt-2 text-2xl font-semibold text-slate-900">
+                        {studentAggregates.totalStudents}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">Included on this invoice</p>
+                    </div>
+                    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                      <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">
+                        Student Spend
+                      </p>
+                      <p className="mt-2 text-2xl font-semibold text-slate-900">
+                        {currencyFormatter.format(studentAggregates.totalAmount)}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">Aggregated for all students</p>
+                    </div>
+                    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                      <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">
+                        Avg. Per Student
+                      </p>
+                      <p className="mt-2 text-2xl font-semibold text-slate-900">
+                        {currencyFormatter.format(studentAggregates.averagePerStudent)}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">Based on invoice totals</p>
+                    </div>
+                    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                      <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">
+                        Top Service
+                      </p>
+                      {studentAggregates.topService ? (
+                        <div className="mt-2">
+                          <p className="text-base font-semibold text-slate-900">
+                            {studentAggregates.topService.service}
+                          </p>
+                          <p className="mt-1 text-xs text-slate-500">
+                            {studentAggregates.topService.count} students ·{' '}
+                            {currencyFormatter.format(studentAggregates.topService.amount)}
+                          </p>
+                        </div>
+                      ) : (
+                        <p className="mt-2 text-base font-semibold text-slate-900">No service data</p>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+
                 <div className="space-y-3">
                   <h5 className="text-sm font-semibold uppercase tracking-wider text-slate-500">Student services</h5>
                   {activeInvoiceDetails.students?.length ? (
-                    <ul className="space-y-3">
-                      {activeInvoiceDetails.students.map((entry) => {
-                        const invoicePdfBase = activeInvoiceDetails.pdfUrl ?? "";
-                        const invoiceTimesheetBase = activeInvoiceDetails.timesheetCsvUrl ?? "";
-                        const studentInvoiceUrl = entry.pdfUrl
-                          ? entry.pdfUrl
+                    <div className="max-h-[28rem] overflow-y-auto pr-1">
+                      <ul className="space-y-3">
+                        {activeInvoiceDetails.students.map((entry) => {
+                          const invoicePdfBase = activeInvoiceDetails.pdfUrl ?? "";
+                          const invoiceTimesheetBase = activeInvoiceDetails.timesheetCsvUrl ?? "";
+                          const studentInvoiceUrl = entry.pdfUrl
+                            ? entry.pdfUrl
                           : invoicePdfBase
                           ? `${invoicePdfBase.replace(/\.pdf$/, "")}/${entry.id}.pdf`
                           : null;
@@ -1380,9 +1495,30 @@ export default function DistrictDashboard({
                         return (
                           <li
                             key={entry.id}
-                            className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm"
+                            className="rounded-xl border border-slate-200 bg-white shadow-sm"
                           >
-                            <div className="flex flex-col gap-2 text-sm text-slate-700 sm:flex-row sm:items-start sm:justify-between">
+                            <div
+                              role={studentInvoiceUrl ? "button" : undefined}
+                              tabIndex={studentInvoiceUrl ? 0 : undefined}
+                              onClick={() => handleStudentInvoiceOpen(studentInvoiceUrl)}
+                              onKeyDown={(event) => {
+                                if (
+                                  !studentInvoiceUrl ||
+                                  (event.key !== "Enter" && event.key !== " ")
+                                ) {
+                                  return;
+                                }
+
+                                event.preventDefault();
+                                handleStudentInvoiceOpen(studentInvoiceUrl);
+                              }}
+                              aria-disabled={!studentInvoiceUrl}
+                              className={`flex flex-col gap-2 px-4 py-3 text-sm text-slate-700 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60 sm:flex-row sm:items-start sm:justify-between ${
+                                studentInvoiceUrl
+                                  ? "cursor-pointer hover:bg-amber-50"
+                                  : "cursor-default"
+                              }`}
+                            >
                               <p className="text-sm text-slate-700">
                                 <span className="font-semibold text-slate-900">
                                   Student Name: {entry.name}
@@ -1394,20 +1530,20 @@ export default function DistrictDashboard({
                                   <span className="font-semibold text-slate-900">{entry.amount}</span>
                                 ) : null}
                                 {studentInvoiceUrl ? (
-                                  <a
-                                    href={studentInvoiceUrl}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="inline-flex items-center rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700 transition hover:bg-amber-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
-                                  >
-                                    PDF Invoice
-                                  </a>
-                                ) : null}
+                                  <span className="inline-flex items-center rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700">
+                                    Click to open invoice
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">
+                                    Invoice not available
+                                  </span>
+                                )}
                                 {studentTimesheetUrl ? (
                                   <a
                                     href={studentTimesheetUrl}
                                     target="_blank"
                                     rel="noreferrer"
+                                    onClick={(event) => event.stopPropagation()}
                                     className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700 transition hover:bg-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
                                   >
                                     Timesheet CSV
@@ -1418,7 +1554,8 @@ export default function DistrictDashboard({
                           </li>
                         );
                       })}
-                    </ul>
+                      </ul>
+                    </div>
                   ) : (
                     <p className="text-sm text-slate-500">No student services were reported for this month.</p>
                   )}
