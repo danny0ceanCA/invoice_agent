@@ -205,7 +205,8 @@ def generate_presigned_url(key: str, expires_in: int = 3600) -> str:
     # AWS S3 mode
     try:
         client = _client()
-        decoded_key = urllib.parse.unquote(key)
+        decoded_key = urllib.parse.unquote(key).strip()
+        LOGGER.info("presign_debug", key=repr(decoded_key))
         return client.generate_presigned_url(
             "get_object",
             Params={"Bucket": settings.aws_s3_bucket, "Key": decoded_key},
