@@ -21,6 +21,7 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
 
 
 def _serialize_job(job: Job) -> dict[str, str | None]:
+    print("DEBUG S3 KEY:", job.result_key)
     return {
         "id": job.id,
         "filename": job.filename,
