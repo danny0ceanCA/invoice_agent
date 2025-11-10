@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from functools import lru_cache
-from io import BytesIO
 import mimetypes
 import shutil
+import urllib.parse
+from functools import lru_cache
+from io import BytesIO
 from pathlib import Path
 from uuid import uuid4
 
@@ -196,9 +197,10 @@ def generate_presigned_url(key: str, expires_in: int = 3600) -> str:
     # AWS S3 mode
     try:
         client = _client()
+        safe_key = urllib.parse.quote(key, safe="/")
         return client.generate_presigned_url(
             "get_object",
-            Params={"Bucket": settings.aws_s3_bucket, "Key": key},
+            Params={"Bucket": settings.aws_s3_bucket, "Key": safe_key},
             ExpiresIn=expires_in,
         )
     except Exception as exc:
