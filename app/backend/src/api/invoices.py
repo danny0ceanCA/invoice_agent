@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 from tempfile import NamedTemporaryFile
+
+import structlog
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
@@ -14,6 +16,8 @@ try:
     from invoice_agent.tasks.invoice_tasks import process_invoice
 except ModuleNotFoundError:  # pragma: no cover
     from tasks.invoice_tasks import process_invoice
+
+LOGGER = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/invoices", tags=["invoices"])
 
@@ -47,13 +51,33 @@ async def generate_invoices(
         raise HTTPException(status_code=400, detail="Uploaded file is empty")
 
     queue = _select_queue(len(contents))
+    LOGGER.info(
+        "invoice_upload_received",
+        filename=file.filename,
+        vendor_id=vendor_id,
+        queue=queue,
+        size=len(contents),
+    )
     with NamedTemporaryFile(delete=False, suffix=Path(file.filename).suffix) as tmp_file:
         tmp_file.write(contents)
         temp_path = Path(tmp_file.name)
 
+    LOGGER.info(
+        "enqueue_invoice_task",
+        vendor_id=vendor_id,
+        queue=queue,
+        temp_path=str(temp_path),
+    )
     task = process_invoice.apply_async(
         args=[str(temp_path), vendor_id, invoice_date, service_month, invoice_code],
         kwargs={"queue_name": queue},
+        queue=queue,
+    )
+
+    LOGGER.info(
+        "invoice_task_enqueued",
+        task_id=task.id,
+        vendor_id=vendor_id,
         queue=queue,
     )
 
