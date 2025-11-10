@@ -78,14 +78,20 @@ def _resolve_bucket_region() -> str | None:
 
 def _client() -> BaseClient:
     settings = get_settings()
+    region = settings.aws_region or "us-east-2"
     return boto3.client(
         "s3",
-        region_name=settings.aws_region or "us-east-2",
+        region_name=region,
         aws_access_key_id=settings.aws_access_key_id,
         aws_secret_access_key=settings.aws_secret_access_key,
         config=Config(
             signature_version="s3v4",
             s3={"addressing_style": "virtual"},
+        ),
+        endpoint_url=(
+            f"https://{settings.aws_s3_bucket}.s3.{region}.amazonaws.com"
+            if settings.aws_s3_bucket and not _is_local_mode()
+            else None
         ),
     )
 
@@ -187,15 +193,14 @@ def generate_presigned_url(key: str, expires_in: int = 3600) -> str:
         return path.as_uri()
 
     # AWS S3 mode
-    client = _client()
     try:
-        print("DEBUG presign:", settings.aws_region, key)
+        client = _client()
         return client.generate_presigned_url(
             "get_object",
             Params={"Bucket": settings.aws_s3_bucket, "Key": key},
             ExpiresIn=expires_in,
         )
-    except (BotoCoreError, NoCredentialsError) as exc:
+    except Exception as exc:
         LOGGER.error("presign_failed", error=str(exc), key=key)
         raise
 
