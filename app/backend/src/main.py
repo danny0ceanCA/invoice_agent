@@ -9,6 +9,7 @@ from .api import (
     admin_districts,
     analytics,
     auth,
+    debug,
     districts,
     health,
     invoices,
@@ -35,6 +36,7 @@ def create_app() -> FastAPI:
 
     app.include_router(health.router, prefix="/api")
     app.include_router(auth.router, prefix="/api")
+    app.include_router(debug.router, prefix="/api")
     app.include_router(uploads.router, prefix="/api")
     app.include_router(invoices.router, prefix="/api")
     app.include_router(jobs.router, prefix="/api")
