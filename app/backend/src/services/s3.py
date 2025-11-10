@@ -197,7 +197,7 @@ def generate_presigned_url(key: str, expires_in: int = 3600) -> str:
     # AWS S3 mode
     try:
         client = _client()
-        if "%" in key:
+        if "%20" in key or "%2F" in key:
             safe_key = key
         else:
             safe_key = urllib.parse.quote(key, safe="/")
