@@ -69,12 +69,110 @@ const currencyFormatter = new Intl.NumberFormat("en-US", {
 });
 
 const parseCurrencyValue = (value) => {
-  if (!value || typeof value !== "string") {
+  if (!value) {
+    return 0;
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value !== "string") {
     return 0;
   }
 
   const numeric = Number(value.replace(/[^0-9.-]+/g, ""));
   return Number.isFinite(numeric) ? numeric : 0;
+};
+
+const aggregateStudentEntries = (entries) => {
+  if (!Array.isArray(entries) || !entries.length) {
+    return [];
+  }
+
+  const groups = new Map();
+
+  entries.forEach((entry, index) => {
+    const key =
+      entry.id ??
+      (entry.name ? `name:${entry.name}` : `index:${index}`);
+    const amountValue =
+      typeof entry.amountValue === "number"
+        ? entry.amountValue
+        : parseCurrencyValue(entry.amount ?? "");
+    const displayName = entry.name ?? "Unknown student";
+
+    if (!groups.has(key)) {
+      groups.set(key, {
+        id: entry.id ?? key,
+        name: displayName,
+        amountValue: 0,
+        services: new Map(),
+        pdfUrls: new Set(),
+        timesheetUrls: new Set(),
+        entryCount: 0,
+      });
+    }
+
+    const group = groups.get(key);
+    group.amountValue += amountValue;
+    group.entryCount += 1;
+
+    const serviceKey = entry.service?.trim();
+    if (serviceKey) {
+      const current = group.services.get(serviceKey) ?? {
+        count: 0,
+        amount: 0,
+      };
+      current.count += 1;
+      current.amount += amountValue;
+      group.services.set(serviceKey, current);
+    }
+
+    if (entry.pdfUrl) {
+      group.pdfUrls.add(entry.pdfUrl);
+    }
+    if (entry.timesheetUrl) {
+      group.timesheetUrls.add(entry.timesheetUrl);
+    }
+  });
+
+  return Array.from(groups.values())
+    .map((group) => {
+      const services = Array.from(group.services.entries()).map(
+        ([service, data]) => ({
+          service,
+          count: data.count,
+          amount: data.amount,
+        }),
+      );
+
+      return {
+        id: group.id,
+        name: group.name,
+        amountValue: group.amountValue,
+        amount: currencyFormatter.format(group.amountValue ?? 0),
+        services: services.map((item) => item.service),
+        serviceBreakdown: services,
+        serviceSummary:
+          services.length === 1
+            ? services[0].service
+            : services.length > 1
+            ? `${services.length} services`
+            : null,
+        pdfUrl: group.pdfUrls.size ? Array.from(group.pdfUrls)[0] : null,
+        timesheetUrl: group.timesheetUrls.size
+          ? Array.from(group.timesheetUrls)[0]
+          : null,
+        entryCount: group.entryCount,
+      };
+    })
+    .sort((a, b) => {
+      if (b.amountValue !== a.amountValue) {
+        return b.amountValue - a.amountValue;
+      }
+      return a.name.localeCompare(b.name);
+    });
 };
 
 const collectVendorInvoices = (profiles) =>
@@ -548,6 +646,7 @@ export default function DistrictDashboard({
   const [activeKey, setActiveKey] = useState(menuItems[0].key);
   const [selectedVendorId, setSelectedVendorId] = useState(null);
   const [selectedInvoiceKey, setSelectedInvoiceKey] = useState(null);
+  const [studentFilter, setStudentFilter] = useState("");
   const [vendorProfiles, setVendorProfiles] = useState([]);
   const [vendorsLoading, setVendorsLoading] = useState(false);
   const [vendorsError, setVendorsError] = useState(null);
@@ -1023,10 +1122,14 @@ export default function DistrictDashboard({
         (invoiceTimesheetBase ? `${invoiceTimesheetBase.replace(/\.csv$/, "")}/${entry.id}.csv` : null),
     }));
 
+    const aggregatedStudents = aggregateStudentEntries(
+      studentsWithSamples ?? [],
+    );
+
     return {
       ...invoiceRecord,
       year: selectedInvoiceKey.year,
-      students: studentsWithSamples ?? [],
+      students: aggregatedStudents,
     };
   }, [selectedInvoiceKey, selectedVendor]);
 
@@ -1045,18 +1148,25 @@ export default function DistrictDashboard({
             : parseCurrencyValue(entry.amount ?? "");
 
         acc.totalAmount += amountValue;
-        if (entry.service) {
-          const key = entry.service.trim();
-          if (key.length) {
-            const current = acc.services.get(key) ?? {
-              count: 0,
-              amount: 0,
-            };
-            current.count += 1;
-            current.amount += amountValue;
-            acc.services.set(key, current);
+
+        (entry.serviceBreakdown ?? []).forEach((serviceEntry) => {
+          if (!serviceEntry?.service) {
+            return;
           }
-        }
+
+          const key = serviceEntry.service.trim();
+          if (!key.length) {
+            return;
+          }
+
+          const current = acc.services.get(key) ?? {
+            count: 0,
+            amount: 0,
+          };
+          current.count += serviceEntry.count ?? 0;
+          current.amount += serviceEntry.amount ?? 0;
+          acc.services.set(key, current);
+        });
 
         return acc;
       },
@@ -1084,6 +1194,39 @@ export default function DistrictDashboard({
       topService: serviceHighlights[0] ?? null,
     };
   }, [activeInvoiceDetails]);
+
+  const filteredStudents = useMemo(() => {
+    if (!activeInvoiceDetails?.students?.length) {
+      return [];
+    }
+
+    const query = studentFilter.trim().toLowerCase();
+    if (!query.length) {
+      return activeInvoiceDetails.students;
+    }
+
+    return activeInvoiceDetails.students.filter((entry) => {
+      const values = [
+        entry.name,
+        entry.amount,
+        entry.serviceSummary,
+        ...(entry.services ?? []),
+      ];
+
+      return values.some((value) =>
+        typeof value === "string"
+          ? value.toLowerCase().includes(query)
+          : false,
+      );
+    });
+  }, [activeInvoiceDetails, studentFilter]);
+
+  useEffect(() => {
+    setStudentFilter("");
+  }, [selectedInvoiceKey, selectedVendorId]);
+
+  const invoicePdfBase = activeInvoiceDetails?.pdfUrl ?? "";
+  const invoiceTimesheetBase = activeInvoiceDetails?.timesheetCsvUrl ?? "";
 
   const handleStudentInvoiceOpen = useCallback((url) => {
     if (!url) {
@@ -1476,85 +1619,126 @@ export default function DistrictDashboard({
                 <div className="space-y-3">
                   <h5 className="text-sm font-semibold uppercase tracking-wider text-slate-500">Student services</h5>
                   {activeInvoiceDetails.students?.length ? (
-                    <div className="max-h-[28rem] overflow-y-auto pr-1">
-                      <ul className="space-y-3">
-                        {activeInvoiceDetails.students.map((entry) => {
-                          const invoicePdfBase = activeInvoiceDetails.pdfUrl ?? "";
-                          const invoiceTimesheetBase = activeInvoiceDetails.timesheetCsvUrl ?? "";
-                          const studentInvoiceUrl = entry.pdfUrl
-                            ? entry.pdfUrl
-                          : invoicePdfBase
-                          ? `${invoicePdfBase.replace(/\.pdf$/, "")}/${entry.id}.pdf`
-                          : null;
-                        const studentTimesheetUrl = entry.timesheetUrl
-                          ? entry.timesheetUrl
-                          : invoiceTimesheetBase
-                          ? `${invoiceTimesheetBase.replace(/\.csv$/, "")}/${entry.id}.csv`
-                          : null;
+                    <div className="rounded-2xl bg-white p-4 shadow-sm">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <p className="text-xs uppercase tracking-widest text-amber-500">Student services</p>
+                          <h6 className="mt-1 text-base font-semibold text-slate-900">
+                            Detailed view of student-level invoices
+                          </h6>
+                        </div>
+                        <div className="w-full sm:w-auto">
+                          <label htmlFor="student-filter" className="sr-only">
+                            Filter students
+                          </label>
+                          <input
+                            id="student-filter"
+                            type="search"
+                            value={studentFilter}
+                            onChange={(event) => setStudentFilter(event.target.value)}
+                            placeholder="Search by name or service"
+                            autoComplete="off"
+                            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm transition placeholder:text-slate-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-300/60 sm:w-64"
+                          />
+                        </div>
+                      </div>
+                      {filteredStudents.length ? (
+                        <div className="mt-4 max-h-[28rem] overflow-y-auto pr-1">
+                          <ul className="space-y-3">
+                            {filteredStudents.map((entry) => {
+                              const studentInvoiceUrl = entry.pdfUrl
+                                ? entry.pdfUrl
+                                : invoicePdfBase
+                                ? `${invoicePdfBase.replace(/\.pdf$/, "")}/${entry.id}.pdf`
+                                : null;
+                              const studentTimesheetUrl = entry.timesheetUrl
+                                ? entry.timesheetUrl
+                                : invoiceTimesheetBase
+                                ? `${invoiceTimesheetBase.replace(/\.csv$/, "")}/${entry.id}.csv`
+                                : null;
 
-                        return (
-                          <li
-                            key={entry.id}
-                            className="rounded-xl border border-slate-200 bg-white shadow-sm"
-                          >
-                            <div
-                              role={studentInvoiceUrl ? "button" : undefined}
-                              tabIndex={studentInvoiceUrl ? 0 : undefined}
-                              onClick={() => handleStudentInvoiceOpen(studentInvoiceUrl)}
-                              onKeyDown={(event) => {
-                                if (
-                                  !studentInvoiceUrl ||
-                                  (event.key !== "Enter" && event.key !== " ")
-                                ) {
-                                  return;
-                                }
+                              return (
+                                <li
+                                  key={entry.id}
+                                  className="rounded-xl border border-slate-200 bg-white shadow-sm"
+                                >
+                                  <div
+                                    role={studentInvoiceUrl ? "button" : undefined}
+                                    tabIndex={studentInvoiceUrl ? 0 : undefined}
+                                    onClick={() => handleStudentInvoiceOpen(studentInvoiceUrl)}
+                                    onKeyDown={(event) => {
+                                      if (
+                                        !studentInvoiceUrl ||
+                                        (event.key !== "Enter" && event.key !== " ")
+                                      ) {
+                                        return;
+                                      }
 
-                                event.preventDefault();
-                                handleStudentInvoiceOpen(studentInvoiceUrl);
-                              }}
-                              aria-disabled={!studentInvoiceUrl}
-                              className={`flex flex-col gap-2 px-4 py-3 text-sm text-slate-700 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60 sm:flex-row sm:items-start sm:justify-between ${
-                                studentInvoiceUrl
-                                  ? "cursor-pointer hover:bg-amber-50"
-                                  : "cursor-default"
-                              }`}
-                            >
-                              <p className="text-sm text-slate-700">
-                                <span className="font-semibold text-slate-900">
-                                  Student Name: {entry.name}
-                                </span>
-                                {entry.service ? <span>, Service: {entry.service}</span> : null}
-                              </p>
-                              <div className="flex flex-wrap items-center gap-2 sm:ml-6 sm:self-start">
-                                {entry.amount ? (
-                                  <span className="font-semibold text-slate-900">{entry.amount}</span>
-                                ) : null}
-                                {studentInvoiceUrl ? (
-                                  <span className="inline-flex items-center rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700">
-                                    Click to open invoice
-                                  </span>
-                                ) : (
-                                  <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">
-                                    Invoice not available
-                                  </span>
-                                )}
-                                {studentTimesheetUrl ? (
-                                  <a
-                                    href={studentTimesheetUrl}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    onClick={(event) => event.stopPropagation()}
-                                    className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700 transition hover:bg-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
+                                      event.preventDefault();
+                                      handleStudentInvoiceOpen(studentInvoiceUrl);
+                                    }}
+                                    aria-disabled={!studentInvoiceUrl}
+                                    className={`flex flex-col gap-3 px-4 py-3 text-sm text-slate-700 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60 sm:flex-row sm:items-center sm:justify-between ${
+                                      studentInvoiceUrl
+                                        ? "cursor-pointer hover:bg-amber-50"
+                                        : "cursor-default"
+                                    }`}
                                   >
-                                    Timesheet CSV
-                                  </a>
-                                ) : null}
-                              </div>
-                            </div>
-                          </li>
-                        );
-                      })}
-                      </ul>
+                                    <div>
+                                      <p className="text-sm font-semibold text-slate-900">{entry.name}</p>
+                                      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                                        {entry.services?.length ? (
+                                          <span>
+                                            {entry.services.length === 1
+                                              ? `Service: ${entry.services[0]}`
+                                              : `Services (${entry.services.length})`}
+                                          </span>
+                                        ) : null}
+                                        {entry.entryCount > 1 ? (
+                                          <span>{`Combined from ${entry.entryCount} line items`}</span>
+                                        ) : null}
+                                      </div>
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-2 sm:ml-6 sm:self-center">
+                                      {entry.amount ? (
+                                        <span className="font-semibold text-slate-900">{entry.amount}</span>
+                                      ) : null}
+                                      {studentInvoiceUrl ? (
+                                        <a
+                                          href={studentInvoiceUrl}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          onClick={(event) => event.stopPropagation()}
+                                          className="inline-flex items-center rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700 transition hover:bg-amber-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
+                                        >
+                                          View invoice PDF
+                                        </a>
+                                      ) : (
+                                        <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">
+                                          Invoice not available
+                                        </span>
+                                      )}
+                                      {studentTimesheetUrl ? (
+                                        <a
+                                          href={studentTimesheetUrl}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          onClick={(event) => event.stopPropagation()}
+                                          className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700 transition hover:bg-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
+                                        >
+                                          Timesheet CSV
+                                        </a>
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        </div>
+                      ) : (
+                        <p className="mt-4 text-sm text-slate-500">No students match your search.</p>
+                      )}
                     </div>
                   ) : (
                     <p className="text-sm text-slate-500">No student services were reported for this month.</p>
