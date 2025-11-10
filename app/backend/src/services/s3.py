@@ -100,14 +100,14 @@ def _client() -> BaseClient:
 
 
 def _resolve_object_key(filename: str, key: str | None = None) -> str:
-    """Return an S3-safe key for this file."""
+    """Return a deterministic, S3-safe object key for the provided filename."""
     if key:
         return key
 
-    # ✅ Remove all forward/back slashes and collapse spaces
+    # ✅ Remove all forward/back slashes and collapse multiple underscores
     safe_name = re.sub(r"[\\/]+", "_", filename).strip()
+    safe_name = re.sub(r"_+", "_", safe_name)
 
-    # Keep plain spaces (S3 handles them fine), or optionally encode as %20 if needed
     return f"invoices/{uuid4()}/{safe_name}"
 
 
@@ -128,9 +128,8 @@ def upload_file(
 ) -> str:
     """Upload a file to S3 or local storage and return the object key."""
     settings = get_settings()
-    safe_filename = (
-        file_path.name.replace("/", "_").replace("\\", "_").strip()
-    )
+    safe_filename = re.sub(r"[\\/]+", "_", file_path.name).strip()
+    safe_filename = re.sub(r"_+", "_", safe_filename)
     object_key = _resolve_object_key(filename=safe_filename, key=key)
     resolved_content_type = _determine_content_type(safe_filename, content_type)
 
@@ -165,7 +164,8 @@ def upload_bytes(
 ) -> str:
     """Upload in-memory data to storage and return the object key."""
     settings = get_settings()
-    safe_filename = filename.replace("/", "_").replace("\\", "_").strip()
+    safe_filename = re.sub(r"[\\/]+", "_", filename).strip()
+    safe_filename = re.sub(r"_+", "_", safe_filename)
     object_key = _resolve_object_key(filename=safe_filename, key=key)
     resolved_content_type = _determine_content_type(safe_filename, content_type)
 
