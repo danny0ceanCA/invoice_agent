@@ -103,6 +103,9 @@ const collectVendorInvoices = (profiles) =>
     })
   );
 
+const isEmailLike = (value) =>
+  typeof value === "string" && value.trim().includes("@") && value.trim().includes(".");
+
 const computeVendorMetrics = (profiles) => {
   const invoices = collectVendorInvoices(profiles);
 
@@ -552,11 +555,16 @@ export default function DistrictDashboard({
 
         const remitToAddress = vendor.remit_to_address?.trim();
 
+        const rawContactName = vendor.contact_name?.trim() ?? "";
+        const contactName = isEmailLike(rawContactName) ? "" : rawContactName;
+
+        const contactEmail = vendor.contact_email?.trim() ?? "";
+
         return {
           id: String(vendor.id),
           name: vendor.name,
-          manager: vendor.contact_name?.trim() ?? "",
-          email: vendor.contact_email?.trim() ?? "",
+          manager: contactName,
+          email: isEmailLike(contactEmail) ? "" : contactEmail,
           phone: vendor.phone_number?.trim() ?? "",
           summary,
           health: healthLabel,
@@ -949,7 +957,9 @@ export default function DistrictDashboard({
       segments.push(primaryContact);
     }
 
-    const contactDetails = [selectedVendor.phone].filter(Boolean);
+    const contactDetails = [selectedVendor.phone]
+      .map((value) => (value && !isEmailLike(value) ? value : ""))
+      .filter(Boolean);
     if (contactDetails.length) {
       segments.push(contactDetails.join(" • "));
     }
@@ -964,6 +974,7 @@ export default function DistrictDashboard({
 
     const segments = [selectedVendor.manager, selectedVendor.phone]
       .map((value) => (value ? value.trim() : ""))
+      .map((value) => (value && !isEmailLike(value) ? value : ""))
       .filter(Boolean);
 
     return segments.length ? segments.join(" • ") : null;
