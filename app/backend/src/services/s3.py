@@ -197,13 +197,10 @@ def generate_presigned_url(key: str, expires_in: int = 3600) -> str:
     # AWS S3 mode
     try:
         client = _client()
-        if "%20" in key or "%2F" in key:
-            safe_key = key
-        else:
-            safe_key = urllib.parse.quote(key, safe="/")
+        decoded_key = urllib.parse.unquote(key)
         return client.generate_presigned_url(
             "get_object",
-            Params={"Bucket": settings.aws_s3_bucket, "Key": safe_key},
+            Params={"Bucket": settings.aws_s3_bucket, "Key": decoded_key},
             ExpiresIn=expires_in,
         )
     except Exception as exc:
