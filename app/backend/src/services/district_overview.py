@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy.orm import Session, selectinload
 
@@ -92,7 +93,7 @@ def fetch_district_vendor_overview(
         )
 
         invoices_by_year: dict[int, list[DistrictVendorInvoice]] = defaultdict(list)
-        flat_invoices: list[DistrictVendorInvoice] = []
+        monthly_groups: dict[tuple[int, str], dict[str, Any]] = {}
 
         for invoice in invoice_models:
             month_name, service_year = _extract_service_month(invoice.service_month)
@@ -116,20 +117,69 @@ def fetch_district_vendor_overview(
                 for item in invoice.line_items
             ]
 
+            status_value = (invoice.status or "").strip()
+            processed_on = _format_processed_on(invoice_date)
+            group_key = (year, month)
+            existing = monthly_groups.get(group_key)
+            if existing is None:
+                monthly_groups[group_key] = {
+                    "id": invoice.id,
+                    "month": month,
+                    "month_index": month_index,
+                    "year": year,
+                    "total": float(invoice.total_cost or 0),
+                    "processed_on": processed_on,
+                    "latest_invoice_date": invoice_date,
+                    "status_values": {status_value} if status_value else set(),
+                    "students": list(students),
+                }
+            else:
+                existing["total"] = float(existing["total"]) + float(
+                    invoice.total_cost or 0
+                )
+                existing_students = existing["students"]
+                existing_students.extend(students)
+                if month_index is not None and existing["month_index"] is None:
+                    existing["month_index"] = month_index
+                if status_value:
+                    status_values = existing["status_values"]
+                    status_values.add(status_value)
+                if (
+                    invoice_date
+                    and (
+                        existing["latest_invoice_date"] is None
+                        or invoice_date > existing["latest_invoice_date"]
+                    )
+                ):
+                    existing["latest_invoice_date"] = invoice_date
+                    existing["processed_on"] = processed_on
+                if invoice.id < existing["id"]:
+                    existing["id"] = invoice.id
+
+        flat_invoices: list[DistrictVendorInvoice] = []
+        for data in monthly_groups.values():
+            status_values = data["status_values"]
+            if not status_values:
+                status_label = ""
+            elif len(status_values) == 1:
+                status_label = next(iter(status_values))
+            else:
+                status_label = "Mixed"
+
             entry = DistrictVendorInvoice(
-                id=invoice.id,
-                month=month,
-                month_index=month_index,
-                year=year,
-                status=(invoice.status or "").strip(),
-                total=float(invoice.total_cost or 0),
-                processed_on=_format_processed_on(invoice_date),
+                id=int(data["id"]),
+                month=data["month"],
+                month_index=data["month_index"],
+                year=int(data["year"]),
+                status=status_label,
+                total=float(data["total"]),
+                processed_on=data["processed_on"],
                 pdf_url=None,
                 timesheet_csv_url=None,
-                students=students,
+                students=data["students"],
             )
 
-            invoices_by_year[year].append(entry)
+            invoices_by_year[entry.year].append(entry)
             flat_invoices.append(entry)
 
         for year, entries in invoices_by_year.items():
@@ -160,26 +210,20 @@ def fetch_district_vendor_overview(
             health_label = "Onboarding"
 
         latest_invoice_summary = None
-        if invoice_models:
-            latest = invoice_models[0]
-            latest_month_name, latest_service_year = _extract_service_month(
-                latest.service_month
+        if flat_invoices:
+            latest_invoice_entry = max(
+                flat_invoices,
+                key=lambda entry: (
+                    entry.year,
+                    entry.month_index if entry.month_index is not None else -1,
+                ),
             )
-            latest_date = latest.invoice_date
-            latest_month = (
-                latest_date.strftime("%B")
-                if latest_date
-                else latest_month_name
-                or "Unknown"
-            )
-            latest_year_value = (
-                latest_date.year if latest_date else latest_service_year or datetime.utcnow().year
-            )
+            latest_status = latest_invoice_entry.status or "Processing"
             latest_invoice_summary = DistrictVendorLatestInvoice(
-                month=latest_month,
-                year=latest_year_value,
-                total=float(latest.total_cost or 0),
-                status=(latest.status or "").strip(),
+                month=latest_invoice_entry.month,
+                year=latest_invoice_entry.year,
+                total=latest_invoice_entry.total,
+                status=latest_status,
             )
 
         profile = DistrictVendorProfile(
