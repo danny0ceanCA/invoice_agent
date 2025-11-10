@@ -15,7 +15,7 @@ import {
 const menuItems = [
   {
     key: "vendors",
-    label: "VendorsActive",
+    label: "Vendors",
     description: "Monitor invoice activity across your approved partners.",
   },
   {
