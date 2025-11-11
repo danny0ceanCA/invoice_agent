@@ -2172,9 +2172,6 @@ export default function DistrictDashboard({
                               <th className="py-2 pr-4 text-left text-xs font-semibold uppercase tracking-widest text-slate-500">
                                 Uploaded
                               </th>
-                              <th className="py-2 text-right text-xs font-semibold uppercase tracking-widest text-slate-500">
-                                Actions
-                              </th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-200">
@@ -2203,15 +2200,6 @@ export default function DistrictDashboard({
                                 </td>
                                 <td className="whitespace-nowrap py-3 pr-4 text-slate-600">
                                   {document.uploadedAtDisplay ?? "—"}
-                                </td>
-                                <td className="whitespace-nowrap py-3 text-right">
-                                  <button
-                                    type="button"
-                                    onClick={() => handleDownloadInvoiceDocument(document)}
-                                    className="inline-flex items-center rounded-full border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-400 hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
-                                  >
-                                    Download
-                                  </button>
                                 </td>
                               </tr>
                             ))}
