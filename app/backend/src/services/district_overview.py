@@ -111,15 +111,27 @@ def fetch_district_vendor_overview(
                 month = month_name or "Unknown"
                 month_index = MONTH_INDEX.get(month_name or "")
 
-            students = [
-                DistrictVendorInvoiceStudent(
-                    id=item.id,
-                    name=item.student,
-                    service=item.service_code,
-                    amount=float(item.cost or 0),
+            invoice_pdf_key = getattr(invoice, "s3_key", None) or getattr(
+                invoice, "pdf_s3_key", None
+            )
+
+            students: list[DistrictVendorInvoiceStudent] = []
+            for item in invoice.line_items:
+                student_pdf_key = getattr(item, "pdf_s3_key", None) or getattr(
+                    item, "s3_key", None
                 )
-                for item in invoice.line_items
-            ]
+                if not student_pdf_key:
+                    student_pdf_key = invoice_pdf_key
+
+                students.append(
+                    DistrictVendorInvoiceStudent(
+                        id=item.id,
+                        name=item.student,
+                        service=item.service_code,
+                        amount=float(item.cost or 0),
+                        pdf_s3_key=student_pdf_key,
+                    )
+                )
 
             if not invoice.pdf_s3_key:
                 LOGGER.warning(
@@ -192,7 +204,27 @@ def fetch_district_vendor_overview(
 
             if download_url:
                 for student in data["students"]:
+                    if student.pdf_s3_key is None:
+                        student.pdf_s3_key = data.get("pdf_s3_key")
                     student.pdf_url = download_url
+                    LOGGER.debug(
+                        "district_student_pdf_key_assigned",
+                        student_name=student.name,
+                        invoice_id=int(data["id"]),
+                        vendor_id=vendor.id,
+                        pdf_s3_key=student.pdf_s3_key,
+                    )
+            else:
+                for student in data["students"]:
+                    if student.pdf_s3_key is None:
+                        student.pdf_s3_key = data.get("pdf_s3_key")
+                    LOGGER.debug(
+                        "district_student_pdf_key_assigned",
+                        student_name=student.name,
+                        invoice_id=int(data["id"]),
+                        vendor_id=vendor.id,
+                        pdf_s3_key=student.pdf_s3_key,
+                    )
 
             entry = DistrictVendorInvoice(
                 id=int(data["id"]),
@@ -204,6 +236,7 @@ def fetch_district_vendor_overview(
                 processed_on=data["processed_on"],
                 download_url=download_url,
                 pdf_url=download_url,
+                pdf_s3_key=data.get("pdf_s3_key"),
                 timesheet_csv_url=None,
                 students=data["students"],
             )

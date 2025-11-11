@@ -141,3 +141,5 @@ def test_fetch_overview_includes_invoice_pdf_url(monkeypatch: pytest.MonkeyPatch
         == "https://example.com/invoices/INV-001.pdf?expires=3600&filename=INV-001.pdf"
     )
     assert first_invoice.pdf_url == first_invoice.download_url
+    assert first_invoice.pdf_s3_key == "invoices/INV-001.pdf"
+    assert first_invoice.students[0].pdf_s3_key == "invoices/INV-001.pdf"
