@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from io import BytesIO
+import re
 from time import perf_counter
 from uuid import uuid4
 
@@ -25,11 +26,23 @@ class InvoicePdf:
     content: bytes
 
 
+def _safe_token(raw: str) -> str:
+    """
+    Return an ASCII-safe token for filenames: keep [A-Za-z0-9._-], replace others with '_'.
+    """
+
+    token = (raw or "").strip()
+    token = re.sub(r"\s+", "_", token)             # normalize whitespace to single underscores
+    token = re.sub(r"[^A-Za-z0-9._-]", "_", token) # drop slashes and odd chars
+    token = re.sub(r"_+", "_", token)               # collapse runs of underscores
+    return token.strip("_")
+
+
 def _build_filename(student: str, service_month: str) -> str:
     """Return a unique, S3-safe filename for a generated invoice."""
 
-    safe_student = student.replace(" ", "_")
-    safe_month = service_month.replace(" ", "_")
+    safe_student = _safe_token(student)
+    safe_month = _safe_token(service_month)
     unique_suffix = uuid4().hex
     return f"Invoice_{safe_student}_{safe_month}_{unique_suffix}.pdf"
 
