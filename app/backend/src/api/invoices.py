@@ -324,8 +324,8 @@ async def download_invoices_zip(
     zip_filename = f"{company_segment}_{year_segment}_{month_segment}_invoices.zip"
     zip_key = f"{prefix}{zip_filename}"
 
-    legacy_prefix = f"invoices/{vendor_id}/{normalized_month}/"
-    legacy_zip_filename = f"{vendor_id}_{normalized_month}_invoices.zip"
+    legacy_prefix = f"invoices/{company_segment}/{normalized_month}/"
+    legacy_zip_filename = f"{company_segment}_{normalized_month}_invoices.zip"
     legacy_zip_key = f"{legacy_prefix}{legacy_zip_filename}"
 
     client = get_s3_client()
