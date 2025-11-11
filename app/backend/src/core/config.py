@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -26,7 +27,7 @@ class Settings(BaseSettings):
     celery_result_backend: str | None = Field(
         default=None, alias="CELERY_RESULT_BACKEND"
     )
-    aws_region: str = Field(default="us-west-1", alias="AWS_REGION")
+    aws_region: str | None = Field(default=None, alias="AWS_REGION")
     aws_s3_bucket: str = Field(default="local", alias="AWS_S3_BUCKET")
     aws_access_key_id: str | None = Field(
         default=None, alias="AWS_ACCESS_KEY_ID"
@@ -37,11 +38,14 @@ class Settings(BaseSettings):
     local_storage_path: str = Field(
         default="/tmp/invoice-agent", alias="LOCAL_STORAGE_PATH"
     )
+    auth0_domain: str | None = Field(default=None, alias="AUTH0_DOMAIN")
+    auth0_audience: str | None = Field(default=None, alias="AUTH0_AUDIENCE")
 
     model_config = SettingsConfigDict(
         case_sensitive=False,
-        env_file=".env",
+        env_file=Path(__file__).resolve().parents[2] / ".env",
         env_file_encoding="utf-8",
+        extra="ignore",
     )
 
     def get(self, key: str, default: object | None = None) -> object | None:

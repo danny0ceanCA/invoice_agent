@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from io import BytesIO
+import re
 from time import perf_counter
+from datetime import date, datetime
+from uuid import uuid4
 
 import pandas as pd
 from reportlab.lib.colors import HexColor
@@ -13,6 +17,9 @@ from reportlab.pdfgen import canvas
 
 from app.backend.src.services.metrics import pdf_generation_seconds
 from app.backend.src.services.s3 import upload_bytes
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,9 +31,33 @@ class InvoicePdf:
     content: bytes
 
 
+def _safe_token(raw: str) -> str:
+    """
+    Return an ASCII-safe token for filenames: keep [A-Za-z0-9._-], replace others with '_'.
+    """
+
+    token = (raw or "").strip()
+    token = token.encode("ascii", errors="ignore").decode("ascii")
+    token = re.sub(r"\s+", "_", token)             # normalize whitespace to single underscores
+    token = re.sub(r"[\\/]+", "_", token)         # replace path separators explicitly
+    token = re.sub(r"[^A-Za-z0-9._-]", "_", token) # drop remaining unsafe chars
+    token = re.sub(r"_+", "_", token)               # collapse runs of underscores
+    return token.strip("_")
+
+
 def _build_filename(student: str, service_month: str) -> str:
-    safe_student = student.replace(" ", "_")
-    return f"Invoice_{safe_student}_{service_month}.pdf"
+    """Return a unique, S3-safe filename for a generated invoice."""
+
+    safe_student = _safe_token(student)
+    safe_month = _safe_token(service_month)
+    unique_suffix = uuid4().hex
+
+    raw_filename = f"Invoice_{safe_student}_{safe_month}_{unique_suffix}.pdf"
+    sanitized_filename = _safe_token(raw_filename)
+    if not sanitized_filename:
+        sanitized_filename = _safe_token(f"Invoice_{unique_suffix}.pdf") or f"Invoice_{unique_suffix}.pdf"
+    logger.info("Generated sanitized invoice filename: %s", sanitized_filename)
+    return sanitized_filename
 
 
 def generate_invoice_pdf(
@@ -37,10 +68,14 @@ def generate_invoice_pdf(
     service_month: str,
     invoice_code: str | None = None,
     invoice_number: str | None = None,
+    *,
+    company_name: str | None = None,
+    reference_date: datetime | date | str | None = None,
 ) -> InvoicePdf:
     """Render a student-level invoice PDF and upload it to S3."""
 
     filename = _build_filename(student, service_month)
+    logger.info("Uploading invoice PDF with filename '%s'", filename)
     start = perf_counter()
     buffer = BytesIO()
     pdf_canvas = canvas.Canvas(buffer, pagesize=letter)
@@ -244,6 +279,8 @@ def generate_invoice_pdf(
         pdf_bytes,
         filename=filename,
         content_type="application/pdf",
+        company_name=company_name,
+        reference_date=reference_date or invoice_date,
     )
     return InvoicePdf(key=key, filename=filename, content=pdf_bytes)
 

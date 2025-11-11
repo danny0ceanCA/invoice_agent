@@ -10,8 +10,16 @@ from app.backend.src.models import User, Vendor
 
 DEFAULT_VENDOR_NAME = "SCUSD Accounts Payable"
 DEFAULT_VENDOR_EMAIL = "ap@scusd.example"
-DEFAULT_USER_EMAIL = "demo.user@scusd.example"
-DEFAULT_USER_NAME = "Demo User"
+DEFAULT_VENDOR_CONTACT = "Regina Martinez"
+DEFAULT_VENDOR_PHONE = "916-555-0183"
+DEFAULT_VENDOR_REMIT = {
+    "street": "SCUSD Accounts Payable",
+    "city": "Sacramento",
+    "state": "CA",
+    "postal_code": "95824",
+}
+DEFAULT_USER_EMAIL = "daniel@responsivehcsolutions.com"
+DEFAULT_USER_NAME = "Daniel Ojeda"
 DEFAULT_USER_ROLE = "admin"
 
 
@@ -23,6 +31,8 @@ class SeedResult:
     user: User
     vendor_created: bool
     user_created: bool
+    vendor_updated: bool
+    user_updated: bool
 
 
 def seed_development_user(
@@ -33,6 +43,7 @@ def seed_development_user(
     user_email: str = DEFAULT_USER_EMAIL,
     user_name: str = DEFAULT_USER_NAME,
     user_role: str = DEFAULT_USER_ROLE,
+    auth0_sub: str | None = None,
 ) -> SeedResult:
     """Ensure a demo vendor and user exist for local development.
 
@@ -40,22 +51,59 @@ def seed_development_user(
     Existing records are updated so they remain associated.
     """
 
-    vendor = session.query(Vendor).filter(Vendor.name == vendor_name).one_or_none()
+    vendor = (
+        session.query(Vendor)
+        .filter(Vendor.company_name == vendor_name)
+        .one_or_none()
+    )
     vendor_created = False
+    vendor_updated = False
     if vendor is None:
-        vendor = Vendor(name=vendor_name, contact_email=vendor_email)
+        vendor = Vendor(
+            company_name=vendor_name,
+            contact_email=vendor_email,
+            contact_name=DEFAULT_VENDOR_CONTACT,
+            phone_number=DEFAULT_VENDOR_PHONE,
+            remit_to_street=DEFAULT_VENDOR_REMIT["street"],
+            remit_to_city=DEFAULT_VENDOR_REMIT["city"],
+            remit_to_state=DEFAULT_VENDOR_REMIT["state"],
+            remit_to_postal_code=DEFAULT_VENDOR_REMIT["postal_code"],
+        )
         session.add(vendor)
         session.flush()
         vendor_created = True
+    else:
+        if vendor.contact_email != vendor_email:
+            vendor.contact_email = vendor_email
+            vendor_updated = True
+        if vendor.contact_name != DEFAULT_VENDOR_CONTACT:
+            vendor.contact_name = DEFAULT_VENDOR_CONTACT
+            vendor_updated = True
+        if vendor.phone_number != DEFAULT_VENDOR_PHONE:
+            vendor.phone_number = DEFAULT_VENDOR_PHONE
+            vendor_updated = True
+        if (
+            vendor.remit_to_street != DEFAULT_VENDOR_REMIT["street"]
+            or vendor.remit_to_city != DEFAULT_VENDOR_REMIT["city"]
+            or vendor.remit_to_state != DEFAULT_VENDOR_REMIT["state"]
+            or vendor.remit_to_postal_code != DEFAULT_VENDOR_REMIT["postal_code"]
+        ):
+            vendor.remit_to_street = DEFAULT_VENDOR_REMIT["street"]
+            vendor.remit_to_city = DEFAULT_VENDOR_REMIT["city"]
+            vendor.remit_to_state = DEFAULT_VENDOR_REMIT["state"]
+            vendor.remit_to_postal_code = DEFAULT_VENDOR_REMIT["postal_code"]
+            vendor_updated = True
 
     user = session.query(User).filter(User.email == user_email).one_or_none()
     user_created = False
+    user_updated = False
     if user is None:
         user = User(
             email=user_email,
             name=user_name,
             role=user_role,
             vendor_id=vendor.id,
+            auth0_sub=auth0_sub,
         )
         session.add(user)
         session.flush()
@@ -63,16 +111,24 @@ def seed_development_user(
     else:
         if user.vendor_id != vendor.id:
             user.vendor_id = vendor.id
+            user_updated = True
         if user.role != user_role:
             user.role = user_role
+            user_updated = True
         if user.name != user_name:
             user.name = user_name
+            user_updated = True
+        if auth0_sub and user.auth0_sub != auth0_sub:
+            user.auth0_sub = auth0_sub
+            user_updated = True
 
     return SeedResult(
         vendor=vendor,
         user=user,
         vendor_created=vendor_created,
         user_created=user_created,
+        vendor_updated=vendor_updated,
+        user_updated=user_updated,
     )
 
 

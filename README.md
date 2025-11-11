@@ -48,7 +48,11 @@ The platform serves three primary user personas:
 
 ## Getting Started
 
-1. Copy `.env.example` to `.env` and supply environment values.
+1. Create environment files for each app:
+   - `app/backend/.env` for server-side variables such as `AUTH0_DOMAIN`,
+     `AUTH0_AUDIENCE`, `DATABASE_URL`, Redis, and storage credentials.
+   - `app/frontend/.env` for browser-safe variables prefixed with `VITE_`
+     like `VITE_API_BASE_URL`, `VITE_AUTH0_DOMAIN`, and `VITE_AUTH0_CLIENT_ID`.
 2. Install backend requirements (FastAPI, SQLAlchemy, etc.) and frontend dependencies
    (React, Vite, TailwindCSS).
 3. Launch the FastAPI app with `uvicorn app.backend.src.main:app --reload` and the frontend
@@ -59,17 +63,16 @@ The platform serves three primary user personas:
 ## Development seed data
 
 - Run `python seed_dev_data.py` to create the demo vendor and user in your local database.
-  The script prints the `X-User-Id` header value required when calling protected endpoints
-  such as `/api/jobs` or `/api/invoices/generate`.
+ Optionally set `AUTH0_DEMO_SUB` to link the seeded user to an Auth0 identity.
 - If the API server is already running you can also call `POST /api/admin/seed` to seed the
-  same records and receive the header value in the JSON response.
+  same records; the response now includes the linked Auth0 subject when present.
 
-After seeding, include the returned `X-User-Id` header in your automation or API clients so the
-requests are authenticated against the demo user.
+After seeding, use Auth0-issued access tokens when calling protected endpoints such as
+`/api/jobs` or `/api/invoices/generate`.
 
 ## Next Steps
 
-- Implement Auth0 JWT validation middleware.
+- Configure automated jobs to update Auth0-linked profiles with additional vendor metadata.
 - Flesh out the processing pipeline connecting uploads, Redis queues, S3 storage, and PDF
   generation.
 - Add Alembic migrations and seed data commands.

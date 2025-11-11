@@ -1,13 +1,19 @@
-import axios from "axios";
+import { API_BASE } from "./auth";
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+export async function listJobs(accessToken) {
+  if (!accessToken) {
+    throw new Error("Missing access token");
+  }
 
-const client = axios.create({
-  baseURL: API_BASE,
-  headers: { "X-User-Id": "1" },
-});
+  const response = await fetch(`${API_BASE}/jobs`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
 
-export async function listJobs() {
-  const response = await client.get("/api/jobs");
-  return response.data;
+  if (!response.ok) {
+    throw new Error("Failed to load jobs");
+  }
+
+  return response.json();
 }

@@ -43,10 +43,23 @@ def process_invoice(
     )
     try:
         result = agent.run(Path(upload_path))
-        LOGGER.info("celery_job_success", upload=upload_path, queue=queue_name)
+        LOGGER.info(
+            "celery_job_success",
+            upload=upload_path,
+            queue=queue_name,
+            vendor_id=vendor_id,
+            job_id=job_id,
+        )
         return result
     except Exception as exc:  # pragma: no cover - logged and re-raised
-        LOGGER.error("celery_job_failure", error=str(exc), upload=upload_path)
+        LOGGER.error(
+            "celery_job_failure",
+            error=str(exc),
+            upload=upload_path,
+            queue=queue_name,
+            vendor_id=vendor_id,
+            job_id=job_id,
+        )
         raise
     finally:
         job_duration_seconds.labels(queue=queue_name).observe(perf_counter() - start)

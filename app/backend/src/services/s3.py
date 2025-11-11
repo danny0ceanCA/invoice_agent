@@ -2,15 +2,21 @@
 
 from __future__ import annotations
 
-from io import BytesIO
 import mimetypes
+import re
 import shutil
+import urllib.parse
+from calendar import month_abbr, month_name
+from datetime import date, datetime
+from functools import lru_cache
+from io import BytesIO
 from pathlib import Path
 from uuid import uuid4
 
 import boto3
 from botocore.client import BaseClient
-from botocore.exceptions import BotoCoreError, NoCredentialsError
+from botocore.config import Config
+from botocore.exceptions import BotoCoreError, ClientError, NoCredentialsError
 import structlog
 
 from app.backend.src.core.config import get_settings
@@ -29,27 +35,208 @@ def _is_local_mode() -> bool:
     return get_settings().aws_s3_bucket.lower() == "local"
 
 
+@lru_cache()
+def _resolve_bucket_region() -> str | None:
+    """Return the region for the configured S3 bucket."""
+
+    settings = get_settings()
+
+    if _is_local_mode():
+        return None
+
+    session_kwargs: dict[str, str] = {}
+    if settings.aws_access_key_id and settings.aws_secret_access_key:
+        session_kwargs["aws_access_key_id"] = settings.aws_access_key_id
+        session_kwargs["aws_secret_access_key"] = settings.aws_secret_access_key
+    if settings.aws_region:
+        session_kwargs["region_name"] = settings.aws_region
+
+    try:
+        session = boto3.session.Session(**session_kwargs)
+        client = session.client("s3", config=Config(signature_version="s3v4"))
+        response = client.get_bucket_location(Bucket=settings.aws_s3_bucket)
+        region = response.get("LocationConstraint") or "us-east-1"
+        if settings.aws_region and settings.aws_region != region:
+            LOGGER.warning(
+                "s3_region_mismatch",
+                bucket=settings.aws_s3_bucket,
+                configured=settings.aws_region,
+                resolved=region,
+            )
+        else:
+            LOGGER.info(
+                "resolved_s3_region", bucket=settings.aws_s3_bucket, region=region
+            )
+        return region
+    except (BotoCoreError, NoCredentialsError, ClientError) as exc:
+        LOGGER.warning("resolve_s3_region_failed", error=str(exc))
+        if settings.aws_region:
+            LOGGER.info(
+                "using_configured_region_fallback",
+                bucket=settings.aws_s3_bucket,
+                region=settings.aws_region,
+            )
+            return settings.aws_region
+        return None
+
+
 def _client() -> BaseClient:
     settings = get_settings()
-    return boto3.client(
-        "s3",
-        region_name=settings.aws_region,
-        aws_access_key_id=settings.aws_access_key_id,
-        aws_secret_access_key=settings.aws_secret_access_key,
-    )
+    client_kwargs: dict[str, object] = {
+        "config": Config(
+            signature_version="s3v4",
+            s3={"addressing_style": "virtual"},
+        ),
+    }
+
+    resolved_region = settings.aws_region or _resolve_bucket_region() or "us-east-2"
+    client_kwargs["region_name"] = resolved_region
+
+    if settings.aws_access_key_id and settings.aws_secret_access_key:
+        client_kwargs["aws_access_key_id"] = settings.aws_access_key_id
+        client_kwargs["aws_secret_access_key"] = settings.aws_secret_access_key
+
+    return boto3.client("s3", **client_kwargs)
 
 
-def _resolve_object_key(filename: str, key: str | None = None) -> str:
-    """Return a deterministic object key for the provided filename."""
+def sanitize_company_name(company_name: str | None) -> str:
+    """Return a deterministic, ASCII-only company segment for S3 paths."""
+
+    raw_value = (company_name or "").strip()
+    if not raw_value:
+        return "unknown"
+
+    ascii_value = raw_value.encode("ascii", errors="ignore").decode("ascii")
+    sanitized = re.sub(r"[^A-Za-z0-9]+", "", ascii_value)
+    return sanitized or "unknown"
+
+
+def _normalize_reference_date(
+    reference_date: date | datetime | str | None,
+) -> datetime:
+    """Return a timezone-naive datetime used for S3 path hierarchy."""
+
+    if isinstance(reference_date, datetime):
+        return reference_date
+    if isinstance(reference_date, date):
+        return datetime(reference_date.year, reference_date.month, reference_date.day)
+    if isinstance(reference_date, str) and reference_date.strip():
+        candidate = reference_date.strip()
+        parse_formats = (
+            "%Y-%m-%d",
+            "%Y/%m/%d",
+            "%m/%d/%Y",
+            "%Y-%m",
+            "%Y/%m",
+            "%m-%Y",
+            "%m/%Y",
+            "%B %Y",
+            "%b %Y",
+        )
+        for fmt in parse_formats:
+            try:
+                parsed = datetime.strptime(candidate, fmt)
+                return parsed
+            except ValueError:
+                continue
+
+        # Handle compact numeric forms like YYYYMM or YYYYMMDD
+        compact_match = re.fullmatch(r"(\d{4})(\d{2})(\d{2})?", candidate)
+        if compact_match:
+            year_value = int(compact_match.group(1))
+            month_value = int(compact_match.group(2))
+            day_value = int(compact_match.group(3) or "01")
+            try:
+                return datetime(year_value, month_value, day_value)
+            except ValueError:
+                pass
+
+        # Attempt to extract month names combined with a year token
+        month_lookup = {
+            name.lower(): index
+            for index, name in enumerate(month_name)
+            if name
+        }
+        month_lookup.update(
+            {
+                name.lower(): index
+                for index, name in enumerate(month_abbr)
+                if name
+            }
+        )
+
+        year_match = re.search(r"(20\d{2}|19\d{2})", candidate)
+        if year_match:
+            year_value = int(year_match.group(0))
+            tokens = re.split(r"[^A-Za-z]+", candidate)
+            for token in tokens:
+                if not token:
+                    continue
+                lookup = month_lookup.get(token.lower())
+                if lookup:
+                    try:
+                        return datetime(year_value, lookup, 1)
+                    except ValueError:
+                        break
+
+        try:
+            return datetime.fromisoformat(candidate)
+        except ValueError:
+            pass
+    return datetime.utcnow()
+
+
+def build_invoice_storage_components(
+    company_name: str | None,
+    reference_date: date | datetime | str | None,
+) -> tuple[str, str, str, str]:
+    """Return the prefix and path segments for invoice storage objects."""
+
+    normalized_company = sanitize_company_name(company_name)
+    normalized_date = _normalize_reference_date(reference_date)
+    year_segment = f"{normalized_date.year:04d}"
+    month_segment = f"{normalized_date.month:02d}"
+    prefix = f"invoices/{normalized_company}/{year_segment}/{month_segment}/"
+    return prefix, normalized_company, year_segment, month_segment
+
+
+def _resolve_object_key(
+    filename: str,
+    *,
+    key: str | None = None,
+    company_name: str | None = None,
+    reference_date: date | datetime | str | None = None,
+) -> str:
+    """Return a deterministic, S3-safe object key for the provided filename."""
 
     if key:
         return key
-    return f"invoices/{uuid4()}/{filename}"
+
+    safe_name = re.sub(r"[\\/]+", "_", filename).strip()
+    safe_name = re.sub(r"_+", "_", safe_name)
+
+    if company_name:
+        (
+            prefix,
+            normalized_company,
+            year_segment,
+            month_segment,
+        ) = build_invoice_storage_components(company_name, reference_date)
+        hierarchical_key = f"{prefix}{safe_name}"
+        LOGGER.info(
+            "s3_upload_path_updated",
+            company=normalized_company,
+            year=year_segment,
+            month=month_segment,
+            s3_key=hierarchical_key,
+        )
+        return hierarchical_key
+
+    return f"invoices/{uuid4()}/{safe_name}"
 
 
 def _determine_content_type(filename: str, content_type: str | None = None) -> str:
     """Infer a best-effort content type for uploads."""
-
     return (
         content_type
         or mimetypes.guess_type(filename)[0]
@@ -62,12 +249,20 @@ def upload_file(
     *,
     key: str | None = None,
     content_type: str | None = None,
+    company_name: str | None = None,
+    reference_date: date | datetime | str | None = None,
 ) -> str:
     """Upload a file to S3 or local storage and return the object key."""
-
     settings = get_settings()
-    object_key = _resolve_object_key(file_path.name, key=key)
-    resolved_content_type = _determine_content_type(file_path.name, content_type)
+    safe_filename = re.sub(r"[\\/]+", "_", file_path.name).strip()
+    safe_filename = re.sub(r"_+", "_", safe_filename)
+    object_key = _resolve_object_key(
+        filename=safe_filename,
+        key=key,
+        company_name=company_name,
+        reference_date=reference_date,
+    )
+    resolved_content_type = _determine_content_type(safe_filename, content_type)
 
     if _is_local_mode():
         destination = _local_bucket_root() / object_key
@@ -97,12 +292,20 @@ def upload_bytes(
     filename: str,
     key: str | None = None,
     content_type: str | None = None,
+    company_name: str | None = None,
+    reference_date: date | datetime | str | None = None,
 ) -> str:
     """Upload in-memory data to storage and return the object key."""
-
     settings = get_settings()
-    object_key = _resolve_object_key(filename, key=key)
-    resolved_content_type = _determine_content_type(filename, content_type)
+    safe_filename = re.sub(r"[\\/]+", "_", filename).strip()
+    safe_filename = re.sub(r"_+", "_", safe_filename)
+    object_key = _resolve_object_key(
+        filename=safe_filename,
+        key=key,
+        company_name=company_name,
+        reference_date=reference_date,
+    )
+    resolved_content_type = _determine_content_type(safe_filename, content_type)
 
     if _is_local_mode():
         destination = _local_bucket_root() / object_key
@@ -126,24 +329,71 @@ def upload_bytes(
         raise
 
 
-def generate_presigned_url(key: str, expires_in: int = 3600) -> str:
-    """Generate a presigned URL for the provided object key."""
+def sanitize_object_key(key: str) -> str:
+    """Minimal, safe normalization that preserves exact S3 key semantics."""
+
+    if not key:
+        return ""
+
+    sanitized = str(key).strip().strip('"').strip("'")
+    sanitized = urllib.parse.unquote(sanitized)
+    sanitized = re.sub(r"/+", "/", sanitized)
+    if sanitized.startswith("/"):
+        sanitized = sanitized[1:]
+    return sanitized
+
+
+def generate_presigned_url(
+    key: str,
+    *,
+    expires_in: int = 3600,
+    download_name: str | None = None,
+    response_content_type: str | None = None,
+) -> str:
+    """Generate a presigned URL; optionally control the downloaded filename."""
 
     settings = get_settings()
+    sanitized_key = sanitize_object_key(key)
+
     if _is_local_mode():
-        path = _local_bucket_root() / key
-        return path.as_uri()
+        return (_local_bucket_root() / sanitized_key).resolve().as_uri()
+
+    params: dict[str, str] = {"Bucket": settings.aws_s3_bucket, "Key": sanitized_key}
+
+    if download_name:
+        safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", download_name)
+        params["ResponseContentDisposition"] = f'attachment; filename="{safe_name}"'
+
+    if response_content_type:
+        params["ResponseContentType"] = response_content_type
 
     client = _client()
-    try:
-        return client.generate_presigned_url(
-            "get_object",
-            Params={"Bucket": settings.aws_s3_bucket, "Key": key},
-            ExpiresIn=expires_in,
-        )
-    except (BotoCoreError, NoCredentialsError) as exc:
-        LOGGER.error("presign_failed", error=str(exc), key=key)
-        raise
+    LOGGER.info(
+        "presign_debug",
+        bucket=settings.aws_s3_bucket,
+        region=settings.aws_region or client.meta.region_name,
+        sanitized_key=sanitized_key,
+        response_headers={k: v for k, v in params.items() if k.startswith("Response")},
+    )
+    return client.generate_presigned_url(
+        "get_object",
+        Params=params,
+        ExpiresIn=expires_in,
+    )
 
 
-__all__ = ["upload_file", "upload_bytes", "generate_presigned_url"]
+def get_s3_client() -> BaseClient:
+    """Return a configured S3 client instance."""
+
+    return _client()
+
+
+__all__ = [
+    "upload_file",
+    "upload_bytes",
+    "generate_presigned_url",
+    "sanitize_object_key",
+    "get_s3_client",
+    "sanitize_company_name",
+    "build_invoice_storage_components",
+]

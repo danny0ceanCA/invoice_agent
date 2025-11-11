@@ -12,13 +12,14 @@ import pandas as pd
 import structlog
 from sqlalchemy.orm import Session
 
-from app.backend.src.db import session_scope
-from app.backend.src.models.invoice import Invoice
-from app.backend.src.models.job import Job
-from app.backend.src.models.line_item import InvoiceLineItem
-from app.backend.src.services.metrics import invoice_jobs_total
-from app.backend.src.services.pdf_generation import InvoicePdf, generate_invoice_pdf
-from app.backend.src.services.s3 import upload_bytes
+from ..db import session_scope
+from ..models.invoice import Invoice
+from ..models.job import Job
+from ..models.line_item import InvoiceLineItem
+from ..models.vendor import Vendor
+from ..services.metrics import invoice_jobs_total
+from ..services.pdf_generation import InvoicePdf, generate_invoice_pdf
+from ..services.s3 import sanitize_company_name, upload_bytes
 
 LOGGER = structlog.get_logger(__name__)
 
@@ -60,6 +61,7 @@ class InvoiceAgent:
             "LVN-SCUSD": 70,
             "RN-SCUSD": 85,
         }
+        self.vendor_company_name: str | None = None
         self.logger = LOGGER.bind(
             vendor_id=vendor_id, service_month=self.service_month_display, job_id=job_id
         )
@@ -82,9 +84,11 @@ class InvoiceAgent:
         invoices: list[Invoice] = []
         duplicates: list[str] = []
         pdf_artifacts: list[InvoicePdf] = []
+        invoice_audit_log: list[dict[str, Any]] = []
         self.logger.info("invoice_agent_start", upload=str(file_path))
         try:
             with session_scope() as session:
+                vendor_name = self._ensure_vendor_company_name(session)
                 for student, student_frame in dataframe.groupby("Client"):
                     invoice_number = generate_invoice_number(student, self.service_month_date)
                     if self._invoice_exists(session, invoice_number):
@@ -97,14 +101,46 @@ class InvoiceAgent:
                         continue
 
                     invoice, pdf_artifact = self._process_student(
-                        session, student, student_frame, invoice_number
+                        session,
+                        student,
+                        student_frame,
+                        invoice_number,
+                        vendor_name,
                     )
                     invoices.append(invoice)
                     pdf_artifacts.append(pdf_artifact)
+                    invoice_audit_log.append(
+                        {
+                            "id": invoice.id,
+                            "student": invoice.student_name,
+                            "s3_key": invoice.s3_key,
+                        }
+                    )
         except Exception as exc:
             invoice_jobs_total.labels(status="failed").inc()
             self.logger.error("invoice_agent_error", error=str(exc))
             raise
+
+        missing_s3_keys = [entry for entry in invoice_audit_log if not entry.get("s3_key")]
+        if missing_s3_keys:
+            for entry in missing_s3_keys:
+                self.logger.error(
+                    "invoice_s3_key_missing_after_upload",
+                    invoice_id=entry.get("id"),
+                    student=entry.get("student"),
+                )
+        else:
+            self.logger.info(
+                "invoice_s3_keys_verified",
+                invoice_count=len(invoice_audit_log),
+            )
+
+        keys = [entry["s3_key"] for entry in invoice_audit_log if entry.get("s3_key")]
+        if len(keys) != len(set(keys)):
+            self.logger.warning(
+                "duplicate_invoice_keys_detected",
+                duplicate_count=len(keys) - len(set(keys)),
+            )
 
         zip_key = self._bundle_invoices(pdf_artifacts)
         status = "completed" if invoices else "skipped"
@@ -132,7 +168,8 @@ class InvoiceAgent:
         student: str,
         student_frame: pd.DataFrame,
         invoice_number: str,
-    ) -> tuple[Invoice, Path]:
+        vendor_company_name: str,
+    ) -> tuple[Invoice, InvoicePdf]:
         frame = student_frame.copy()
         frame["Rate"] = frame["Service Code"].map(self.rates).fillna(0)
         frame["Cost"] = frame["Hours"] * frame["Rate"]
@@ -147,6 +184,8 @@ class InvoiceAgent:
             self.service_month_display,
             invoice_code,
             invoice_number,
+            company_name=vendor_company_name,
+            reference_date=self.invoice_date,
         )
 
         invoice = Invoice(
@@ -163,6 +202,20 @@ class InvoiceAgent:
         )
         session.add(invoice)
         session.flush()
+
+        if pdf_artifact.key:
+            invoice.s3_key = pdf_artifact.key
+            self.logger.info(
+                "invoice_s3_key_saved",
+                key=pdf_artifact.key,
+                invoice_id=invoice.id,
+            )
+        else:
+            self.logger.warning(
+                "missing_s3_key",
+                invoice_id=invoice.id,
+                student=student,
+            )
 
         for _, row in frame.iterrows():
             line_item = InvoiceLineItem(
@@ -206,13 +259,38 @@ class InvoiceAgent:
                 bundle.writestr(artifact.filename, artifact.content)
 
         zip_buffer.seek(0)
-        bundle_name = f"Invoices_{uuid4()}.zip"
+        reference_date = self.invoice_date
+        safe_company = sanitize_company_name(self.vendor_company_name)
+        bundle_name = (
+            f"{safe_company}_{reference_date.year:04d}_{reference_date.month:02d}_invoices.zip"
+        )
         zip_key = upload_bytes(
             zip_buffer.getvalue(),
             filename=bundle_name,
             content_type="application/zip",
+            company_name=self.vendor_company_name,
+            reference_date=reference_date,
         )
         return zip_key
+
+    def _ensure_vendor_company_name(self, session: Session) -> str:
+        """Resolve and cache the vendor company name for S3 key generation."""
+
+        if self.vendor_company_name:
+            return self.vendor_company_name
+
+        vendor: Vendor | None = session.get(Vendor, self.vendor_id)
+        if vendor and vendor.company_name:
+            self.vendor_company_name = vendor.company_name
+        else:
+            fallback = f"vendor-{self.vendor_id}"
+            self.vendor_company_name = fallback
+            self.logger.warning(
+                "vendor_company_missing",
+                vendor_id=self.vendor_id,
+                fallback=self.vendor_company_name,
+            )
+        return self.vendor_company_name
 
     @staticmethod
     def _normalize_service_month(
