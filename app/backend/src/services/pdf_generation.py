@@ -53,7 +53,9 @@ def _build_filename(student: str, service_month: str) -> str:
 
     raw_filename = f"Invoice_{safe_student}_{safe_month}_{unique_suffix}.pdf"
     sanitized_filename = _safe_token(raw_filename)
-    logger.debug("Sanitized invoice filename generated: %s", sanitized_filename)
+    if not sanitized_filename:
+        sanitized_filename = _safe_token(f"Invoice_{unique_suffix}.pdf") or f"Invoice_{unique_suffix}.pdf"
+    logger.info("Generated sanitized invoice filename: %s", sanitized_filename)
     return sanitized_filename
 
 
