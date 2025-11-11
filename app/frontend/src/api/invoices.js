@@ -27,3 +27,32 @@ export async function uploadInvoice(file, meta, accessToken) {
 
   return response.json();
 }
+
+export async function fetchInvoicePresignedUrl(s3Key, accessToken) {
+  if (!s3Key) {
+    throw new Error("Missing S3 key for invoice download");
+  }
+
+  if (!accessToken) {
+    throw new Error("Missing access token");
+  }
+
+  const response = await fetch(
+    `${API_BASE}/invoices/presign?s3_key=${encodeURIComponent(s3Key)}`,
+    {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  );
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(
+      message || `Failed to fetch presigned URL (status ${response.status})`,
+    );
+  }
+
+  return response.json();
+}

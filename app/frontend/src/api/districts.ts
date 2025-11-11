@@ -38,6 +38,7 @@ export interface DistrictVendorStudent {
   service: string | null;
   amount: number;
   pdf_url: string | null;
+  pdf_s3_key?: string | null;
   timesheet_url: string | null;
 }
 
@@ -51,6 +52,7 @@ export interface DistrictVendorInvoice {
   processed_on: string | null;
   download_url: string | null;
   pdf_url: string | null;
+  pdf_s3_key?: string | null;
   timesheet_csv_url: string | null;
   students: DistrictVendorStudent[];
 }
