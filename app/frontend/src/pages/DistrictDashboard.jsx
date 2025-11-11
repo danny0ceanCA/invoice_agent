@@ -92,34 +92,20 @@ const aggregateStudentEntries = (entries) => {
   if (!Array.isArray(entries) || !entries.length) {
     return [];
   }
+
   const groups = new Map();
 
-
   entries.forEach((entry, index) => {
-    const normalizedStudentKey =
-      typeof entry.studentKey === "string" && entry.studentKey.trim().length
-        ? entry.studentKey.trim().toLowerCase()
-        : null;
-    const normalizedName =
-      typeof entry.name === "string" && entry.name.trim().length
-        ? entry.name.trim().toLowerCase()
-        : null;
-    const fallbackId =
-      typeof entry.originalLineItemId === "number" &&
-      Number.isFinite(entry.originalLineItemId)
-        ? `line:${entry.originalLineItemId}`
-        : null;
     const key =
-      normalizedStudentKey ??
-      fallbackId ??
-      normalizedName ??
-      (typeof entry.id === "string" && entry.id.trim().length
-        ? entry.id.trim()
-        : `index:${index}`);
+      entry.id ??
+      entry.originalLineItemId ??
+      `${entry.name || "unknown"}-${index}`;
+
     const amountValue =
       typeof entry.amountValue === "number"
         ? entry.amountValue
         : parseCurrencyValue(entry.amount ?? "");
+
     const displayName =
       typeof entry.name === "string" && entry.name.trim().length
         ? entry.name.trim()
@@ -127,12 +113,7 @@ const aggregateStudentEntries = (entries) => {
 
     if (!groups.has(key)) {
       groups.set(key, {
-        id:
-          (typeof entry.id === "string" && entry.id.trim().length
-            ? entry.id.trim()
-            : null) ??
-          fallbackId ??
-          `aggregated-${index}`,
+        id: key,
         name: displayName,
         amountValue: 0,
         services: new Map(),
@@ -149,24 +130,15 @@ const aggregateStudentEntries = (entries) => {
 
     const serviceKey = entry.service?.trim();
     if (serviceKey) {
-      const current = group.services.get(serviceKey) ?? {
-        count: 0,
-        amount: 0,
-      };
+      const current = group.services.get(serviceKey) ?? { count: 0, amount: 0 };
       current.count += 1;
       current.amount += amountValue;
       group.services.set(serviceKey, current);
     }
 
-    if (entry.pdfUrl) {
-      group.pdfUrls.add(entry.pdfUrl);
-    }
-    if (entry.pdfS3Key) {
-      group.pdfKeys.add(entry.pdfS3Key);
-    }
-    if (entry.timesheetUrl) {
-      group.timesheetUrls.add(entry.timesheetUrl);
-    }
+    if (entry.pdfUrl) group.pdfUrls.add(entry.pdfUrl);
+    if (entry.pdfS3Key) group.pdfKeys.add(entry.pdfS3Key);
+    if (entry.timesheetUrl) group.timesheetUrls.add(entry.timesheetUrl);
   });
 
   return Array.from(groups.values())
@@ -176,7 +148,7 @@ const aggregateStudentEntries = (entries) => {
           service,
           count: data.count,
           amount: data.amount,
-        }),
+        })
       );
 
       return {
@@ -192,18 +164,14 @@ const aggregateStudentEntries = (entries) => {
             : services.length > 1
             ? `${services.length} services`
             : null,
-        pdfUrl: group.pdfUrls.size ? Array.from(group.pdfUrls)[0] : null,
-        pdfS3Key: group.pdfKeys.size ? Array.from(group.pdfKeys)[0] : null,
-        timesheetUrl: group.timesheetUrls.size
-          ? Array.from(group.timesheetUrls)[0]
-          : null,
+        pdfUrl: Array.from(group.pdfUrls).pop() ?? null,
+        pdfS3Key: Array.from(group.pdfKeys).pop() ?? null,
+        timesheetUrl: Array.from(group.timesheetUrls).pop() ?? null,
         entryCount: group.entryCount,
       };
     })
     .sort((a, b) => {
-      if (b.amountValue !== a.amountValue) {
-        return b.amountValue - a.amountValue;
-      }
+      if (b.amountValue !== a.amountValue) return b.amountValue - a.amountValue;
       return a.name.localeCompare(b.name);
     });
 };
