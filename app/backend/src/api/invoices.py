@@ -6,12 +6,25 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 
 import structlog
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    UploadFile,
+    Query,
+)
 from sqlalchemy.orm import Session
 
-from app.backend.src.core.security import require_vendor_user
-from ..db import get_session_dependency
+from app.backend.src.core.security import (
+    require_vendor_user,
+    get_current_user,
+)
 from app.backend.src.models import Job, User
+from app.backend.src.services.s3 import generate_presigned_url
+from ..db import get_session_dependency
+
 try:
     from invoice_agent.tasks.invoice_tasks import process_invoice
 except ModuleNotFoundError:  # pragma: no cover
@@ -22,7 +35,9 @@ LOGGER = structlog.get_logger(__name__)
 router = APIRouter(prefix="/invoices", tags=["invoices"])
 
 
-
+# --------------------------------------------------------------------------
+# Utility: Select Celery queue based on file size
+# --------------------------------------------------------------------------
 def _select_queue(file_size: int) -> str:
     if file_size < 10_000_000:
         return "small"
@@ -31,6 +46,9 @@ def _select_queue(file_size: int) -> str:
     return "large"
 
 
+# --------------------------------------------------------------------------
+# POST /invoices/generate
+# --------------------------------------------------------------------------
 @router.post("/generate")
 async def generate_invoices(
     file: UploadFile = File(...),
@@ -58,6 +76,7 @@ async def generate_invoices(
         queue=queue,
         size=len(contents),
     )
+
     with NamedTemporaryFile(delete=False, suffix=Path(file.filename).suffix) as tmp_file:
         tmp_file.write(contents)
         temp_path = Path(tmp_file.name)
@@ -68,6 +87,8 @@ async def generate_invoices(
         queue=queue,
         temp_path=str(temp_path),
     )
+
+    # Enqueue the Celery task
     task = process_invoice.apply_async(
         args=[str(temp_path), vendor_id, invoice_date, service_month, invoice_code],
         kwargs={"queue_name": queue},
@@ -81,6 +102,7 @@ async def generate_invoices(
         queue=queue,
     )
 
+    # Record the job in the database
     job = Job(
         id=task.id,
         user_id=current_user.id,
@@ -93,3 +115,38 @@ async def generate_invoices(
     session.commit()
 
     return {"job_id": task.id, "status": job.status}
+
+
+# --------------------------------------------------------------------------
+# GET /invoices/presign
+# --------------------------------------------------------------------------
+@router.get("/presign")
+def presign_invoice_file(
+    s3_key: str = Query(..., description="Full S3 key of the stored invoice PDF"),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Return a presigned S3 URL so authenticated users can download invoice PDFs.
+
+    - Works for both vendor and district roles.
+    - Accepts the full S3 key as a query parameter.
+    - Responds with a JSON object: {"url": "<presigned_s3_url>"}.
+    """
+
+    LOGGER.info("presign_request_received", user=current_user.email, s3_key=s3_key)
+
+    if not s3_key:
+        raise HTTPException(status_code=400, detail="Missing S3 key")
+
+    try:
+        url = generate_presigned_url(
+            key=s3_key,
+            download_name=Path(s3_key).name,
+            response_content_type="application/pdf",
+        )
+        LOGGER.info("presign_success", s3_key=s3_key, url_preview=url[:80])
+        return {"url": url}
+
+    except Exception as exc:
+        LOGGER.error("presign_failed", s3_key=s3_key, error=str(exc))
+        raise HTTPException(status_code=500, detail="Failed to generate presigned URL")

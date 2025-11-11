@@ -92,8 +92,8 @@ const aggregateStudentEntries = (entries) => {
   if (!Array.isArray(entries) || !entries.length) {
     return [];
   }
-
   const groups = new Map();
+
 
   entries.forEach((entry, index) => {
     const normalizedStudentKey =
