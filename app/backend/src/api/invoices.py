@@ -637,13 +637,85 @@ def list_vendor_invoices(
     if vendor is None:
         raise HTTPException(status_code=404, detail="Vendor not found")
 
+    try:
+        reference_date = datetime(year, month, 1)
+    except ValueError as exc:  # pragma: no cover - defensive guard
+        raise HTTPException(status_code=400, detail="Invalid invoice period") from exc
+
+    vendor_company = _resolve_vendor_company_name(session, vendor_id)
+    (
+        prefix,
+        company_segment,
+        year_segment,
+        month_segment,
+    ) = build_invoice_storage_components(vendor_company, reference_date)
+
+    legacy_month_token = f"{year_segment}-{month_segment}"
+    legacy_prefix = f"invoices/{company_segment}/{legacy_month_token}/"
+
     LOGGER.info(
         "district_invoice_listing_requested",
         vendor_id=vendor_id,
-        year=year,
-        month=month,
+        company=company_segment,
+        year=year_segment,
+        month=month_segment,
         user=current_user.email,
     )
+
+    settings = get_settings()
+    bucket_name = settings.aws_s3_bucket or "invoice-agent-files"
+    if bucket_name.lower() == "local":
+        bucket_name = "invoice-agent-files"
+
+    client = get_s3_client()
+
+    def _collect_invoice_objects(target_prefix: str) -> list[dict[str, object]]:
+        paginator = client.get_paginator("list_objects_v2")
+        objects: list[dict[str, object]] = []
+        for page in paginator.paginate(Bucket=bucket_name, Prefix=target_prefix):
+            contents = page.get("Contents", []) or []
+            for entry in contents:
+                key = entry.get("Key")
+                if not key:
+                    continue
+                if str(key).endswith("/"):
+                    continue
+                objects.append(entry)
+        return objects
+
+    invoice_objects: list[dict[str, object]] = []
+    active_prefix = prefix
+
+    try:
+        invoice_objects = _collect_invoice_objects(prefix)
+    except (ClientError, BotoCoreError) as exc:
+        LOGGER.error(
+            "district_invoice_listing_s3_error",
+            vendor_id=vendor_id,
+            company=company_segment,
+            year=year_segment,
+            month=month_segment,
+            prefix=prefix,
+            error=str(exc),
+        )
+
+    if not invoice_objects:
+        try:
+            legacy_objects = _collect_invoice_objects(legacy_prefix)
+        except (ClientError, BotoCoreError) as exc:
+            LOGGER.error(
+                "district_invoice_listing_legacy_s3_error",
+                vendor_id=vendor_id,
+                company=company_segment,
+                year=year_segment,
+                month=month_segment,
+                prefix=legacy_prefix,
+                error=str(exc),
+            )
+        else:
+            if legacy_objects:
+                invoice_objects = legacy_objects
+                active_prefix = legacy_prefix
 
     invoices = (
         session.query(Invoice)
@@ -652,18 +724,86 @@ def list_vendor_invoices(
         .all()
     )
 
+    vendor_company_display = vendor.company_name or company_segment
+
     results: list[dict[str, object]] = []
     target_month = month
     target_year = year
 
+    invoice_lookup: dict[str, Invoice] = {}
+    invoice_lookup_by_name: dict[str, Invoice] = {}
+
+    filtered_invoices: list[Invoice] = []
     for invoice in invoices:
         period_year, period_month = _determine_invoice_period(invoice)
         if period_year != target_year or period_month != target_month:
+            continue
+        filtered_invoices.append(invoice)
+        for attr in ("s3_key", "pdf_s3_key"):
+            key_value = getattr(invoice, attr, None)
+            if key_value:
+                normalized_key = str(key_value).strip()
+                sanitized_key = sanitize_object_key(normalized_key)
+                invoice_lookup[normalized_key] = invoice
+                invoice_lookup[sanitized_key] = invoice
+                invoice_lookup_by_name[Path(normalized_key).name] = invoice
+                invoice_lookup_by_name[Path(sanitized_key).name] = invoice
+
+    matched_invoice_ids: set[int] = set()
+
+    seen_s3_keys: set[str] = set()
+    for entry in invoice_objects:
+        key = str(entry.get("Key", ""))
+        if not key or key in seen_s3_keys:
+            continue
+        if Path(key).suffix.lower() == ".zip":
+            continue
+        seen_s3_keys.add(key)
+
+        invoice = invoice_lookup.get(key) or invoice_lookup.get(sanitize_object_key(key))
+        if invoice is None:
+            invoice = invoice_lookup_by_name.get(Path(key).name)
+
+        if invoice:
+            matched_invoice_ids.add(invoice.id)
+            amount_decimal = Decimal(invoice.total_cost or 0).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
+            uploaded_at = _format_uploaded_at(
+                invoice.invoice_date or getattr(invoice, "created_at", None)
+            )
+        else:
+            amount_decimal = Decimal(0).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
+            uploaded_at = None
+
+        if not uploaded_at:
+            uploaded_at = _format_uploaded_at(entry.get("LastModified"))
+
+        results.append(
+            {
+                "invoice_id": invoice.id if invoice else None,
+                "vendor_id": vendor_id,
+                "company": vendor_company_display,
+                "invoice_name": Path(key).name,
+                "s3_key": key,
+                "amount": float(amount_decimal),
+                "status": (invoice.status if invoice else "") or "",
+                "uploaded_at": uploaded_at,
+            }
+        )
+
+    for invoice in filtered_invoices:
+        if invoice.id in matched_invoice_ids:
             continue
 
         s3_key = getattr(invoice, "s3_key", None) or getattr(
             invoice, "pdf_s3_key", None
         )
+        if s3_key and Path(s3_key).suffix.lower() == ".zip":
+            continue
+
         if s3_key:
             invoice_name = Path(s3_key).name
         else:
@@ -683,7 +823,7 @@ def list_vendor_invoices(
             {
                 "invoice_id": invoice.id,
                 "vendor_id": invoice.vendor_id,
-                "company": vendor.company_name,
+                "company": vendor_company_display,
                 "invoice_name": invoice_name,
                 "s3_key": s3_key,
                 "amount": float(amount),
@@ -703,8 +843,10 @@ def list_vendor_invoices(
     LOGGER.info(
         "district_invoice_listing_ready",
         vendor_id=vendor_id,
-        year=year,
-        month=month,
+        company=company_segment,
+        year=year_segment,
+        month=month_segment,
+        prefix_used=active_prefix,
         count=len(results),
     )
 
