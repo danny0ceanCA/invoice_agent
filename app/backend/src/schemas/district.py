@@ -113,6 +113,7 @@ class DistrictVendorInvoice(BaseModel):
     status: str
     total: float
     processed_on: str | None
+    download_url: str | None
     pdf_url: str | None
     timesheet_csv_url: str | None
     students: list[DistrictVendorInvoiceStudent]

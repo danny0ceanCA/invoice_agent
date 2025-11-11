@@ -40,5 +40,17 @@ class Invoice(Base):
     )
     approvals: Mapped[list["Approval"]] = relationship("Approval", back_populates="invoice")
 
+    @property
+    def s3_key(self) -> str:
+        """Return the storage object key for the generated invoice PDF."""
+
+        return self.pdf_s3_key
+
+    @s3_key.setter
+    def s3_key(self, value: str) -> None:
+        """Persist the storage object key for compatibility with legacy code paths."""
+
+        self.pdf_s3_key = value
+
 
 __all__ = ["Invoice"]

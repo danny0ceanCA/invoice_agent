@@ -65,8 +65,17 @@ def setup_database() -> None:  # type: ignore[no-untyped-def]
 def test_fetch_overview_includes_invoice_pdf_url(monkeypatch: pytest.MonkeyPatch) -> None:
     generated_urls: list[str] = []
 
-    def fake_generate_presigned_url(key: str, expires_in: int = 3600) -> str:
+    def fake_generate_presigned_url(
+        key: str,
+        *,
+        expires_in: int = 3600,
+        download_name: str | None = None,
+        response_content_type: str | None = None,
+    ) -> str:
+        assert response_content_type == "application/pdf"
         url = f"https://example.com/{key}?expires={expires_in}"
+        if download_name:
+            url += f"&filename={download_name}"
         generated_urls.append(url)
         return url
 
@@ -126,5 +135,9 @@ def test_fetch_overview_includes_invoice_pdf_url(monkeypatch: pytest.MonkeyPatch
     first_year = next(iter(vendor_profile.invoices))
     first_invoice = vendor_profile.invoices[first_year][0]
 
-    assert first_invoice.pdf_url == generated_urls[0]
-    assert first_invoice.pdf_url == "https://example.com/invoices/INV-001.pdf?expires=3600"
+    assert first_invoice.download_url == generated_urls[0]
+    assert (
+        first_invoice.download_url
+        == "https://example.com/invoices/INV-001.pdf?expires=3600&filename=INV-001.pdf"
+    )
+    assert first_invoice.pdf_url == first_invoice.download_url

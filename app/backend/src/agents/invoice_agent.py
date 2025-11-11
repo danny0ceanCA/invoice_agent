@@ -164,6 +164,20 @@ class InvoiceAgent:
         session.add(invoice)
         session.flush()
 
+        if pdf_artifact.key:
+            invoice.s3_key = pdf_artifact.key
+            self.logger.info(
+                "invoice_s3_key_saved",
+                key=pdf_artifact.key,
+                invoice_id=invoice.id,
+            )
+        else:
+            self.logger.warning(
+                "missing_s3_key",
+                invoice_id=invoice.id,
+                student=student,
+            )
+
         for _, row in frame.iterrows():
             line_item = InvoiceLineItem(
                 invoice_id=invoice.id,
