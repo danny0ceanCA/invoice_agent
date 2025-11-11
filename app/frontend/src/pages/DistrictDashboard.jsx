@@ -1679,27 +1679,14 @@ export default function DistrictDashboard({
     setExportingInvoiceCsv(true);
 
     try {
-      const header = [
-        "Invoice ID",
-        "Vendor ID",
-        "Vendor",
-        "Invoice Name",
-        "Amount",
-        "Status",
-        "Uploaded At",
-        "S3 Key",
-      ];
+      const header = ["Vendor", "Invoice Name", "Amount", "Uploaded At"];
       const rows = invoiceDocuments.map((record) => [
-        record.invoiceId ?? "",
-        record.vendorId ?? "",
         record.company ?? selectedVendorName,
         record.invoiceName ?? "",
         Number.isFinite(record.amountValue)
           ? Number(record.amountValue).toFixed(2)
           : "",
-        record.status ?? "",
         record.uploadedAt ?? "",
-        record.s3Key ?? "",
       ]);
 
       const csvContent = [header, ...rows]
