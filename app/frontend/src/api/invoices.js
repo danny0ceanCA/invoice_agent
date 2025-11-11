@@ -56,3 +56,38 @@ export async function fetchInvoicePresignedUrl(s3Key, accessToken) {
 
   return response.json();
 }
+
+export async function fetchVendorInvoiceArchive(vendorId, month, accessToken) {
+  if (vendorId == null) {
+    throw new Error("Missing vendor identifier");
+  }
+
+  if (!month) {
+    throw new Error("Missing month identifier");
+  }
+
+  if (!accessToken) {
+    throw new Error("Missing access token");
+  }
+
+  const encodedMonth = encodeURIComponent(month);
+  const response = await fetch(
+    `${API_BASE}/invoices/download-zip/${vendorId}/${encodedMonth}`,
+    {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  );
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(
+      message ||
+        `Failed to fetch vendor invoice archive (status ${response.status})`,
+    );
+  }
+
+  return response.json();
+}
