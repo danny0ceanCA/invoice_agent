@@ -149,6 +149,14 @@ const formatDisplayDateTime = (value) => {
   });
 };
 
+const formatInvoiceDisplayName = (value) => {
+  if (typeof value !== "string" || !value.trim()) {
+    return value;
+  }
+
+  return value.replace(/(20\d{2})_.+$/, "$1.pdf");
+};
+
 const sanitizeFilenameSegment = (value) => {
   if (!value) {
     return "file";
@@ -1397,17 +1405,19 @@ export default function DistrictDashboard({
                 ? entry.status.trim()
                 : "";
 
+            const invoiceName =
+              (typeof entry?.invoice_name === "string" &&
+                entry.invoice_name.trim()) ||
+              `Invoice ${invoiceId ?? ""}`.trim() ||
+              "Invoice";
             return {
               invoiceId,
               vendorId: entry?.vendor_id ?? vendorNumericId,
               company:
                 (typeof entry?.company === "string" && entry.company.trim()) ||
                 selectedVendorName,
-              invoiceName:
-                (typeof entry?.invoice_name === "string" &&
-                  entry.invoice_name.trim()) ||
-                `Invoice ${invoiceId ?? ""}`.trim() ||
-                "Invoice",
+              invoiceName,
+              invoiceNameDisplay: formatInvoiceDisplayName(invoiceName),
               s3Key:
                 typeof entry?.s3_key === "string" && entry.s3_key.trim().length
                   ? entry.s3_key.trim()
@@ -2180,7 +2190,7 @@ export default function DistrictDashboard({
                                 key={`${document.invoiceId ?? document.invoiceName ?? "invoice"}-${document.s3Key ?? index}`}
                               >
                                 <td className="whitespace-nowrap px-4 py-3 font-medium text-slate-900 first:pl-0 last:pr-0">
-                                  {document.invoiceName}
+                                  {document.invoiceNameDisplay ?? document.invoiceName}
                                 </td>
                                 <td className="whitespace-nowrap px-4 py-3 text-right font-medium text-slate-900 first:pl-0 last:pr-0">
                                   {document.amountDisplay}
