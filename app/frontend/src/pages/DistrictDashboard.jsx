@@ -1213,6 +1213,42 @@ export default function DistrictDashboard({
       districtProfile?.mailing_address?.postal_code,
     ],
   );
+  const computedActiveInvoiceDetails = useMemo(() => {
+    if (!selectedVendor || !selectedInvoiceKey) {
+      return null;
+    }
+
+    const invoiceRecord =
+      selectedVendor.invoices[selectedInvoiceKey.year]?.find(
+        (invoice) => invoice.month === selectedInvoiceKey.month,
+      ) ?? null;
+
+    if (!invoiceRecord) {
+      return null;
+    }
+
+    const aggregatedStudents = aggregateStudentEntries(
+      invoiceRecord.students ?? [],
+    );
+
+    return {
+      ...invoiceRecord,
+      year: selectedInvoiceKey.year,
+      students: aggregatedStudents,
+    };
+  }, [selectedInvoiceKey, selectedVendor]);
+
+  const selectedMonthNumber = useMemo(() => {
+    if (!activeInvoiceDetails) {
+      return null;
+    }
+
+    return resolveMonthNumber(
+      activeInvoiceDetails.month,
+      activeInvoiceDetails.monthIndex,
+    );
+  }, [activeInvoiceDetails]);
+
   useEffect(() => {
     if (!isAuthenticated) {
       setVendorProfiles([]);
@@ -1439,31 +1475,6 @@ export default function DistrictDashboard({
     selectedVendorName,
   ]);
 
-  const computedActiveInvoiceDetails = useMemo(() => {
-    if (!selectedVendor || !selectedInvoiceKey) {
-      return null;
-    }
-
-    const invoiceRecord =
-      selectedVendor.invoices[selectedInvoiceKey.year]?.find(
-        (invoice) => invoice.month === selectedInvoiceKey.month
-      ) ?? null;
-
-    if (!invoiceRecord) {
-      return null;
-    }
-
-    const aggregatedStudents = aggregateStudentEntries(
-      invoiceRecord.students ?? [],
-    );
-
-    return {
-      ...invoiceRecord,
-      year: selectedInvoiceKey.year,
-      students: aggregatedStudents,
-    };
-  }, [selectedInvoiceKey, selectedVendor]);
-
   useEffect(() => {
     setActiveInvoiceDetails(computedActiveInvoiceDetails);
   }, [computedActiveInvoiceDetails]);
@@ -1471,16 +1482,6 @@ export default function DistrictDashboard({
   const studentInvoiceCount = activeInvoiceDetails?.students?.length ?? 0;
   const invoiceDocumentCount = invoiceDocuments.length;
   const zipInvoiceCount = invoiceDocumentCount || studentInvoiceCount;
-  const selectedMonthNumber = useMemo(() => {
-    if (!activeInvoiceDetails) {
-      return null;
-    }
-
-    return resolveMonthNumber(
-      activeInvoiceDetails.month,
-      activeInvoiceDetails.monthIndex,
-    );
-  }, [activeInvoiceDetails]);
 
   const openInvoiceUrl = useCallback((url, errorMessage) => {
     if (!url) {
