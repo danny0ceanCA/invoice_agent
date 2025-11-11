@@ -91,3 +91,49 @@ export async function fetchVendorInvoiceArchive(vendorId, month, accessToken) {
 
   return response.json();
 }
+
+export async function fetchVendorInvoicesForMonth(
+  vendorId,
+  year,
+  month,
+  accessToken,
+) {
+  if (vendorId == null || Number.isNaN(Number(vendorId))) {
+    throw new Error("Missing vendor identifier");
+  }
+
+  if (year == null || Number.isNaN(Number(year))) {
+    throw new Error("Missing invoice year");
+  }
+
+  if (month == null || Number.isNaN(Number(month))) {
+    throw new Error("Missing invoice month");
+  }
+
+  if (!accessToken) {
+    throw new Error("Missing access token");
+  }
+
+  const normalizedMonth = String(month).padStart(2, "0");
+  const response = await fetch(
+    `${API_BASE}/invoices/${encodeURIComponent(
+      vendorId,
+    )}/${encodeURIComponent(year)}/${encodeURIComponent(normalizedMonth)}`,
+    {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  );
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(
+      message ||
+        `Failed to fetch invoices for ${vendorId} (${year}-${normalizedMonth})`,
+    );
+  }
+
+  return response.json();
+}

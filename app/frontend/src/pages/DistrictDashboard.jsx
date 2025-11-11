@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth0 } from "@auth0/auth0-react";
 import toast from "react-hot-toast";
 import { CheckCircle2, Plus } from "lucide-react";
@@ -12,7 +12,11 @@ import {
   activateDistrictMembership,
 } from "../api/districts";
 import { formatPostalAddress } from "../api/common";
-import { fetchInvoicePresignedUrl, fetchVendorInvoiceArchive } from "../api/invoices";
+import {
+  fetchInvoicePresignedUrl,
+  fetchVendorInvoiceArchive,
+  fetchVendorInvoicesForMonth,
+} from "../api/invoices";
 
 const menuItems = [
   {
@@ -63,6 +67,14 @@ const MONTH_INDEX = MONTH_ORDER.reduce((acc, month, index) => {
   return acc;
 }, {});
 
+const MONTH_NAME_LOOKUP = Object.entries(MONTH_INDEX).reduce(
+  (acc, [name, index]) => {
+    acc[name.toLowerCase()] = index;
+    return acc;
+  },
+  {},
+);
+
 const currencyFormatter = new Intl.NumberFormat("en-US", {
   style: "currency",
   currency: "USD",
@@ -85,6 +97,69 @@ const parseCurrencyValue = (value) => {
 
   const numeric = Number(value.replace(/[^0-9.-]+/g, ""));
   return Number.isFinite(numeric) ? numeric : 0;
+};
+
+const resolveMonthNumber = (monthName, monthIndex) => {
+  if (typeof monthIndex === "number" && monthIndex >= 0) {
+    return monthIndex + 1;
+  }
+
+  if (typeof monthName === "number" && monthName >= 1 && monthName <= 12) {
+    return monthName;
+  }
+
+  if (typeof monthName !== "string") {
+    return null;
+  }
+
+  const trimmed = monthName.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const numeric = Number.parseInt(trimmed, 10);
+  if (Number.isFinite(numeric) && numeric >= 1 && numeric <= 12) {
+    return numeric;
+  }
+
+  const lookup = MONTH_NAME_LOOKUP[trimmed.toLowerCase()];
+  if (typeof lookup === "number") {
+    return lookup + 1;
+  }
+
+  return null;
+};
+
+const formatDisplayDateTime = (value) => {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+
+  return parsed.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+};
+
+const sanitizeFilenameSegment = (value) => {
+  if (!value) {
+    return "file";
+  }
+
+  return value
+    .toString()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80) || "file";
 };
 
 const aggregateStudentEntries = (entries) => {
@@ -320,6 +395,24 @@ const getHealthBadgeClasses = (health) => {
   }
   if (normalized.includes("procurement")) {
     return "bg-sky-100 text-sky-700";
+  }
+  return "bg-slate-100 text-slate-600";
+};
+
+const getInvoiceStatusBadgeClasses = (status) => {
+  if (!status) {
+    return "bg-slate-100 text-slate-600";
+  }
+
+  const normalized = status.toLowerCase();
+  if (normalized.includes("approved") || normalized.includes("paid")) {
+    return "bg-emerald-100 text-emerald-700";
+  }
+  if (normalized.includes("pending") || normalized.includes("process")) {
+    return "bg-amber-100 text-amber-700";
+  }
+  if (normalized.includes("reject") || normalized.includes("denied")) {
+    return "bg-red-100 text-red-700";
   }
   return "bg-slate-100 text-slate-600";
 };
@@ -703,9 +796,15 @@ export default function DistrictDashboard({
   const [addingMembership, setAddingMembership] = useState(false);
   const [activatingDistrictId, setActivatingDistrictId] = useState(null);
   const [downloadingInvoices, setDownloadingInvoices] = useState(false);
+  const [invoiceDocuments, setInvoiceDocuments] = useState([]);
+  const [invoiceDocumentsLoading, setInvoiceDocumentsLoading] = useState(false);
+  const [invoiceDocumentsError, setInvoiceDocumentsError] = useState(null);
+  const invoiceDocumentsCacheRef = useRef({});
+  const [exportingInvoiceCsv, setExportingInvoiceCsv] = useState(false);
 
   const activeItem = menuItems.find((item) => item.key === activeKey) ?? menuItems[0];
   const selectedVendor = vendorProfiles.find((vendor) => vendor.id === selectedVendorId) ?? null;
+  const selectedVendorName = selectedVendor?.name ?? "";
   const vendorMetrics = useMemo(() => computeVendorMetrics(vendorProfiles), [vendorProfiles]);
 
   useEffect(() => {
@@ -1169,6 +1268,176 @@ export default function DistrictDashboard({
     setSelectedInvoiceKey(null);
   }, [activeKey, selectedVendorId]);
 
+  useEffect(() => {
+    if (!activeInvoiceDetails) {
+      setInvoiceDocuments([]);
+      setInvoiceDocumentsError(null);
+      setInvoiceDocumentsLoading(false);
+      setExportingInvoiceCsv(false);
+    }
+  }, [activeInvoiceDetails]);
+
+  useEffect(() => {
+    let ignore = false;
+
+    if (!selectedVendorId || !activeInvoiceDetails) {
+      return () => {
+        ignore = true;
+      };
+    }
+
+    const vendorNumericId = Number(selectedVendorId);
+    if (!Number.isFinite(vendorNumericId) || vendorNumericId <= 0) {
+      setInvoiceDocuments([]);
+      setInvoiceDocumentsError(
+        "We couldn't determine the vendor for these invoices.",
+      );
+      setInvoiceDocumentsLoading(false);
+      return () => {
+        ignore = true;
+      };
+    }
+
+    if (!selectedMonthNumber || typeof activeInvoiceDetails.year !== "number") {
+      setInvoiceDocuments([]);
+      setInvoiceDocumentsError(
+        "We couldn't determine which month to load invoices for.",
+      );
+      setInvoiceDocumentsLoading(false);
+      return () => {
+        ignore = true;
+      };
+    }
+
+    const cacheKey = `${vendorNumericId}-${activeInvoiceDetails.year}-${String(
+      selectedMonthNumber,
+    ).padStart(2, "0")}`;
+    const cached = invoiceDocumentsCacheRef.current[cacheKey];
+    if (cached) {
+      setInvoiceDocuments(cached.records ?? []);
+      setInvoiceDocumentsError(null);
+      setInvoiceDocumentsLoading(false);
+      return () => {
+        ignore = true;
+      };
+    }
+
+    setInvoiceDocuments([]);
+    setInvoiceDocumentsLoading(true);
+    setInvoiceDocumentsError(null);
+
+    (async () => {
+      try {
+        const accessToken = await getAccessTokenSilently();
+        const response = await fetchVendorInvoicesForMonth(
+          vendorNumericId,
+          activeInvoiceDetails.year,
+          selectedMonthNumber,
+          accessToken,
+        );
+
+        if (ignore) {
+          return;
+        }
+
+        const records = Array.isArray(response) ? response : [];
+        const normalized = records
+          .map((entry) => {
+            const invoiceId = entry?.invoice_id ?? null;
+            const amountValue =
+              typeof entry?.amount === "number"
+                ? entry.amount
+                : parseCurrencyValue(entry?.amount ?? 0);
+            const uploadedAt =
+              typeof entry?.uploaded_at === "string"
+                ? entry.uploaded_at.trim()
+                : null;
+            const uploadedAtTimestamp = uploadedAt
+              ? Date.parse(uploadedAt)
+              : Number.NaN;
+            const statusValue =
+              typeof entry?.status === "string"
+                ? entry.status.trim()
+                : "";
+
+            return {
+              invoiceId,
+              vendorId: entry?.vendor_id ?? vendorNumericId,
+              company:
+                (typeof entry?.company === "string" && entry.company.trim()) ||
+                selectedVendorName,
+              invoiceName:
+                (typeof entry?.invoice_name === "string" &&
+                  entry.invoice_name.trim()) ||
+                `Invoice ${invoiceId ?? ""}`.trim() ||
+                "Invoice",
+              s3Key:
+                typeof entry?.s3_key === "string" && entry.s3_key.trim().length
+                  ? entry.s3_key.trim()
+                  : null,
+              amountValue,
+              amountDisplay: currencyFormatter.format(amountValue ?? 0),
+              status: statusValue,
+              uploadedAt,
+              uploadedAtDisplay: formatDisplayDateTime(uploadedAt),
+              uploadedAtTimestamp,
+            };
+          })
+          .sort((a, b) => {
+            const aTimestamp = Number.isFinite(a.uploadedAtTimestamp)
+              ? a.uploadedAtTimestamp
+              : -Infinity;
+            const bTimestamp = Number.isFinite(b.uploadedAtTimestamp)
+              ? b.uploadedAtTimestamp
+              : -Infinity;
+
+            if (aTimestamp !== bTimestamp) {
+              return bTimestamp - aTimestamp;
+            }
+
+            return (b.invoiceId ?? 0) - (a.invoiceId ?? 0);
+          });
+
+        invoiceDocumentsCacheRef.current[cacheKey] = {
+          records: normalized,
+        };
+
+        setInvoiceDocuments(normalized);
+        setInvoiceDocumentsError(null);
+      } catch (error) {
+        if (ignore) {
+          return;
+        }
+
+        console.error("district_vendor_invoices_fetch_failed", {
+          error,
+          vendorId: vendorNumericId,
+          year: activeInvoiceDetails.year,
+          month: selectedMonthNumber,
+        });
+        setInvoiceDocuments([]);
+        setInvoiceDocumentsError(
+          "We couldn't load the invoices for this month. Try again in a moment.",
+        );
+      } finally {
+        if (!ignore) {
+          setInvoiceDocumentsLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      ignore = true;
+    };
+  }, [
+    activeInvoiceDetails,
+    getAccessTokenSilently,
+    invoiceDocumentsCacheRef,
+    selectedMonthNumber,
+    selectedVendorId,
+    selectedVendorName,
+  ]);
+
   const activeInvoiceDetails = useMemo(() => {
     if (!selectedVendor || !selectedInvoiceKey) {
       return null;
@@ -1195,6 +1464,18 @@ export default function DistrictDashboard({
   }, [selectedInvoiceKey, selectedVendor]);
 
   const studentInvoiceCount = activeInvoiceDetails?.students?.length ?? 0;
+  const invoiceDocumentCount = invoiceDocuments.length;
+  const zipInvoiceCount = invoiceDocumentCount || studentInvoiceCount;
+  const selectedMonthNumber = useMemo(() => {
+    if (!activeInvoiceDetails) {
+      return null;
+    }
+
+    return resolveMonthNumber(
+      activeInvoiceDetails.month,
+      activeInvoiceDetails.monthIndex,
+    );
+  }, [activeInvoiceDetails]);
 
   const openInvoiceUrl = useCallback((url, errorMessage) => {
     if (!url) {
@@ -1273,8 +1554,8 @@ export default function DistrictDashboard({
       return;
     }
 
-    if (!studentInvoiceCount) {
-      toast.error("No student invoices are available for this month.");
+    if (!zipInvoiceCount) {
+      toast.error("No invoices are available for this month.");
       return;
     }
 
@@ -1342,7 +1623,134 @@ export default function DistrictDashboard({
     getAccessTokenSilently,
     openInvoiceUrl,
     selectedVendor?.id,
-    studentInvoiceCount,
+    zipInvoiceCount,
+  ]);
+
+  const handleDownloadInvoiceDocument = useCallback(
+    async (record) => {
+      if (!record) {
+        toast.error("We couldn't find that invoice.");
+        return;
+      }
+
+      const s3Key = record.s3Key ?? null;
+      const invoiceId = record.invoiceId ?? null;
+
+      if (!s3Key) {
+        toast.error("This invoice does not have a file to download yet.");
+        return;
+      }
+
+      try {
+        const presignedUrl = await requestInvoiceUrl(s3Key, invoiceId);
+        openInvoiceUrl(
+          presignedUrl,
+          "We couldn't open this invoice. Please try again.",
+        );
+      } catch (error) {
+        console.error("district_invoice_document_download_failed", {
+          error,
+          invoiceId,
+          s3Key,
+        });
+        toast.error("We couldn't download this invoice. Please try again.");
+      }
+    },
+    [openInvoiceUrl, requestInvoiceUrl],
+  );
+
+  const handleExportInvoicesCsv = useCallback(() => {
+    if (!invoiceDocuments.length) {
+      toast.error("No invoices are available to export for this month.");
+      return;
+    }
+
+    if (!activeInvoiceDetails || !selectedMonthNumber) {
+      toast.error("We couldn't determine the selected month for export.");
+      return;
+    }
+
+    setExportingInvoiceCsv(true);
+
+    try {
+      const header = [
+        "Invoice ID",
+        "Vendor ID",
+        "Vendor",
+        "Invoice Name",
+        "Amount",
+        "Status",
+        "Uploaded At",
+        "S3 Key",
+      ];
+      const rows = invoiceDocuments.map((record) => [
+        record.invoiceId ?? "",
+        record.vendorId ?? "",
+        record.company ?? selectedVendorName,
+        record.invoiceName ?? "",
+        Number.isFinite(record.amountValue)
+          ? Number(record.amountValue).toFixed(2)
+          : "",
+        record.status ?? "",
+        record.uploadedAt ?? "",
+        record.s3Key ?? "",
+      ]);
+
+      const csvContent = [header, ...rows]
+        .map((row) =>
+          row
+            .map((value) => {
+              const text =
+                value === null || value === undefined ? "" : String(value);
+              if (/[",\n]/.test(text)) {
+                return `"${text.replace(/"/g, '""')}"`;
+              }
+              return text;
+            })
+            .join(","),
+        )
+        .join("\r\n");
+
+      const blob = new Blob([csvContent], {
+        type: "text/csv;charset=utf-8;",
+      });
+      const vendorSegment = sanitizeFilenameSegment(
+        selectedVendorName || `vendor-${selectedVendorId ?? ""}`,
+      );
+      const filename = `invoices-${vendorSegment}-${activeInvoiceDetails.year}-${String(
+        selectedMonthNumber,
+      ).padStart(2, "0")}.csv`;
+
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = filename;
+      link.style.display = "none";
+      document.body.appendChild(link);
+      link.click();
+
+      setTimeout(() => {
+        URL.revokeObjectURL(link.href);
+        document.body.removeChild(link);
+      }, 0);
+
+      toast.success("Invoice CSV exported.");
+    } catch (error) {
+      console.error("district_invoice_csv_export_failed", {
+        error,
+        vendorId: selectedVendorId,
+        year: activeInvoiceDetails?.year,
+        month: selectedMonthNumber,
+      });
+      toast.error("We couldn't export the invoices. Please try again.");
+    } finally {
+      setExportingInvoiceCsv(false);
+    }
+  }, [
+    activeInvoiceDetails,
+    invoiceDocuments,
+    selectedMonthNumber,
+    selectedVendorId,
+    selectedVendorName,
   ]);
   const vendorOverviewHighlights = useMemo(() => {
     if (!selectedVendor) {
@@ -1688,9 +2096,9 @@ export default function DistrictDashboard({
                         <button
                           type="button"
                           onClick={handleDownloadAllInvoicesZip}
-                          disabled={downloadingInvoices || !studentInvoiceCount}
+                          disabled={downloadingInvoices || !zipInvoiceCount}
                           className={`inline-flex items-center rounded-full px-4 py-2 text-sm font-semibold shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60 ${
-                            downloadingInvoices || !studentInvoiceCount
+                            downloadingInvoices || !zipInvoiceCount
                               ? "cursor-not-allowed bg-amber-200 text-amber-800"
                               : "bg-amber-500 text-white hover:bg-amber-600"
                           }`}
@@ -1700,12 +2108,12 @@ export default function DistrictDashboard({
                             : "Download ZIP + CSV"}
                         </button>
                         <span className="text-xs text-slate-500">
-                          {studentInvoiceCount
-                            ? `${studentInvoiceCount} invoice${studentInvoiceCount === 1 ? "" : "s"} included`
-                            : "No student invoices available"}
+                          {zipInvoiceCount
+                            ? `${zipInvoiceCount} invoice${zipInvoiceCount === 1 ? "" : "s"} included`
+                            : "No invoices available"}
                         </span>
                       </div>
-                      {studentInvoiceCount ? (
+                      {zipInvoiceCount ? (
                         <p className="mt-2 text-xs text-slate-500">
                           The archive opens in a new tab and includes every PDF plus a CSV summary of filenames, S3 keys, dates, and sizes.
                         </p>
@@ -1714,9 +2122,113 @@ export default function DistrictDashboard({
                           When invoices are uploaded, you'll be able to download them here as a single archive.
                         </p>
                       )}
-                    </div>
                   </div>
-                ) : null}
+                  <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">
+                          Monthly invoice files
+                        </p>
+                        <h5 className="mt-2 text-lg font-semibold text-slate-900">
+                          Invoices uploaded for {activeInvoiceDetails.month} {activeInvoiceDetails.year}
+                        </h5>
+                        <p className="mt-1 text-sm text-slate-600">
+                          Review the invoices submitted by {selectedVendorName || "this vendor"} and download individual files as needed.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleExportInvoicesCsv}
+                        disabled={exportingInvoiceCsv || !invoiceDocuments.length}
+                        className={`inline-flex items-center rounded-full px-4 py-2 text-sm font-semibold shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60 ${
+                          exportingInvoiceCsv || !invoiceDocuments.length
+                            ? "cursor-not-allowed bg-slate-200 text-slate-500"
+                            : "bg-amber-500 text-white hover:bg-amber-600"
+                        }`}
+                      >
+                        {exportingInvoiceCsv ? "Exporting…" : "Export CSV"}
+                      </button>
+                    </div>
+                    {invoiceDocumentsError ? (
+                      <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                        {invoiceDocumentsError}
+                      </div>
+                    ) : null}
+                    {invoiceDocumentsLoading ? (
+                      <p className="mt-4 text-sm text-slate-600">Loading invoices…</p>
+                    ) : null}
+                    {!invoiceDocumentsLoading && !invoiceDocumentsError && !invoiceDocuments.length ? (
+                      <p className="mt-4 text-sm text-slate-500">
+                        No invoices were uploaded for this month yet.
+                      </p>
+                    ) : null}
+                    {invoiceDocuments.length ? (
+                      <div className="mt-4 overflow-x-auto">
+                        <table className="min-w-full divide-y divide-slate-200 text-sm">
+                          <thead>
+                            <tr>
+                              <th className="py-2 pr-4 text-left text-xs font-semibold uppercase tracking-widest text-slate-500">
+                                Invoice
+                              </th>
+                              <th className="py-2 pr-4 text-right text-xs font-semibold uppercase tracking-widest text-slate-500">
+                                Amount
+                              </th>
+                              <th className="py-2 pr-4 text-left text-xs font-semibold uppercase tracking-widest text-slate-500">
+                                Status
+                              </th>
+                              <th className="py-2 pr-4 text-left text-xs font-semibold uppercase tracking-widest text-slate-500">
+                                Uploaded
+                              </th>
+                              <th className="py-2 text-right text-xs font-semibold uppercase tracking-widest text-slate-500">
+                                Actions
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-200">
+                            {invoiceDocuments.map((document, index) => (
+                              <tr
+                                key={`${document.invoiceId ?? document.invoiceName ?? "invoice"}-${document.s3Key ?? index}`}
+                              >
+                                <td className="whitespace-nowrap py-3 pr-4 font-medium text-slate-900">
+                                  {document.invoiceName}
+                                </td>
+                                <td className="whitespace-nowrap py-3 pr-4 text-right font-medium text-slate-900">
+                                  {document.amountDisplay}
+                                </td>
+                                <td className="whitespace-nowrap py-3 pr-4">
+                                  {document.status ? (
+                                    <span
+                                      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${getInvoiceStatusBadgeClasses(
+                                        document.status,
+                                      )}`}
+                                    >
+                                      {document.status}
+                                    </span>
+                                  ) : (
+                                    <span className="text-xs text-slate-500">Pending</span>
+                                  )}
+                                </td>
+                                <td className="whitespace-nowrap py-3 pr-4 text-slate-600">
+                                  {document.uploadedAtDisplay ?? "—"}
+                                </td>
+                                <td className="whitespace-nowrap py-3 text-right">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDownloadInvoiceDocument(document)}
+                                    className="inline-flex items-center rounded-full border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-400 hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
+                                  >
+                                    Download
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
               </div>
             ) : (
               <div className="space-y-6">
