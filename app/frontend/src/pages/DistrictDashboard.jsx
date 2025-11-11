@@ -154,7 +154,19 @@ const formatInvoiceDisplayName = (value) => {
     return value;
   }
 
-  return value.replace(/(20\d{2})_.+$/, "$1.pdf");
+  const cleanName = value
+    .replace(/^Invoice_/, "")
+    .replace(/_[0-9a-f]{32}\.pdf$/i, "")
+    .replace(/\.pdf$/i, "");
+
+  const parts = cleanName.split("_");
+  if (parts.length > 2 && parts[0].length > 1) {
+    const [firstName, lastName, ...rest] = parts;
+    const compressedName = lastName ? `${firstName[0]}${lastName}` : firstName[0];
+    return [compressedName, ...rest].join("_");
+  }
+
+  return parts.join("_");
 };
 
 const sanitizeFilenameSegment = (value) => {
@@ -403,24 +415,6 @@ const getHealthBadgeClasses = (health) => {
   }
   if (normalized.includes("procurement")) {
     return "bg-sky-100 text-sky-700";
-  }
-  return "bg-slate-100 text-slate-600";
-};
-
-const getInvoiceStatusBadgeClasses = (status) => {
-  if (!status) {
-    return "bg-slate-100 text-slate-600";
-  }
-
-  const normalized = status.toLowerCase();
-  if (normalized.includes("approved") || normalized.includes("paid")) {
-    return "bg-emerald-100 text-emerald-700";
-  }
-  if (normalized.includes("pending") || normalized.includes("process")) {
-    return "bg-amber-100 text-amber-700";
-  }
-  if (normalized.includes("reject") || normalized.includes("denied")) {
-    return "bg-red-100 text-red-700";
   }
   return "bg-slate-100 text-slate-600";
 };
@@ -2177,9 +2171,6 @@ export default function DistrictDashboard({
                                 Amount
                               </th>
                               <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-widest text-slate-500 first:pl-0 last:pr-0">
-                                Status
-                              </th>
-                              <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-widest text-slate-500 first:pl-0 last:pr-0">
                                 Uploaded
                               </th>
                             </tr>
@@ -2194,19 +2185,6 @@ export default function DistrictDashboard({
                                 </td>
                                 <td className="whitespace-nowrap px-4 py-3 text-right font-medium text-slate-900 first:pl-0 last:pr-0">
                                   {document.amountDisplay}
-                                </td>
-                                <td className="whitespace-nowrap px-4 py-3 first:pl-0 last:pr-0">
-                                  {document.status ? (
-                                    <span
-                                      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${getInvoiceStatusBadgeClasses(
-                                        document.status,
-                                      )}`}
-                                    >
-                                      {document.status}
-                                    </span>
-                                  ) : (
-                                    <span className="text-xs text-slate-500">Pending</span>
-                                  )}
                                 </td>
                                 <td className="whitespace-nowrap px-4 py-3 text-slate-600 first:pl-0 last:pr-0">
                                   {document.uploadedAtDisplay ?? "—"}

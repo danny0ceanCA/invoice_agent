@@ -176,6 +176,23 @@ def _format_uploaded_at(value: datetime | None) -> str | None:
     return value.isoformat().replace("+00:00", "Z")
 
 
+def _format_invoice_name_for_export(key: str) -> str:
+    if not key:
+        return ""
+
+    base_name = Path(key).stem
+    clean_name = re.sub(r"_[0-9a-f]{32}$", "", base_name, flags=re.IGNORECASE)
+    clean_name = re.sub(r"^Invoice_", "", clean_name)
+    parts = clean_name.split("_")
+    if len(parts) > 2 and len(parts[0]) > 1:
+        first_name, last_name, *rest = parts
+        compressed = f"{first_name[0]}{last_name}" if last_name else first_name[0]
+        if rest:
+            return "_".join([compressed, *rest])
+        return compressed
+    return "_".join(parts)
+
+
 # --------------------------------------------------------------------------
 # POST /invoices/generate
 # --------------------------------------------------------------------------
@@ -573,10 +590,12 @@ async def download_invoices_zip(
                 if not uploaded_at:
                     uploaded_at = _format_uploaded_at(entry.get("LastModified"))
 
+                display_name = _format_invoice_name_for_export(Path(key).name)
+
                 summary_rows.append(
                     (
                         vendor_display_name,
-                        Path(key).name,
+                        display_name,
                         amount_display,
                         uploaded_at or "",
                     )
