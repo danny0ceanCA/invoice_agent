@@ -128,6 +128,13 @@ class InvoiceAgent:
                 invoice_count=len(invoice_audit_log),
             )
 
+        keys = [entry["s3_key"] for entry in invoice_audit_log if entry.get("s3_key")]
+        if len(keys) != len(set(keys)):
+            self.logger.warning(
+                "duplicate_invoice_keys_detected",
+                duplicate_count=len(keys) - len(set(keys)),
+            )
+
         zip_key = self._bundle_invoices(pdf_artifacts)
         status = "completed" if invoices else "skipped"
         message = self._compose_job_message(len(invoices), duplicates)
