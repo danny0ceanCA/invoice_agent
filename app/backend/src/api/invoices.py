@@ -33,9 +33,9 @@ from app.backend.src.core.security import (
 )
 from app.backend.src.models import Invoice, Job, User, Vendor
 from app.backend.src.services.s3 import (
+    build_invoice_storage_components,
     generate_presigned_url,
     get_s3_client,
-    sanitize_company_name,
     sanitize_object_key,
 )
 from app.backend.src.core.config import get_settings
@@ -307,13 +307,22 @@ async def download_invoices_zip(
         bucket_name = "invoice-agent-files"
 
     vendor_company = _resolve_vendor_company_name(session, vendor_id)
-    company_segment = sanitize_company_name(vendor_company)
-    year_segment, month_segment = _resolve_year_month(normalized_month)
+    year_token, month_token = _resolve_year_month(normalized_month)
 
-    prefix = f"invoices/{company_segment}/{year_segment}/{month_segment}/"
+    try:
+        reference_date = datetime(int(year_token), int(month_token), 1)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid month value") from None
+
+    (
+        prefix,
+        company_segment,
+        year_segment,
+        month_segment,
+    ) = build_invoice_storage_components(vendor_company, reference_date)
+
     zip_filename = f"{company_segment}_{year_segment}_{month_segment}_invoices.zip"
     zip_key = f"{prefix}{zip_filename}"
-    safe_download_name = zip_filename
 
     legacy_prefix = f"invoices/{vendor_id}/{normalized_month}/"
     legacy_zip_filename = f"{vendor_id}_{normalized_month}_invoices.zip"
