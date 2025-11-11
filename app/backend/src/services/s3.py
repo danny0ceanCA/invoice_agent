@@ -6,6 +6,7 @@ import mimetypes
 import re
 import shutil
 import urllib.parse
+from calendar import month_abbr, month_name
 from datetime import date, datetime
 from functools import lru_cache
 from io import BytesIO
@@ -121,12 +122,63 @@ def _normalize_reference_date(
         return datetime(reference_date.year, reference_date.month, reference_date.day)
     if isinstance(reference_date, str) and reference_date.strip():
         candidate = reference_date.strip()
-        for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%m/%d/%Y", "%Y-%m"):
+        parse_formats = (
+            "%Y-%m-%d",
+            "%Y/%m/%d",
+            "%m/%d/%Y",
+            "%Y-%m",
+            "%Y/%m",
+            "%m-%Y",
+            "%m/%Y",
+            "%B %Y",
+            "%b %Y",
+        )
+        for fmt in parse_formats:
             try:
                 parsed = datetime.strptime(candidate, fmt)
                 return parsed
             except ValueError:
                 continue
+
+        # Handle compact numeric forms like YYYYMM or YYYYMMDD
+        compact_match = re.fullmatch(r"(\d{4})(\d{2})(\d{2})?", candidate)
+        if compact_match:
+            year_value = int(compact_match.group(1))
+            month_value = int(compact_match.group(2))
+            day_value = int(compact_match.group(3) or "01")
+            try:
+                return datetime(year_value, month_value, day_value)
+            except ValueError:
+                pass
+
+        # Attempt to extract month names combined with a year token
+        month_lookup = {
+            name.lower(): index
+            for index, name in enumerate(month_name)
+            if name
+        }
+        month_lookup.update(
+            {
+                name.lower(): index
+                for index, name in enumerate(month_abbr)
+                if name
+            }
+        )
+
+        year_match = re.search(r"(20\d{2}|19\d{2})", candidate)
+        if year_match:
+            year_value = int(year_match.group(0))
+            tokens = re.split(r"[^A-Za-z]+", candidate)
+            for token in tokens:
+                if not token:
+                    continue
+                lookup = month_lookup.get(token.lower())
+                if lookup:
+                    try:
+                        return datetime(year_value, lookup, 1)
+                    except ValueError:
+                        break
+
         try:
             return datetime.fromisoformat(candidate)
         except ValueError:
