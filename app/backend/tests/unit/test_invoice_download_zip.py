@@ -65,6 +65,8 @@ if not hasattr(importlib.metadata, "_invoice_agent_email_validator_patch"):
 
 from app.backend.src.main import app
 from app.backend.src.core.security import require_district_user
+from app.backend.src.db import Base, get_engine, session_scope
+from app.backend.src.models.vendor import Vendor
 
 
 @pytest.fixture(autouse=True)
@@ -74,6 +76,26 @@ def override_district_user():
     )
     yield
     app.dependency_overrides.pop(require_district_user, None)
+
+
+@pytest.fixture(autouse=True)
+def ensure_vendor_record():
+    Base.metadata.create_all(bind=get_engine())
+    with session_scope() as session:
+        vendor = session.get(Vendor, 42)
+        if vendor is None:
+            vendor = Vendor(
+                id=42,
+                company_name="Always Home Nursing",
+                contact_email="contact@alwayshome.com",
+            )
+            session.add(vendor)
+        else:
+            vendor.company_name = "Always Home Nursing"
+            if not vendor.contact_email:
+                vendor.contact_email = "contact@alwayshome.com"
+            session.add(vendor)
+    yield
 
 
 @pytest.fixture
@@ -97,7 +119,16 @@ def test_download_zip_returns_existing_archive(
     assert response.json() == {"download_url": "https://example.com/archive.zip"}
     mock_client.get_paginator.assert_not_called()
     mock_client.upload_fileobj.assert_not_called()
-    mock_client.generate_presigned_url.assert_called_once()
+    mock_client.generate_presigned_url.assert_called_once_with(
+        "get_object",
+        Params={
+            "Bucket": "invoice-agent-files",
+            "Key": "invoices/AlwaysHomeNursing/2024/01/AlwaysHomeNursing_2024_01_invoices.zip",
+            "ResponseContentDisposition": 'attachment; filename="AlwaysHomeNursing_2024_01_invoices.zip"',
+            "ResponseContentType": "application/zip",
+        },
+        ExpiresIn=3600,
+    )
 
 
 @patch("app.backend.src.api.invoices.get_s3_client")
@@ -116,7 +147,7 @@ def test_download_zip_creates_archive(
         {
             "Contents": [
                 {
-                    "Key": "invoices/42/2024-01/student-a.pdf",
+                    "Key": "invoices/AlwaysHomeNursing/2024/01/student-a.pdf",
                     "LastModified": datetime(2024, 1, 5, 10, 15, tzinfo=timezone.utc),
                     "Size": 4096,
                 }
@@ -154,7 +185,7 @@ def test_download_zip_creates_archive(
     assert uploaded["bucket"] == "invoice-agent-files"
     assert (
         uploaded["key"]
-        == "invoices/42/2024-01/42_2024-01_invoices.zip"
+        == "invoices/AlwaysHomeNursing/2024/01/AlwaysHomeNursing_2024_01_invoices.zip"
     )
     assert uploaded["extra_args"] == {"ContentType": "application/zip"}
     assert mock_client.download_fileobj.call_count == 1
@@ -166,7 +197,7 @@ def test_download_zip_creates_archive(
     summary = archive.read("invoice_summary.csv").decode("utf-8")
     assert "Invoice Name,S3 Key,Last Modified,Size (KB)" in summary
     assert "student-a.pdf" in summary
-    assert "invoices/42/2024-01/student-a.pdf" in summary
+    assert "invoices/AlwaysHomeNursing/2024/01/student-a.pdf" in summary
     assert "2024-01-05T10:15:00Z" in summary
     assert "4.00" in summary
 
@@ -177,8 +208,8 @@ def test_download_zip_creates_archive(
         "get_object",
         Params={
             "Bucket": "invoice-agent-files",
-            "Key": "invoices/42/2024-01/42_2024-01_invoices.zip",
-            "ResponseContentDisposition": 'attachment; filename="42_2024-01_invoices.zip"',
+            "Key": "invoices/AlwaysHomeNursing/2024/01/AlwaysHomeNursing_2024_01_invoices.zip",
+            "ResponseContentDisposition": 'attachment; filename="AlwaysHomeNursing_2024_01_invoices.zip"',
             "ResponseContentType": "application/zip",
         },
         ExpiresIn=3600,

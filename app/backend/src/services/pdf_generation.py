@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from io import BytesIO
 import re
 from time import perf_counter
+from datetime import date, datetime
 from uuid import uuid4
 
 import pandas as pd
@@ -67,6 +68,9 @@ def generate_invoice_pdf(
     service_month: str,
     invoice_code: str | None = None,
     invoice_number: str | None = None,
+    *,
+    company_name: str | None = None,
+    reference_date: datetime | date | str | None = None,
 ) -> InvoicePdf:
     """Render a student-level invoice PDF and upload it to S3."""
 
@@ -275,6 +279,8 @@ def generate_invoice_pdf(
         pdf_bytes,
         filename=filename,
         content_type="application/pdf",
+        company_name=company_name,
+        reference_date=reference_date or invoice_date,
     )
     return InvoicePdf(key=key, filename=filename, content=pdf_bytes)
 

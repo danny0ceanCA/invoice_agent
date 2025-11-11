@@ -6,6 +6,7 @@ import mimetypes
 import re
 import shutil
 import urllib.parse
+from datetime import date, datetime
 from functools import lru_cache
 from io import BytesIO
 from pathlib import Path
@@ -97,13 +98,75 @@ def _client() -> BaseClient:
     return boto3.client("s3", **client_kwargs)
 
 
-def _resolve_object_key(filename: str, key: str | None = None) -> str:
+def sanitize_company_name(company_name: str | None) -> str:
+    """Return a deterministic, ASCII-only company segment for S3 paths."""
+
+    raw_value = (company_name or "").strip()
+    if not raw_value:
+        return "unknown"
+
+    ascii_value = raw_value.encode("ascii", errors="ignore").decode("ascii")
+    sanitized = re.sub(r"[^A-Za-z0-9]+", "", ascii_value)
+    return sanitized or "unknown"
+
+
+def _normalize_reference_date(
+    reference_date: date | datetime | str | None,
+) -> datetime:
+    """Return a timezone-naive datetime used for S3 path hierarchy."""
+
+    if isinstance(reference_date, datetime):
+        return reference_date
+    if isinstance(reference_date, date):
+        return datetime(reference_date.year, reference_date.month, reference_date.day)
+    if isinstance(reference_date, str) and reference_date.strip():
+        candidate = reference_date.strip()
+        for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%m/%d/%Y", "%Y-%m"):
+            try:
+                parsed = datetime.strptime(candidate, fmt)
+                return parsed
+            except ValueError:
+                continue
+        try:
+            return datetime.fromisoformat(candidate)
+        except ValueError:
+            pass
+    return datetime.utcnow()
+
+
+def _resolve_object_key(
+    filename: str,
+    *,
+    key: str | None = None,
+    company_name: str | None = None,
+    reference_date: date | datetime | str | None = None,
+) -> str:
     """Return a deterministic, S3-safe object key for the provided filename."""
+
     if key:
         return key
 
     safe_name = re.sub(r"[\\/]+", "_", filename).strip()
     safe_name = re.sub(r"_+", "_", safe_name)
+
+    if company_name:
+        normalized_company = sanitize_company_name(company_name)
+        normalized_date = _normalize_reference_date(reference_date)
+        year_segment = f"{normalized_date.year:04d}"
+        month_segment = f"{normalized_date.month:02d}"
+        hierarchical_key = (
+            f"invoices/{normalized_company}/{year_segment}/{month_segment}/{safe_name}"
+        )
+        LOGGER.info(
+            "s3_upload_path_updated",
+            event="s3_upload_path_updated",
+            company=normalized_company,
+            year=year_segment,
+            month=month_segment,
+            s3_key=hierarchical_key,
+        )
+        return hierarchical_key
+
     return f"invoices/{uuid4()}/{safe_name}"
 
 
@@ -121,12 +184,19 @@ def upload_file(
     *,
     key: str | None = None,
     content_type: str | None = None,
+    company_name: str | None = None,
+    reference_date: date | datetime | str | None = None,
 ) -> str:
     """Upload a file to S3 or local storage and return the object key."""
     settings = get_settings()
     safe_filename = re.sub(r"[\\/]+", "_", file_path.name).strip()
     safe_filename = re.sub(r"_+", "_", safe_filename)
-    object_key = _resolve_object_key(filename=safe_filename, key=key)
+    object_key = _resolve_object_key(
+        filename=safe_filename,
+        key=key,
+        company_name=company_name,
+        reference_date=reference_date,
+    )
     resolved_content_type = _determine_content_type(safe_filename, content_type)
 
     if _is_local_mode():
@@ -157,12 +227,19 @@ def upload_bytes(
     filename: str,
     key: str | None = None,
     content_type: str | None = None,
+    company_name: str | None = None,
+    reference_date: date | datetime | str | None = None,
 ) -> str:
     """Upload in-memory data to storage and return the object key."""
     settings = get_settings()
     safe_filename = re.sub(r"[\\/]+", "_", filename).strip()
     safe_filename = re.sub(r"_+", "_", safe_filename)
-    object_key = _resolve_object_key(filename=safe_filename, key=key)
+    object_key = _resolve_object_key(
+        filename=safe_filename,
+        key=key,
+        company_name=company_name,
+        reference_date=reference_date,
+    )
     resolved_content_type = _determine_content_type(safe_filename, content_type)
 
     if _is_local_mode():
@@ -252,4 +329,5 @@ __all__ = [
     "generate_presigned_url",
     "sanitize_object_key",
     "get_s3_client",
+    "sanitize_company_name",
 ]
