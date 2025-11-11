@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth0 } from "@auth0/auth0-react";
 import toast from "react-hot-toast";
+import JSZip from "jszip";
 import { CheckCircle2, Plus } from "lucide-react";
 
 import {
@@ -13,7 +14,7 @@ import {
 } from "../api/districts";
 import { formatPostalAddress } from "../api/common";
 import { fetchInvoicePresignedUrl } from "../api/invoices";
-import { buildSafeFilename, downloadFileFromPresignedUrl } from "../utils/downloadFile";
+import { buildSafeFilename } from "../utils/downloadFile";
 
 const menuItems = [
   {
@@ -96,9 +97,33 @@ const aggregateStudentEntries = (entries) => {
   const groups = new Map();
 
   entries.forEach((entry, index) => {
+    const normalizedStudentKey =
+      typeof entry.studentKey === "string" && entry.studentKey.trim().length
+        ? entry.studentKey.trim()
+        : null;
+    const normalizedId =
+      typeof entry.studentId === "string" && entry.studentId.trim().length
+        ? entry.studentId.trim()
+        : null;
+    const fallbackOriginalStudentId =
+      typeof entry.originalStudentId === "string" && entry.originalStudentId.trim().length
+        ? entry.originalStudentId.trim()
+        : null;
+    const fallbackEntryId =
+      typeof entry.id === "string" && entry.id.trim().length
+        ? entry.id.trim()
+        : null;
+    const fallbackLineItemId =
+      typeof entry.originalLineItemId === "string" && entry.originalLineItemId.trim().length
+        ? entry.originalLineItemId.trim()
+        : entry.originalLineItemId ?? null;
+
     const key =
-      entry.id ??
-      entry.originalLineItemId ??
+      normalizedId ??
+      fallbackOriginalStudentId ??
+      fallbackEntryId ??
+      fallbackLineItemId ??
+      normalizedStudentKey ??
       `${entry.name || "unknown"}-${index}`;
 
     const amountValue =
@@ -113,18 +138,23 @@ const aggregateStudentEntries = (entries) => {
 
     if (!groups.has(key)) {
       groups.set(key, {
-        id: key,
+        id: normalizedId ?? fallbackEntryId ?? key,
+        studentKey: normalizedStudentKey,
         name: displayName,
         amountValue: 0,
         services: new Map(),
         pdfUrls: new Set(),
         pdfKeys: new Set(),
         timesheetUrls: new Set(),
+        originalLineItemIds: new Set(),
         entryCount: 0,
       });
     }
 
     const group = groups.get(key);
+    if (!group.name && displayName) {
+      group.name = displayName;
+    }
     group.amountValue += amountValue;
     group.entryCount += 1;
 
@@ -139,6 +169,9 @@ const aggregateStudentEntries = (entries) => {
     if (entry.pdfUrl) group.pdfUrls.add(entry.pdfUrl);
     if (entry.pdfS3Key) group.pdfKeys.add(entry.pdfS3Key);
     if (entry.timesheetUrl) group.timesheetUrls.add(entry.timesheetUrl);
+    if (entry.originalLineItemId != null) {
+      group.originalLineItemIds.add(entry.originalLineItemId);
+    }
   });
 
   return Array.from(groups.values())
@@ -151,8 +184,14 @@ const aggregateStudentEntries = (entries) => {
         })
       );
 
+      const pdfUrls = Array.from(group.pdfUrls);
+      const pdfKeys = Array.from(group.pdfKeys);
+      const timesheetUrls = Array.from(group.timesheetUrls);
+      const originalLineItemIds = Array.from(group.originalLineItemIds);
+
       return {
         id: group.id,
+        studentKey: group.studentKey ?? null,
         name: group.name,
         amountValue: group.amountValue,
         amount: currencyFormatter.format(group.amountValue ?? 0),
@@ -164,9 +203,10 @@ const aggregateStudentEntries = (entries) => {
             : services.length > 1
             ? `${services.length} services`
             : null,
-        pdfUrl: Array.from(group.pdfUrls).pop() ?? null,
-        pdfS3Key: Array.from(group.pdfKeys).pop() ?? null,
-        timesheetUrl: Array.from(group.timesheetUrls).pop() ?? null,
+        pdfUrl: pdfUrls[0] ?? null,
+        pdfS3Key: pdfKeys[0] ?? null,
+        timesheetUrl: timesheetUrls[0] ?? null,
+        originalLineItemId: originalLineItemIds[0] ?? null,
         entryCount: group.entryCount,
       };
     })
@@ -647,7 +687,6 @@ export default function DistrictDashboard({
   const [activeKey, setActiveKey] = useState(menuItems[0].key);
   const [selectedVendorId, setSelectedVendorId] = useState(null);
   const [selectedInvoiceKey, setSelectedInvoiceKey] = useState(null);
-  const [studentFilter, setStudentFilter] = useState("");
   const [vendorProfiles, setVendorProfiles] = useState([]);
   const [vendorsLoading, setVendorsLoading] = useState(false);
   const [vendorsError, setVendorsError] = useState(null);
@@ -665,6 +704,7 @@ export default function DistrictDashboard({
   const [membershipActionError, setMembershipActionError] = useState(null);
   const [addingMembership, setAddingMembership] = useState(false);
   const [activatingDistrictId, setActivatingDistrictId] = useState(null);
+  const [downloadingInvoices, setDownloadingInvoices] = useState(false);
 
   const activeItem = menuItems.find((item) => item.key === activeKey) ?? menuItems[0];
   const selectedVendor = vendorProfiles.find((vendor) => vendor.id === selectedVendorId) ?? null;
@@ -693,7 +733,7 @@ export default function DistrictDashboard({
                   typeof invoice.month_index === "number"
                     ? invoice.month_index
                     : MONTH_INDEX[invoice.month] ?? -1;
-                const students = (invoice.students ?? []).map((student) => {
+                const students = (invoice.students ?? []).map((student, studentIndex) => {
                   const trimmedName =
                     typeof student.name === "string" && student.name.trim().length
                       ? student.name.trim()
@@ -701,6 +741,12 @@ export default function DistrictDashboard({
                   const normalizedKey =
                     trimmedName !== "Unknown student"
                       ? trimmedName.toLowerCase()
+                      : null;
+                  const rawStudentId =
+                    typeof student.student_id === "string" && student.student_id.trim().length
+                      ? student.student_id.trim()
+                      : typeof student.student_id === "number"
+                      ? String(student.student_id)
                       : null;
                   const amountValue =
                     typeof student.amount === "number"
@@ -712,8 +758,14 @@ export default function DistrictDashboard({
                       : null;
 
                   return {
-                    id: `student-${student.id}`,
+                    id:
+                      rawStudentId ??
+                      (typeof student.id === "string"
+                        ? student.id
+                        : `student-${student.id ?? studentIndex}`),
                     originalLineItemId: student.id,
+                    studentId: rawStudentId,
+                    originalStudentId: rawStudentId,
                     name: trimmedName,
                     studentKey: normalizedKey,
                     service: serviceLabel,
@@ -734,7 +786,7 @@ export default function DistrictDashboard({
                 pdfUrl: invoice.download_url ?? invoice.pdf_url ?? null,
                 pdfS3Key: invoice.pdf_s3_key ?? null,
                 timesheetCsvUrl: invoice.timesheet_csv_url ?? null,
-                students,
+                students: aggregateStudentEntries(students),
               };
             })
               .sort((a, b) => (b.monthIndex ?? -1) - (a.monthIndex ?? -1));
@@ -1144,97 +1196,7 @@ export default function DistrictDashboard({
     };
   }, [selectedInvoiceKey, selectedVendor]);
 
-  const studentAggregates = useMemo(() => {
-    if (!activeInvoiceDetails) {
-      return null;
-    }
-
-    const students = activeInvoiceDetails.students ?? [];
-    const totalStudents = students.length;
-    const totals = students.reduce(
-      (acc, entry) => {
-        const amountValue =
-          typeof entry.amountValue === "number"
-            ? entry.amountValue
-            : parseCurrencyValue(entry.amount ?? "");
-
-        acc.totalAmount += amountValue;
-
-        (entry.serviceBreakdown ?? []).forEach((serviceEntry) => {
-          if (!serviceEntry?.service) {
-            return;
-          }
-
-          const key = serviceEntry.service.trim();
-          if (!key.length) {
-            return;
-          }
-
-          const current = acc.services.get(key) ?? {
-            count: 0,
-            amount: 0,
-          };
-          current.count += serviceEntry.count ?? 0;
-          current.amount += serviceEntry.amount ?? 0;
-          acc.services.set(key, current);
-        });
-
-        return acc;
-      },
-      { totalAmount: 0, services: new Map() },
-    );
-
-    const serviceHighlights = Array.from(totals.services.entries())
-      .map(([service, data]) => ({
-        service,
-        count: data.count,
-        amount: data.amount,
-      }))
-      .sort((a, b) => {
-        if (b.amount !== a.amount) {
-          return b.amount - a.amount;
-        }
-        return b.count - a.count;
-      });
-
-    return {
-      totalStudents,
-      totalAmount: totals.totalAmount,
-      averagePerStudent: totalStudents ? totals.totalAmount / totalStudents : 0,
-      uniqueServices: serviceHighlights.length,
-      topService: serviceHighlights[0] ?? null,
-    };
-  }, [activeInvoiceDetails]);
-
-  const filteredStudents = useMemo(() => {
-    if (!activeInvoiceDetails?.students?.length) {
-      return [];
-    }
-
-    const query = studentFilter.trim().toLowerCase();
-    if (!query.length) {
-      return activeInvoiceDetails.students;
-    }
-
-    return activeInvoiceDetails.students.filter((entry) => {
-      const values = [
-        entry.name,
-        entry.amount,
-        entry.serviceSummary,
-        ...(entry.services ?? []),
-      ];
-
-      return values.some((value) =>
-        typeof value === "string"
-          ? value.toLowerCase().includes(query)
-          : false,
-      );
-    });
-  }, [activeInvoiceDetails, studentFilter]);
-
-  useEffect(() => {
-    setStudentFilter("");
-  }, [selectedInvoiceKey, selectedVendorId]);
+  const studentInvoiceCount = activeInvoiceDetails?.students?.length ?? 0;
 
   const composeFilename = useCallback((parts, extension, fallbackBase) => {
     const joined = parts
@@ -1315,75 +1277,144 @@ export default function DistrictDashboard({
     requestInvoiceUrl,
   ]);
 
-  const handleStudentInvoiceDownload = useCallback(
-    async (entry) => {
-      const fallbackUrl = entry?.pdfUrl ?? activeInvoiceDetails?.pdfUrl ?? null;
-      const s3Key = entry?.pdfS3Key ?? activeInvoiceDetails?.pdfS3Key ?? null;
-      const invoiceId = activeInvoiceDetails?.id ?? entry?.originalLineItemId ?? null;
+  const handleDownloadAllInvoicesZip = useCallback(async () => {
+    if (!activeInvoiceDetails) {
+      toast.error("Select a month to download invoices.");
+      return;
+    }
 
-      if (s3Key) {
+    const students = activeInvoiceDetails.students ?? [];
+    if (!students.length) {
+      toast.error("No student invoices are available for this month.");
+      return;
+    }
+
+    setDownloadingInvoices(true);
+
+    try {
+      const zip = new JSZip();
+      const usedFilenames = new Set();
+      let bundledCount = 0;
+      const invoiceId = activeInvoiceDetails.id ?? null;
+
+      for (let index = 0; index < students.length; index += 1) {
+        const entry = students[index];
+        const pdfKey = entry?.pdfS3Key ?? activeInvoiceDetails.pdfS3Key ?? null;
+        let downloadUrl = entry?.pdfUrl ?? activeInvoiceDetails.pdfUrl ?? null;
+
+        if (pdfKey) {
+          try {
+            downloadUrl = await requestInvoiceUrl(pdfKey, invoiceId);
+          } catch (error) {
+            console.error("Failed to fetch presigned URL for student invoice", {
+              error,
+              invoiceId,
+              pdfKey,
+              studentId: entry?.id ?? null,
+            });
+            if (!downloadUrl) {
+              continue;
+            }
+          }
+        } else if (!downloadUrl) {
+          continue;
+        }
+
         try {
-          const presignedUrl = await requestInvoiceUrl(s3Key, invoiceId);
-          openInvoiceUrl(
-            presignedUrl,
-            "Invoice file not available for this student.",
+          const response = await fetch(downloadUrl);
+          if (!response.ok) {
+            throw new Error(`Failed to fetch invoice (status ${response.status})`);
+          }
+
+          const fileBuffer = await response.arrayBuffer();
+          const fallbackBase = `invoice-${entry?.id ?? index + 1}`;
+          const desiredName = composeFilename(
+            [
+              entry?.name ?? "Student Invoice",
+              selectedVendor?.name ?? "",
+              activeInvoiceDetails.month ?? "",
+              activeInvoiceDetails.year
+                ? String(activeInvoiceDetails.year)
+                : "",
+            ],
+            "pdf",
+            fallbackBase,
           );
-          return;
+
+          const normalizedExt = desiredName.toLowerCase().endsWith(".pdf")
+            ? ".pdf"
+            : ".pdf";
+          const baseName = desiredName.endsWith(normalizedExt)
+            ? desiredName.slice(0, -normalizedExt.length)
+            : desiredName;
+
+          let candidateName = desiredName;
+          let suffix = 2;
+          while (usedFilenames.has(candidateName)) {
+            candidateName = `${baseName} (${suffix})${normalizedExt}`;
+            suffix += 1;
+          }
+
+          usedFilenames.add(candidateName);
+          zip.file(candidateName, fileBuffer);
+          bundledCount += 1;
         } catch (error) {
-          console.error("Failed to fetch student invoice presigned URL", {
+          console.error("Failed to include student invoice in ZIP bundle", {
             error,
-            invoiceId,
-            s3Key,
+            downloadUrl,
+            studentId: entry?.id ?? null,
+            studentName: entry?.name ?? null,
           });
-          toast.error("Unable to fetch this invoice. Please try again.");
         }
       }
 
-      if (fallbackUrl) {
-        openInvoiceUrl(
-          fallbackUrl,
-          "Invoice file not available for this student.",
-        );
+      if (!bundledCount) {
+        toast.error("We couldn't prepare any invoices to download.");
         return;
       }
 
-      toast.error("Invoice file not available for this student.");
-    },
-    [
-      activeInvoiceDetails?.id,
-      activeInvoiceDetails?.pdfS3Key,
-      activeInvoiceDetails?.pdfUrl,
-      openInvoiceUrl,
-      requestInvoiceUrl,
-    ],
-  );
-
-  const handleStudentTimesheetDownload = useCallback(
-    async (url, studentName) => {
-      if (!url) {
-        toast.error("Timesheet not available for this student.");
-        return;
-      }
-
-      const fallbackFilename = composeFilename(
+      const zipBlob = await zip.generateAsync({ type: "blob" });
+      const zipName = composeFilename(
         [
-          studentName ?? "",
-          activeInvoiceDetails?.month ?? "",
-          activeInvoiceDetails?.year ? String(activeInvoiceDetails.year) : "",
+          selectedVendor?.name ?? "Vendor",
+          activeInvoiceDetails.month ?? "",
+          activeInvoiceDetails.year ? String(activeInvoiceDetails.year) : "",
+          "Student Invoices",
         ],
-        "csv",
-        "timesheet",
+        "zip",
+        "student-invoices",
       );
 
+      const blobUrl = window.URL.createObjectURL(zipBlob);
+
       try {
-        await downloadFileFromPresignedUrl(url, fallbackFilename);
-      } catch (error) {
-        console.error("Failed to download student timesheet", error);
-        toast.error("We couldn't download this timesheet. Please try again.");
+        const link = document.createElement("a");
+        link.href = blobUrl;
+        link.download = zipName;
+        link.rel = "noopener noreferrer";
+        link.style.display = "none";
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      } finally {
+        window.URL.revokeObjectURL(blobUrl);
       }
-    },
-    [activeInvoiceDetails?.month, activeInvoiceDetails?.year, composeFilename],
-  );
+
+      toast.success(
+        `Downloading ${bundledCount} student invoice${bundledCount === 1 ? "" : "s"}.`,
+      );
+    } catch (error) {
+      console.error("Failed to bundle student invoices", error);
+      toast.error("We couldn't bundle these invoices. Please try again.");
+    } finally {
+      setDownloadingInvoices(false);
+    }
+  }, [
+    activeInvoiceDetails,
+    composeFilename,
+    requestInvoiceUrl,
+    selectedVendor?.name,
+  ]);
 
   const vendorOverviewHighlights = useMemo(() => {
     if (!selectedVendor) {
@@ -1713,186 +1744,51 @@ export default function DistrictDashboard({
                   </div>
                 ) : null}
 
-                {activeInvoiceDetails && studentAggregates ? (
-                  <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                {activeInvoiceDetails ? (
+                  <div className="space-y-6">
+                    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                       <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">
-                        Students Served
+                        Student invoices
                       </p>
-                      <p className="mt-2 text-2xl font-semibold text-slate-900">
-                        {studentAggregates.totalStudents}
+                      <h5 className="mt-2 text-lg font-semibold text-slate-900">
+                        Download all invoices for {activeInvoiceDetails.month} {activeInvoiceDetails.year}
+                      </h5>
+                      <p className="mt-1 text-sm text-slate-600">
+                        Get a zipped archive containing every student invoice included in this month's billing.
                       </p>
-                      <p className="mt-1 text-xs text-slate-500">Included on this invoice</p>
-                    </div>
-                    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                      <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">
-                        Student Spend
-                      </p>
-                      <p className="mt-2 text-2xl font-semibold text-slate-900">
-                        {currencyFormatter.format(studentAggregates.totalAmount)}
-                      </p>
-                      <p className="mt-1 text-xs text-slate-500">Aggregated for all students</p>
-                    </div>
-                    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                      <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">
-                        Avg. Per Student
-                      </p>
-                      <p className="mt-2 text-2xl font-semibold text-slate-900">
-                        {currencyFormatter.format(studentAggregates.averagePerStudent)}
-                      </p>
-                      <p className="mt-1 text-xs text-slate-500">Based on invoice totals</p>
-                    </div>
-                    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-                      <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">
-                        Top Service
-                      </p>
-                      {studentAggregates.topService ? (
-                        <div className="mt-2">
-                          <p className="text-base font-semibold text-slate-900">
-                            {studentAggregates.topService.service}
-                          </p>
-                          <p className="mt-1 text-xs text-slate-500">
-                            {studentAggregates.topService.count} students ·{' '}
-                            {currencyFormatter.format(studentAggregates.topService.amount)}
-                          </p>
-                        </div>
+                      <div className="mt-4 flex flex-wrap items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={handleDownloadAllInvoicesZip}
+                          disabled={downloadingInvoices || !studentInvoiceCount}
+                          className={`inline-flex items-center rounded-full px-4 py-2 text-sm font-semibold shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60 ${
+                            downloadingInvoices || !studentInvoiceCount
+                              ? "cursor-not-allowed bg-amber-200 text-amber-800"
+                              : "bg-amber-500 text-white hover:bg-amber-600"
+                          }`}
+                        >
+                          {downloadingInvoices
+                            ? "Preparing download…"
+                            : "Download all invoices (.zip)"}
+                        </button>
+                        <span className="text-xs text-slate-500">
+                          {studentInvoiceCount
+                            ? `${studentInvoiceCount} invoice${studentInvoiceCount === 1 ? "" : "s"} included`
+                            : "No student invoices available"}
+                        </span>
+                      </div>
+                      {studentInvoiceCount ? (
+                        <p className="mt-2 text-xs text-slate-500">
+                          Download to review each student's documentation without browsing an itemized list.
+                        </p>
                       ) : (
-                        <p className="mt-2 text-base font-semibold text-slate-900">No service data</p>
+                        <p className="mt-2 text-xs text-slate-500">
+                          When invoices are uploaded, you'll be able to download them here as a single archive.
+                        </p>
                       )}
                     </div>
                   </div>
                 ) : null}
-
-                <div className="space-y-3">
-                  <h5 className="text-sm font-semibold uppercase tracking-wider text-slate-500">Student services</h5>
-                  {activeInvoiceDetails.students?.length ? (
-                    <div className="rounded-2xl bg-white p-4 shadow-sm">
-                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <div>
-                          <p className="text-xs uppercase tracking-widest text-amber-500">Student services</p>
-                          <h6 className="mt-1 text-base font-semibold text-slate-900">
-                            Detailed view of student-level invoices
-                          </h6>
-                        </div>
-                        <div className="w-full sm:w-auto">
-                          <label htmlFor="student-filter" className="sr-only">
-                            Filter students
-                          </label>
-                          <input
-                            id="student-filter"
-                            type="search"
-                            value={studentFilter}
-                            onChange={(event) => setStudentFilter(event.target.value)}
-                            placeholder="Search by name or service"
-                            autoComplete="off"
-                            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm transition placeholder:text-slate-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-300/60 sm:w-64"
-                          />
-                        </div>
-                      </div>
-                      {filteredStudents.length ? (
-                        <div className="mt-4 max-h-[65vh] overflow-y-auto pr-1">
-                          <ul className="space-y-3">
-                            {filteredStudents.map((entry) => {
-                              const studentInvoiceUrl =
-                                entry.pdfUrl ?? activeInvoiceDetails?.pdfUrl ?? null;
-                              const studentInvoiceKey =
-                                entry.pdfS3Key ?? activeInvoiceDetails?.pdfS3Key ?? null;
-                              const studentInvoiceAvailable = Boolean(
-                                studentInvoiceUrl || studentInvoiceKey,
-                              );
-                              const studentTimesheetUrl = entry.timesheetUrl ?? null;
-                              return (
-                                <li
-                                  key={entry.id}
-                                  className="rounded-xl border border-slate-200 bg-white shadow-sm"
-                                >
-                                  <div
-                                    role={studentInvoiceAvailable ? "button" : undefined}
-                                    tabIndex={studentInvoiceAvailable ? 0 : undefined}
-                                    onClick={() => handleStudentInvoiceDownload(entry)}
-                                    onKeyDown={(event) => {
-                                      if (
-                                        !studentInvoiceAvailable ||
-                                        (event.key !== "Enter" && event.key !== " ")
-                                      ) {
-                                        return;
-                                      }
-
-                                      event.preventDefault();
-                                      handleStudentInvoiceDownload(entry);
-                                    }}
-                                    aria-disabled={!studentInvoiceAvailable}
-                                    className={`flex flex-col gap-3 px-4 py-3 text-sm text-slate-700 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60 sm:flex-row sm:items-center sm:justify-between ${
-                                      studentInvoiceAvailable
-                                        ? "cursor-pointer hover:bg-amber-50"
-                                        : "cursor-default"
-                                    }`}
-                                  >
-                                    <div>
-                                      <p className="text-sm font-semibold text-slate-900">{entry.name}</p>
-                                      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                                        {entry.services?.length ? (
-                                          <span>
-                                            {entry.services.length === 1
-                                              ? `Service: ${entry.services[0]}`
-                                              : `Services (${entry.services.length})`}
-                                          </span>
-                                        ) : null}
-                                        {entry.entryCount > 1 ? (
-                                          <span>{`Combined from ${entry.entryCount} line items`}</span>
-                                        ) : null}
-                                      </div>
-                                    </div>
-                                    <div className="flex flex-wrap items-center gap-2 sm:ml-6 sm:self-center">
-                                      {entry.amount ? (
-                                        <span className="font-semibold text-slate-900">{entry.amount}</span>
-                                      ) : null}
-                                      {studentInvoiceAvailable ? (
-                                        <button
-                                          type="button"
-                                          onClick={(event) => {
-                                            event.stopPropagation();
-                                            handleStudentInvoiceDownload(entry);
-                                          }}
-                                          className="inline-flex items-center rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700 transition hover:bg-amber-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
-                                        >
-                                          Download invoice PDF
-                                        </button>
-                                      ) : (
-                                        <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">
-                                          Invoice not available
-                                        </span>
-                                      )}
-                                      {studentTimesheetUrl ? (
-                                        <button
-                                          type="button"
-                                          onClick={(event) => {
-                                            event.stopPropagation();
-                                            handleStudentTimesheetDownload(
-                                              studentTimesheetUrl,
-                                              studentName,
-                                            );
-                                          }}
-                                          className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700 transition hover:bg-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
-                                        >
-                                          Timesheet CSV
-                                        </button>
-                                      ) : null}
-                                    </div>
-                                  </div>
-                                </li>
-                              );
-                            })}
-                          </ul>
-                        </div>
-                      ) : (
-                        <p className="mt-4 text-sm text-slate-500">No students match your search.</p>
-                      )}
-                    </div>
-                  ) : (
-                    <p className="text-sm text-slate-500">No student services were reported for this month.</p>
-                  )}
-                </div>
               </div>
             ) : (
               <div className="space-y-6">
