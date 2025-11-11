@@ -50,7 +50,11 @@ def _build_filename(student: str, service_month: str) -> str:
     safe_student = _safe_token(student)
     safe_month = _safe_token(service_month)
     unique_suffix = uuid4().hex
-    return f"Invoice_{safe_student}_{safe_month}_{unique_suffix}.pdf"
+
+    raw_filename = f"Invoice_{safe_student}_{safe_month}_{unique_suffix}.pdf"
+    sanitized_filename = _safe_token(raw_filename)
+    logger.debug("Sanitized invoice filename generated: %s", sanitized_filename)
+    return sanitized_filename
 
 
 def generate_invoice_pdf(
