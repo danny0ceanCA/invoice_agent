@@ -752,18 +752,18 @@ export default function DistrictDashboard({
                     timesheetUrl: student.timesheet_url ?? null,
                   };
                 });
-                return {
-                  month: invoice.month,
-                  monthIndex,
-                  total: currencyFormatter.format(invoice.total ?? 0),
-                  totalValue: invoice.total ?? 0,
-                  status: invoice.status ? invoice.status.trim() : "",
-                  processedOn: invoice.processed_on ?? "Processing",
-                  pdfUrl: invoice.pdf_url ?? null,
-                  timesheetCsvUrl: invoice.timesheet_csv_url ?? null,
-                  students,
-                };
-              })
+              return {
+                month: invoice.month,
+                monthIndex,
+                total: currencyFormatter.format(invoice.total ?? 0),
+                totalValue: invoice.total ?? 0,
+                status: invoice.status ? invoice.status.trim() : "",
+                processedOn: invoice.processed_on ?? "Processing",
+                pdfUrl: invoice.download_url ?? invoice.pdf_url ?? null,
+                timesheetCsvUrl: invoice.timesheet_csv_url ?? null,
+                students,
+              };
+            })
               .sort((a, b) => (b.monthIndex ?? -1) - (a.monthIndex ?? -1));
             acc[Number(yearKey)] = sortedInvoices;
             return acc;

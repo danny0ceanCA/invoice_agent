@@ -6,6 +6,7 @@ from collections import defaultdict
 from datetime import datetime
 from typing import Any
 
+import structlog
 from sqlalchemy.orm import Session, selectinload
 
 from app.backend.src.models import District, Invoice, Vendor
@@ -19,6 +20,8 @@ from app.backend.src.schemas.district import (
     DistrictVendorProfile,
 )
 from app.backend.src.services.s3 import generate_presigned_url
+
+LOGGER = structlog.get_logger(__name__)
 
 MONTH_ORDER = [
     "January",
@@ -118,10 +121,22 @@ def fetch_district_vendor_overview(
                 for item in invoice.line_items
             ]
 
+            if not invoice.pdf_s3_key:
+                LOGGER.warning(
+                    "missing_s3_key",
+                    invoice_id=invoice.id,
+                    student=invoice.student_name,
+                    vendor_id=vendor.id,
+                )
+
             status_value = (invoice.status or "").strip()
             processed_on = _format_processed_on(invoice_date)
             group_key = (year, month)
             existing = monthly_groups.get(group_key)
+            download_name = invoice.invoice_number or invoice.student_name or "invoice"
+            download_name = download_name.strip() or "invoice"
+            if not download_name.lower().endswith(".pdf"):
+                download_name = f"{download_name}.pdf"
             if existing is None:
                 monthly_groups[group_key] = {
                     "id": invoice.id,
@@ -134,6 +149,7 @@ def fetch_district_vendor_overview(
                     "status_values": {status_value} if status_value else set(),
                     "students": list(students),
                     "pdf_s3_key": invoice.pdf_s3_key,
+                    "download_name": download_name,
                 }
             else:
                 existing["total"] = float(existing["total"]) + float(
@@ -156,6 +172,7 @@ def fetch_district_vendor_overview(
                     existing["latest_invoice_date"] = invoice_date
                     existing["processed_on"] = processed_on
                     existing["pdf_s3_key"] = invoice.pdf_s3_key
+                    existing["download_name"] = download_name
                 if invoice.id < existing["id"]:
                     existing["id"] = invoice.id
 
@@ -169,6 +186,10 @@ def fetch_district_vendor_overview(
             else:
                 status_label = "Mixed"
 
+            download_url = _build_presigned_url(
+                data.get("pdf_s3_key"), data.get("download_name"), int(data["id"])
+            )
+
             entry = DistrictVendorInvoice(
                 id=int(data["id"]),
                 month=data["month"],
@@ -177,9 +198,8 @@ def fetch_district_vendor_overview(
                 status=status_label,
                 total=float(data["total"]),
                 processed_on=data["processed_on"],
-                pdf_url=generate_presigned_url(data["pdf_s3_key"])
-                if data.get("pdf_s3_key")
-                else None,
+                download_url=download_url,
+                pdf_url=download_url,
                 timesheet_csv_url=None,
                 students=data["students"],
             )
@@ -267,6 +287,32 @@ def _build_vendor_address(vendor: Vendor) -> PostalAddress | None:
         vendor.remit_to_state,
         vendor.remit_to_postal_code,
     )
+
+
+def _build_presigned_url(
+    key: str | None, download_name: str | None, invoice_id: int
+) -> str | None:
+    """Return a presigned URL for an invoice PDF if the key is available."""
+
+    if not key:
+        return None
+
+    safe_name = (download_name or "invoice.pdf").strip() or "invoice.pdf"
+
+    try:
+        return generate_presigned_url(
+            key,
+            download_name=safe_name,
+            response_content_type="application/pdf",
+        )
+    except Exception as exc:  # pragma: no cover - logging best effort
+        LOGGER.warning(
+            "invoice_presign_failed",
+            key=key,
+            invoice_id=invoice_id,
+            error=str(exc),
+        )
+        return None
 
 
 __all__ = ["fetch_district_vendor_overview"]

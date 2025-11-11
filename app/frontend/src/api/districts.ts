@@ -49,6 +49,7 @@ export interface DistrictVendorInvoice {
   status: string;
   total: number;
   processed_on: string | null;
+  download_url: string | null;
   pdf_url: string | null;
   timesheet_csv_url: string | null;
   students: DistrictVendorStudent[];
