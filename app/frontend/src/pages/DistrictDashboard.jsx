@@ -96,9 +96,33 @@ const aggregateStudentEntries = (entries) => {
   const groups = new Map();
 
   entries.forEach((entry, index) => {
+    const normalizedStudentKey =
+      typeof entry.studentKey === "string" && entry.studentKey.trim().length
+        ? entry.studentKey.trim()
+        : null;
+    const normalizedId =
+      typeof entry.studentId === "string" && entry.studentId.trim().length
+        ? entry.studentId.trim()
+        : null;
+    const fallbackOriginalStudentId =
+      typeof entry.originalStudentId === "string" && entry.originalStudentId.trim().length
+        ? entry.originalStudentId.trim()
+        : null;
+    const fallbackEntryId =
+      typeof entry.id === "string" && entry.id.trim().length
+        ? entry.id.trim()
+        : null;
+    const fallbackLineItemId =
+      typeof entry.originalLineItemId === "string" && entry.originalLineItemId.trim().length
+        ? entry.originalLineItemId.trim()
+        : entry.originalLineItemId ?? null;
+
     const key =
-      entry.id ??
-      entry.originalLineItemId ??
+      normalizedId ??
+      fallbackOriginalStudentId ??
+      fallbackEntryId ??
+      fallbackLineItemId ??
+      normalizedStudentKey ??
       `${entry.name || "unknown"}-${index}`;
 
     const amountValue =
@@ -113,18 +137,23 @@ const aggregateStudentEntries = (entries) => {
 
     if (!groups.has(key)) {
       groups.set(key, {
-        id: key,
+        id: normalizedId ?? fallbackEntryId ?? key,
+        studentKey: normalizedStudentKey,
         name: displayName,
         amountValue: 0,
         services: new Map(),
         pdfUrls: new Set(),
         pdfKeys: new Set(),
         timesheetUrls: new Set(),
+        originalLineItemIds: new Set(),
         entryCount: 0,
       });
     }
 
     const group = groups.get(key);
+    if (!group.name && displayName) {
+      group.name = displayName;
+    }
     group.amountValue += amountValue;
     group.entryCount += 1;
 
@@ -139,6 +168,9 @@ const aggregateStudentEntries = (entries) => {
     if (entry.pdfUrl) group.pdfUrls.add(entry.pdfUrl);
     if (entry.pdfS3Key) group.pdfKeys.add(entry.pdfS3Key);
     if (entry.timesheetUrl) group.timesheetUrls.add(entry.timesheetUrl);
+    if (entry.originalLineItemId != null) {
+      group.originalLineItemIds.add(entry.originalLineItemId);
+    }
   });
 
   return Array.from(groups.values())
@@ -151,8 +183,14 @@ const aggregateStudentEntries = (entries) => {
         })
       );
 
+      const pdfUrls = Array.from(group.pdfUrls);
+      const pdfKeys = Array.from(group.pdfKeys);
+      const timesheetUrls = Array.from(group.timesheetUrls);
+      const originalLineItemIds = Array.from(group.originalLineItemIds);
+
       return {
         id: group.id,
+        studentKey: group.studentKey ?? null,
         name: group.name,
         amountValue: group.amountValue,
         amount: currencyFormatter.format(group.amountValue ?? 0),
@@ -164,9 +202,10 @@ const aggregateStudentEntries = (entries) => {
             : services.length > 1
             ? `${services.length} services`
             : null,
-        pdfUrl: Array.from(group.pdfUrls).pop() ?? null,
-        pdfS3Key: Array.from(group.pdfKeys).pop() ?? null,
-        timesheetUrl: Array.from(group.timesheetUrls).pop() ?? null,
+        pdfUrl: pdfUrls[0] ?? null,
+        pdfS3Key: pdfKeys[0] ?? null,
+        timesheetUrl: timesheetUrls[0] ?? null,
+        originalLineItemId: originalLineItemIds[0] ?? null,
         entryCount: group.entryCount,
       };
     })
@@ -693,7 +732,7 @@ export default function DistrictDashboard({
                   typeof invoice.month_index === "number"
                     ? invoice.month_index
                     : MONTH_INDEX[invoice.month] ?? -1;
-                const students = (invoice.students ?? []).map((student) => {
+                const students = (invoice.students ?? []).map((student, studentIndex) => {
                   const trimmedName =
                     typeof student.name === "string" && student.name.trim().length
                       ? student.name.trim()
@@ -701,6 +740,12 @@ export default function DistrictDashboard({
                   const normalizedKey =
                     trimmedName !== "Unknown student"
                       ? trimmedName.toLowerCase()
+                      : null;
+                  const rawStudentId =
+                    typeof student.student_id === "string" && student.student_id.trim().length
+                      ? student.student_id.trim()
+                      : typeof student.student_id === "number"
+                      ? String(student.student_id)
                       : null;
                   const amountValue =
                     typeof student.amount === "number"
@@ -712,8 +757,14 @@ export default function DistrictDashboard({
                       : null;
 
                   return {
-                    id: `student-${student.id}`,
+                    id:
+                      rawStudentId ??
+                      (typeof student.id === "string"
+                        ? student.id
+                        : `student-${student.id ?? studentIndex}`),
                     originalLineItemId: student.id,
+                    studentId: rawStudentId,
+                    originalStudentId: rawStudentId,
                     name: trimmedName,
                     studentKey: normalizedKey,
                     service: serviceLabel,
@@ -734,7 +785,7 @@ export default function DistrictDashboard({
                 pdfUrl: invoice.download_url ?? invoice.pdf_url ?? null,
                 pdfS3Key: invoice.pdf_s3_key ?? null,
                 timesheetCsvUrl: invoice.timesheet_csv_url ?? null,
-                students,
+                students: aggregateStudentEntries(students),
               };
             })
               .sort((a, b) => (b.monthIndex ?? -1) - (a.monthIndex ?? -1));
