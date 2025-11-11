@@ -1,8 +1,36 @@
 const DEFAULT_API_BASE_URL = "http://localhost:8000/api";
 
-export const API_BASE = (
-  import.meta.env.VITE_API_BASE_URL ?? DEFAULT_API_BASE_URL
-).replace(/\/$/, "");
+function resolveApiBase(rawBase?: string): string {
+  if (!rawBase) {
+    return DEFAULT_API_BASE_URL;
+  }
+
+  const trimmed = rawBase.trim();
+  if (!trimmed) {
+    return DEFAULT_API_BASE_URL;
+  }
+
+  try {
+    const url = new URL(trimmed);
+    if (url.pathname === "" || url.pathname === "/") {
+      url.pathname = "/api";
+    }
+    return url.toString().replace(/\/$/, "");
+  } catch (error) {
+    if (trimmed.startsWith("/")) {
+      const normalizedPath = trimmed === "/" ? "/api" : trimmed;
+      return normalizedPath.replace(/\/$/, "");
+    }
+
+    console.warn(
+      `Invalid VITE_API_BASE_URL "${trimmed}". Falling back to ${DEFAULT_API_BASE_URL}.`,
+      error,
+    );
+    return DEFAULT_API_BASE_URL;
+  }
+}
+
+export const API_BASE = resolveApiBase(import.meta.env.VITE_API_BASE_URL);
 
 export type UserRole = "vendor" | "district" | "admin";
 export type RoleSelectionOption = Exclude<UserRole, "admin">;
