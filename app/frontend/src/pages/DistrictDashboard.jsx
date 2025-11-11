@@ -734,7 +734,7 @@ export default function DistrictDashboard({
                 pdfUrl: invoice.download_url ?? invoice.pdf_url ?? null,
                 pdfS3Key: invoice.pdf_s3_key ?? null,
                 timesheetCsvUrl: invoice.timesheet_csv_url ?? null,
-                students,
+                students: aggregateStudentEntries(students),
               };
             })
               .sort((a, b) => (b.monthIndex ?? -1) - (a.monthIndex ?? -1));
