@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import re
+from calendar import month_abbr, month_name
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from io import BytesIO, StringIO
@@ -30,7 +31,7 @@ from app.backend.src.core.security import (
     get_current_user,
     require_district_user,
 )
-from app.backend.src.models import Job, User, Vendor
+from app.backend.src.models import Invoice, Job, User, Vendor
 from app.backend.src.services.s3 import (
     generate_presigned_url,
     get_s3_client,
@@ -94,6 +95,85 @@ def _resolve_year_month(month_token: str) -> tuple[str, str]:
 
     fallback = datetime.utcnow()
     return f"{fallback.year:04d}", f"{fallback.month:02d}"
+
+
+# --------------------------------------------------------------------------
+# Utility: Month parsing helpers
+# --------------------------------------------------------------------------
+_MONTH_LOOKUP = {
+    name.lower(): index
+    for index, name in enumerate(month_name)
+    if name
+}
+_MONTH_LOOKUP.update(
+    {
+        name.lower(): index
+        for index, name in enumerate(month_abbr)
+        if name
+    }
+)
+
+
+def _parse_service_month_tokens(value: str | None) -> tuple[int | None, int | None]:
+    """Attempt to extract year and month from a service month string."""
+
+    if not value:
+        return None, None
+
+    candidate = value.strip()
+    if not candidate:
+        return None, None
+
+    for fmt in ("%Y-%m", "%Y/%m", "%m-%Y", "%m/%Y", "%B %Y", "%b %Y"):
+        try:
+            parsed = datetime.strptime(candidate, fmt)
+            return parsed.year, parsed.month
+        except ValueError:
+            continue
+
+    year_match = re.search(r"(20\d{2}|19\d{2})", candidate)
+    month_match = None
+    if year_match:
+        year_value = int(year_match.group(0))
+        tokens = re.split(r"[^A-Za-z]+", candidate)
+        for token in tokens:
+            if not token:
+                continue
+            lookup = _MONTH_LOOKUP.get(token.lower())
+            if lookup:
+                return year_value, lookup
+        month_match = re.search(r"(?P<month>1[0-2]|0?[1-9])", candidate)
+        if month_match:
+            return year_value, int(month_match.group("month"))
+
+    return None, None
+
+
+def _determine_invoice_period(invoice: Invoice) -> tuple[int | None, int | None]:
+    """Return the (year, month) tuple for an invoice."""
+
+    invoice_date = getattr(invoice, "invoice_date", None)
+    if invoice_date:
+        return invoice_date.year, invoice_date.month
+
+    service_year, service_month = _parse_service_month_tokens(
+        getattr(invoice, "service_month", None)
+    )
+    return service_year, service_month
+
+
+def _format_uploaded_at(value: datetime | None) -> str | None:
+    """Format timestamps as ISO 8601 with UTC normalization."""
+
+    if not value:
+        return None
+
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    else:
+        value = value.astimezone(timezone.utc)
+
+    return value.isoformat().replace("+00:00", "Z")
 
 
 # --------------------------------------------------------------------------
@@ -520,3 +600,103 @@ async def download_invoices_zip(
         key=zip_key,
     )
     return {"download_url": download_url}
+
+
+# --------------------------------------------------------------------------
+# GET /invoices/{vendor_id}/{year}/{month}
+# --------------------------------------------------------------------------
+@router.get("/{vendor_id}/{year}/{month}")
+def list_vendor_invoices(
+    vendor_id: int,
+    year: int,
+    month: int,
+    session: Session = Depends(get_session_dependency),
+    current_user: User = Depends(require_district_user),
+) -> list[dict[str, object]]:
+    """Return invoice metadata for a vendor in a specific month."""
+
+    if vendor_id <= 0:
+        raise HTTPException(status_code=400, detail="Invalid vendor identifier")
+
+    if month <= 0 or month > 12:
+        raise HTTPException(status_code=400, detail="Invalid month value")
+
+    if year <= 0:
+        raise HTTPException(status_code=400, detail="Invalid year value")
+
+    vendor = session.get(Vendor, vendor_id)
+    if vendor is None:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+
+    LOGGER.info(
+        "district_invoice_listing_requested",
+        vendor_id=vendor_id,
+        year=year,
+        month=month,
+        user=current_user.email,
+    )
+
+    invoices = (
+        session.query(Invoice)
+        .filter(Invoice.vendor_id == vendor_id)
+        .order_by(Invoice.invoice_date.desc(), Invoice.created_at.desc())
+        .all()
+    )
+
+    results: list[dict[str, object]] = []
+    target_month = month
+    target_year = year
+
+    for invoice in invoices:
+        period_year, period_month = _determine_invoice_period(invoice)
+        if period_year != target_year or period_month != target_month:
+            continue
+
+        s3_key = getattr(invoice, "s3_key", None) or getattr(
+            invoice, "pdf_s3_key", None
+        )
+        if s3_key:
+            invoice_name = Path(s3_key).name
+        else:
+            candidate_name = (invoice.invoice_number or invoice.student_name or "invoice").strip()
+            if not candidate_name.lower().endswith(".pdf"):
+                candidate_name = f"{candidate_name}.pdf"
+            invoice_name = candidate_name
+
+        amount = Decimal(invoice.total_cost or 0).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+        uploaded_at = _format_uploaded_at(
+            invoice.invoice_date or getattr(invoice, "created_at", None)
+        )
+
+        results.append(
+            {
+                "invoice_id": invoice.id,
+                "vendor_id": invoice.vendor_id,
+                "company": vendor.company_name,
+                "invoice_name": invoice_name,
+                "s3_key": s3_key,
+                "amount": float(amount),
+                "status": invoice.status or "",
+                "uploaded_at": uploaded_at,
+            }
+        )
+
+    results.sort(
+        key=lambda entry: (
+            entry.get("uploaded_at") or "",
+            entry.get("invoice_id") or 0,
+        ),
+        reverse=True,
+    )
+
+    LOGGER.info(
+        "district_invoice_listing_ready",
+        vendor_id=vendor_id,
+        year=year,
+        month=month,
+        count=len(results),
+    )
+
+    return results

@@ -66,6 +66,7 @@ if not hasattr(importlib.metadata, "_invoice_agent_email_validator_patch"):
 from app.backend.src.main import app
 from app.backend.src.core.security import require_district_user
 from app.backend.src.db import Base, get_engine, session_scope
+from app.backend.src.models import Invoice
 from app.backend.src.models.vendor import Vendor
 
 
@@ -214,3 +215,63 @@ def test_download_zip_creates_archive(
         },
         ExpiresIn=3600,
     )
+
+
+def test_list_vendor_invoices_returns_monthly_records(client: TestClient) -> None:
+    with session_scope() as session:
+        session.query(Invoice).delete()
+        invoice = Invoice(
+            vendor_id=42,
+            upload_id=None,
+            student_name="Lola Day",
+            invoice_number="INV-2025-11-001",
+            invoice_code="CODE-001",
+            service_month="November 2025",
+            invoice_date=datetime(2025, 11, 11, 8, 52, 31, tzinfo=timezone.utc),
+            total_hours=5.0,
+            total_cost=1800.0,
+            status="approved",
+            pdf_s3_key="invoices/ActionSupportiveCare/2025/11/Invoice_Lola_Day_November_2025.pdf",
+        )
+        session.add(invoice)
+        session.commit()
+        invoice_id = invoice.id
+
+    response = client.get("/api/invoices/42/2025/11")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert isinstance(payload, list)
+    assert len(payload) == 1
+    entry = payload[0]
+
+    assert entry["invoice_id"] == invoice_id
+    assert entry["vendor_id"] == 42
+    assert entry["company"] == "Always Home Nursing"
+    assert entry["invoice_name"] == "Invoice_Lola_Day_November_2025.pdf"
+    assert (
+        entry["s3_key"]
+        == "invoices/ActionSupportiveCare/2025/11/Invoice_Lola_Day_November_2025.pdf"
+    )
+    assert entry["amount"] == pytest.approx(1800.0)
+    assert entry["status"] == "approved"
+    assert entry["uploaded_at"] == "2025-11-11T08:52:31Z"
+
+    with session_scope() as session:
+        session.query(Invoice).delete()
+
+
+def test_list_vendor_invoices_handles_missing_month(client: TestClient) -> None:
+    with session_scope() as session:
+        session.query(Invoice).delete()
+
+    response = client.get("/api/invoices/42/2025/12")
+
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_list_vendor_invoices_unknown_vendor(client: TestClient) -> None:
+    response = client.get("/api/invoices/999/2025/11")
+
+    assert response.status_code == 404
