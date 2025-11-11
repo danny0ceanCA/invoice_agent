@@ -104,13 +104,25 @@ const aggregateStudentEntries = (entries) => {
       typeof entry.studentId === "string" && entry.studentId.trim().length
         ? entry.studentId.trim()
         : null;
+    const fallbackOriginalStudentId =
+      typeof entry.originalStudentId === "string" && entry.originalStudentId.trim().length
+        ? entry.originalStudentId.trim()
+        : null;
+    const fallbackEntryId =
+      typeof entry.id === "string" && entry.id.trim().length
+        ? entry.id.trim()
+        : null;
+    const fallbackLineItemId =
+      typeof entry.originalLineItemId === "string" && entry.originalLineItemId.trim().length
+        ? entry.originalLineItemId.trim()
+        : entry.originalLineItemId ?? null;
 
     const key =
-      normalizedStudentKey ??
       normalizedId ??
-      entry.originalStudentId ??
-      entry.id ??
-      entry.originalLineItemId ??
+      fallbackOriginalStudentId ??
+      fallbackEntryId ??
+      fallbackLineItemId ??
+      normalizedStudentKey ??
       `${entry.name || "unknown"}-${index}`;
 
     const amountValue =
@@ -125,7 +137,7 @@ const aggregateStudentEntries = (entries) => {
 
     if (!groups.has(key)) {
       groups.set(key, {
-        id: normalizedId ?? key,
+        id: normalizedId ?? fallbackEntryId ?? key,
         studentKey: normalizedStudentKey,
         name: displayName,
         amountValue: 0,
@@ -133,6 +145,7 @@ const aggregateStudentEntries = (entries) => {
         pdfUrls: new Set(),
         pdfKeys: new Set(),
         timesheetUrls: new Set(),
+        originalLineItemIds: new Set(),
         entryCount: 0,
       });
     }
@@ -155,6 +168,9 @@ const aggregateStudentEntries = (entries) => {
     if (entry.pdfUrl) group.pdfUrls.add(entry.pdfUrl);
     if (entry.pdfS3Key) group.pdfKeys.add(entry.pdfS3Key);
     if (entry.timesheetUrl) group.timesheetUrls.add(entry.timesheetUrl);
+    if (entry.originalLineItemId != null) {
+      group.originalLineItemIds.add(entry.originalLineItemId);
+    }
   });
 
   return Array.from(groups.values())
@@ -170,6 +186,7 @@ const aggregateStudentEntries = (entries) => {
       const pdfUrls = Array.from(group.pdfUrls);
       const pdfKeys = Array.from(group.pdfKeys);
       const timesheetUrls = Array.from(group.timesheetUrls);
+      const originalLineItemIds = Array.from(group.originalLineItemIds);
 
       return {
         id: group.id,
@@ -188,6 +205,7 @@ const aggregateStudentEntries = (entries) => {
         pdfUrl: pdfUrls[0] ?? null,
         pdfS3Key: pdfKeys[0] ?? null,
         timesheetUrl: timesheetUrls[0] ?? null,
+        originalLineItemId: originalLineItemIds[0] ?? null,
         entryCount: group.entryCount,
       };
     })
