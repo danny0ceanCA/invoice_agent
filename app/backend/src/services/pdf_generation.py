@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from io import BytesIO
 from time import perf_counter
+from uuid import uuid4
 
 import pandas as pd
 from reportlab.lib.colors import HexColor
@@ -25,8 +26,12 @@ class InvoicePdf:
 
 
 def _build_filename(student: str, service_month: str) -> str:
+    """Return a unique, S3-safe filename for a generated invoice."""
+
     safe_student = student.replace(" ", "_")
-    return f"Invoice_{safe_student}_{service_month}.pdf"
+    safe_month = service_month.replace(" ", "_")
+    unique_suffix = uuid4().hex
+    return f"Invoice_{safe_student}_{safe_month}_{unique_suffix}.pdf"
 
 
 def generate_invoice_pdf(
