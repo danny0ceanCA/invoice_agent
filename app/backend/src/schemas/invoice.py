@@ -16,6 +16,7 @@ class InvoiceRead(BaseModel):
     total_hours: Decimal
     status: str
     pdf_s3_key: str | None
+    download_url: str | None = None
     line_items: list[InvoiceLineItemRead] = []
 
 

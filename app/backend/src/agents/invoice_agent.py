@@ -82,6 +82,7 @@ class InvoiceAgent:
         invoices: list[Invoice] = []
         duplicates: list[str] = []
         pdf_artifacts: list[InvoicePdf] = []
+        invoice_audit_log: list[dict[str, Any]] = []
         self.logger.info("invoice_agent_start", upload=str(file_path))
         try:
             with session_scope() as session:
@@ -101,10 +102,31 @@ class InvoiceAgent:
                     )
                     invoices.append(invoice)
                     pdf_artifacts.append(pdf_artifact)
+                    invoice_audit_log.append(
+                        {
+                            "id": invoice.id,
+                            "student": invoice.student_name,
+                            "s3_key": invoice.s3_key,
+                        }
+                    )
         except Exception as exc:
             invoice_jobs_total.labels(status="failed").inc()
             self.logger.error("invoice_agent_error", error=str(exc))
             raise
+
+        missing_s3_keys = [entry for entry in invoice_audit_log if not entry.get("s3_key")]
+        if missing_s3_keys:
+            for entry in missing_s3_keys:
+                self.logger.error(
+                    "invoice_s3_key_missing_after_upload",
+                    invoice_id=entry.get("id"),
+                    student=entry.get("student"),
+                )
+        else:
+            self.logger.info(
+                "invoice_s3_keys_verified",
+                invoice_count=len(invoice_audit_log),
+            )
 
         zip_key = self._bundle_invoices(pdf_artifacts)
         status = "completed" if invoices else "skipped"
@@ -132,7 +154,7 @@ class InvoiceAgent:
         student: str,
         student_frame: pd.DataFrame,
         invoice_number: str,
-    ) -> tuple[Invoice, Path]:
+    ) -> tuple[Invoice, InvoicePdf]:
         frame = student_frame.copy()
         frame["Rate"] = frame["Service Code"].map(self.rates).fillna(0)
         frame["Cost"] = frame["Hours"] * frame["Rate"]
