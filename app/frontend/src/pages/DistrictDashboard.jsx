@@ -12,10 +12,7 @@ import {
   activateDistrictMembership,
 } from "../api/districts";
 import { formatPostalAddress } from "../api/common";
-import {
-  buildSafeFilename,
-  downloadFileFromPresignedUrl,
-} from "../utils/downloadFile";
+import { buildSafeFilename, downloadFileFromPresignedUrl } from "../utils/downloadFile";
 
 const menuItems = [
   {
@@ -1272,62 +1269,29 @@ export default function DistrictDashboard({
     return buildSafeFilename(joined, extension, fallbackBase);
   }, []);
 
-  const handleVendorInvoiceDownload = useCallback(async () => {
-    if (!activeInvoiceDetails?.pdfUrl) {
-      toast.error("Invoice file not available.");
+  const openInvoiceUrl = useCallback((url, errorMessage) => {
+    if (!url) {
+      toast.error(errorMessage);
       return;
     }
 
-    const fallbackFilename = composeFilename(
-      [
-        selectedVendor?.name ?? "",
-        activeInvoiceDetails.month ?? "",
-        activeInvoiceDetails.year ? String(activeInvoiceDetails.year) : "",
-      ],
-      "pdf",
-      "invoice",
-    );
-
     try {
-      await downloadFileFromPresignedUrl(
-        activeInvoiceDetails.pdfUrl,
-        fallbackFilename,
-      );
+      window.open(url, "_blank", "noopener,noreferrer");
     } catch (error) {
-      console.error("Failed to download invoice PDF", error);
-      toast.error("We couldn't download this invoice. Please try again.");
+      console.error("Failed to open invoice link", error);
+      toast.error("We couldn't open this invoice. Please try again.");
     }
-  }, [
-    activeInvoiceDetails,
-    composeFilename,
-    selectedVendor,
-  ]);
+  }, []);
+
+  const handleVendorInvoiceDownload = useCallback(() => {
+    openInvoiceUrl(activeInvoiceDetails?.pdfUrl, "Invoice file not available.");
+  }, [activeInvoiceDetails?.pdfUrl, openInvoiceUrl]);
 
   const handleStudentInvoiceDownload = useCallback(
-    async (url, studentName) => {
-      if (!url) {
-        toast.error("Invoice file not available for this student.");
-        return;
-      }
-
-      const fallbackFilename = composeFilename(
-        [
-          studentName ?? "",
-          activeInvoiceDetails?.month ?? "",
-          activeInvoiceDetails?.year ? String(activeInvoiceDetails.year) : "",
-        ],
-        "pdf",
-        "student-invoice",
-      );
-
-      try {
-        await downloadFileFromPresignedUrl(url, fallbackFilename);
-      } catch (error) {
-        console.error("Failed to download student invoice", error);
-        toast.error("We couldn't download this invoice. Please try again.");
-      }
+    (url) => {
+      openInvoiceUrl(url, "Invoice file not available for this student.");
     },
-    [activeInvoiceDetails?.month, activeInvoiceDetails?.year, composeFilename],
+    [openInvoiceUrl],
   );
 
   const handleStudentTimesheetDownload = useCallback(
@@ -1767,8 +1731,6 @@ export default function DistrictDashboard({
                             {filteredStudents.map((entry) => {
                               const studentInvoiceUrl = entry.pdfUrl ?? null;
                               const studentTimesheetUrl = entry.timesheetUrl ?? null;
-                              const studentName = entry.name ?? "";
-
                               return (
                                 <li
                                   key={entry.id}
@@ -1778,10 +1740,7 @@ export default function DistrictDashboard({
                                     role={studentInvoiceUrl ? "button" : undefined}
                                     tabIndex={studentInvoiceUrl ? 0 : undefined}
                                     onClick={() =>
-                                      handleStudentInvoiceDownload(
-                                        studentInvoiceUrl,
-                                        studentName,
-                                      )
+                                      handleStudentInvoiceDownload(studentInvoiceUrl)
                                     }
                                     onKeyDown={(event) => {
                                       if (
@@ -1792,10 +1751,7 @@ export default function DistrictDashboard({
                                       }
 
                                       event.preventDefault();
-                                      handleStudentInvoiceDownload(
-                                        studentInvoiceUrl,
-                                        studentName,
-                                      );
+                                      handleStudentInvoiceDownload(studentInvoiceUrl);
                                     }}
                                     aria-disabled={!studentInvoiceUrl}
                                     className={`flex flex-col gap-3 px-4 py-3 text-sm text-slate-700 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60 sm:flex-row sm:items-center sm:justify-between ${
@@ -1828,10 +1784,7 @@ export default function DistrictDashboard({
                                           type="button"
                                           onClick={(event) => {
                                             event.stopPropagation();
-                                            handleStudentInvoiceDownload(
-                                              studentInvoiceUrl,
-                                              studentName,
-                                            );
+                                            handleStudentInvoiceDownload(studentInvoiceUrl);
                                           }}
                                           className="inline-flex items-center rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700 transition hover:bg-amber-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
                                         >

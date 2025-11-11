@@ -190,6 +190,10 @@ def fetch_district_vendor_overview(
                 data.get("pdf_s3_key"), data.get("download_name"), int(data["id"])
             )
 
+            if download_url:
+                for student in data["students"]:
+                    student.pdf_url = download_url
+
             entry = DistrictVendorInvoice(
                 id=int(data["id"]),
                 month=data["month"],
