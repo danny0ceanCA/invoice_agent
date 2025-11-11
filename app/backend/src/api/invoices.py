@@ -499,6 +499,44 @@ async def download_invoices_zip(
         )
         raise HTTPException(status_code=404, detail="No invoices available for this month")
 
+    invoices = (
+        session.query(Invoice)
+        .filter(Invoice.vendor_id == vendor_id)
+        .order_by(Invoice.invoice_date.desc(), Invoice.created_at.desc())
+        .all()
+    )
+
+    vendor_record = session.get(Vendor, vendor_id)
+    vendor_display_name = (
+        (vendor_record.company_name or "").strip() if vendor_record else ""
+    ) or vendor_company
+
+    target_year = reference_date.year
+    target_month = reference_date.month
+
+    invoice_lookup: dict[str, Invoice] = {}
+    invoice_lookup_by_name: dict[str, Invoice] = {}
+
+    for invoice in invoices:
+        period_year, period_month = _determine_invoice_period(invoice)
+        if period_year != target_year or period_month != target_month:
+            continue
+
+        for attr in ("s3_key", "pdf_s3_key"):
+            key_value = getattr(invoice, attr, None)
+            if not key_value:
+                continue
+
+            normalized_key = str(key_value).strip()
+            if not normalized_key:
+                continue
+
+            sanitized_key = sanitize_object_key(normalized_key)
+            invoice_lookup[normalized_key] = invoice
+            invoice_lookup[sanitized_key] = invoice
+            invoice_lookup_by_name[Path(normalized_key).name] = invoice
+            invoice_lookup_by_name[Path(sanitized_key).name] = invoice
+
     def _build_zip() -> bytes:
         buffer = BytesIO()
         summary_rows: list[tuple[str, str, str, str]] = []
@@ -514,33 +552,39 @@ async def download_invoices_zip(
                 file_buffer.seek(0)
                 archive.writestr(Path(key).name, file_buffer.read())
 
-                last_modified = entry.get("LastModified")
-                if hasattr(last_modified, "astimezone"):
-                    last_modified_str = (
-                        last_modified.astimezone(timezone.utc)
-                        .isoformat()
-                        .replace("+00:00", "Z")
+                invoice = invoice_lookup.get(key) or invoice_lookup.get(
+                    sanitize_object_key(key)
+                )
+                if invoice is None:
+                    invoice = invoice_lookup_by_name.get(Path(key).name)
+
+                if invoice:
+                    amount_value = Decimal(invoice.total_cost or 0).quantize(
+                        Decimal("0.01"), rounding=ROUND_HALF_UP
+                    )
+                    amount_display = format(amount_value, ".2f")
+                    uploaded_at = _format_uploaded_at(
+                        invoice.invoice_date or getattr(invoice, "created_at", None)
                     )
                 else:
-                    last_modified_str = ""
+                    amount_display = ""
+                    uploaded_at = None
 
-                size_bytes = Decimal(entry.get("Size", 0) or 0)
-                size_kb = (size_bytes / Decimal(1024)).quantize(
-                    Decimal("0.01"), rounding=ROUND_HALF_UP
-                )
+                if not uploaded_at:
+                    uploaded_at = _format_uploaded_at(entry.get("LastModified"))
 
                 summary_rows.append(
                     (
+                        vendor_display_name,
                         Path(key).name,
-                        key,
-                        last_modified_str,
-                        f"{size_kb}",
+                        amount_display,
+                        uploaded_at or "",
                     )
                 )
 
             csv_buffer = StringIO()
             writer = csv.writer(csv_buffer)
-            writer.writerow(["Invoice Name", "S3 Key", "Last Modified", "Size (KB)"])
+            writer.writerow(["Vendor", "Invoice Name", "Amount", "Uploaded At"])
             writer.writerows(summary_rows)
             archive.writestr("invoice_summary.csv", csv_buffer.getvalue())
 
