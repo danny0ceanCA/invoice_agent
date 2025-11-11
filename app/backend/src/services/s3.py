@@ -159,7 +159,6 @@ def _resolve_object_key(
         )
         LOGGER.info(
             "s3_upload_path_updated",
-            event="s3_upload_path_updated",
             company=normalized_company,
             year=year_segment,
             month=month_segment,
