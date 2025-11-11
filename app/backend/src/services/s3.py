@@ -134,6 +134,20 @@ def _normalize_reference_date(
     return datetime.utcnow()
 
 
+def build_invoice_storage_components(
+    company_name: str | None,
+    reference_date: date | datetime | str | None,
+) -> tuple[str, str, str, str]:
+    """Return the prefix and path segments for invoice storage objects."""
+
+    normalized_company = sanitize_company_name(company_name)
+    normalized_date = _normalize_reference_date(reference_date)
+    year_segment = f"{normalized_date.year:04d}"
+    month_segment = f"{normalized_date.month:02d}"
+    prefix = f"invoices/{normalized_company}/{year_segment}/{month_segment}/"
+    return prefix, normalized_company, year_segment, month_segment
+
+
 def _resolve_object_key(
     filename: str,
     *,
@@ -150,13 +164,13 @@ def _resolve_object_key(
     safe_name = re.sub(r"_+", "_", safe_name)
 
     if company_name:
-        normalized_company = sanitize_company_name(company_name)
-        normalized_date = _normalize_reference_date(reference_date)
-        year_segment = f"{normalized_date.year:04d}"
-        month_segment = f"{normalized_date.month:02d}"
-        hierarchical_key = (
-            f"invoices/{normalized_company}/{year_segment}/{month_segment}/{safe_name}"
-        )
+        (
+            prefix,
+            normalized_company,
+            year_segment,
+            month_segment,
+        ) = build_invoice_storage_components(company_name, reference_date)
+        hierarchical_key = f"{prefix}{safe_name}"
         LOGGER.info(
             "s3_upload_path_updated",
             company=normalized_company,
@@ -329,4 +343,5 @@ __all__ = [
     "sanitize_object_key",
     "get_s3_client",
     "sanitize_company_name",
+    "build_invoice_storage_components",
 ]
