@@ -1,3 +1,11 @@
+import { useCallback } from "react";
+import toast from "react-hot-toast";
+
+import {
+  buildSafeFilename,
+  downloadFileFromPresignedUrl,
+} from "../utils/downloadFile";
+
 export default function JobStatusCard({ job }) {
   const status = job.status ?? "queued";
   const colors = {
@@ -13,6 +21,26 @@ export default function JobStatusCard({ job }) {
       ? "Skipped (Duplicate)"
       : status.charAt(0).toUpperCase() + status.slice(1);
 
+  const handleDownload = useCallback(async () => {
+    if (!job.download_url) {
+      toast.error("A download link is not available yet.");
+      return;
+    }
+
+    const fallbackFilename = buildSafeFilename(
+      job.filename ?? "invoice",
+      "pdf",
+      "invoice",
+    );
+
+    try {
+      await downloadFileFromPresignedUrl(job.download_url, fallbackFilename);
+    } catch (error) {
+      console.error("Failed to download invoice", error);
+      toast.error("We couldn't download this invoice. Please try again.");
+    }
+  }, [job.download_url, job.filename]);
+
   return (
     <div className="p-4 border rounded-xl bg-white shadow-sm">
       <div className="flex justify-between items-center">
@@ -23,14 +51,13 @@ export default function JobStatusCard({ job }) {
       </div>
       {job.message && <p className="text-sm mt-2 text-gray-600">{job.message}</p>}
       {status === "completed" && job.download_url && (
-        <a
-          href={job.download_url}
-          target="_blank"
-          rel="noopener noreferrer"
+        <button
+          type="button"
+          onClick={handleDownload}
           className="mt-2 inline-block text-blue-600 hover:underline"
         >
           Download Invoice
-        </a>
+        </button>
       )}
     </div>
   );

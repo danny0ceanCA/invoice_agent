@@ -12,6 +12,10 @@ import {
   activateDistrictMembership,
 } from "../api/districts";
 import { formatPostalAddress } from "../api/common";
+import {
+  buildSafeFilename,
+  downloadFileFromPresignedUrl,
+} from "../utils/downloadFile";
 
 const menuItems = [
   {
@@ -1156,21 +1160,8 @@ export default function DistrictDashboard({
       return null;
     }
 
-    const invoicePdfBase = invoiceRecord.pdfUrl ?? "";
-    const invoiceTimesheetBase = invoiceRecord.timesheetCsvUrl ?? "";
-
-    const studentsWithSamples = invoiceRecord.students?.map((entry) => ({
-      ...entry,
-      pdfUrl:
-        entry.pdfUrl ??
-        (invoicePdfBase ? `${invoicePdfBase.replace(/\.pdf$/, "")}/${entry.id}.pdf` : null),
-      timesheetUrl:
-        entry.timesheetUrl ??
-        (invoiceTimesheetBase ? `${invoiceTimesheetBase.replace(/\.csv$/, "")}/${entry.id}.csv` : null),
-    }));
-
     const aggregatedStudents = aggregateStudentEntries(
-      studentsWithSamples ?? [],
+      invoiceRecord.students ?? [],
     );
 
     return {
@@ -1272,17 +1263,99 @@ export default function DistrictDashboard({
     setStudentFilter("");
   }, [selectedInvoiceKey, selectedVendorId]);
 
-  const invoicePdfBase = activeInvoiceDetails?.pdfUrl ?? "";
-  const invoiceTimesheetBase = activeInvoiceDetails?.timesheetCsvUrl ?? "";
+  const composeFilename = useCallback((parts, extension, fallbackBase) => {
+    const joined = parts
+      .map((part) => (typeof part === "string" ? part.trim() : ""))
+      .filter(Boolean)
+      .join(" - ");
 
-  const handleStudentInvoiceOpen = useCallback((url) => {
-    if (!url) {
-      toast.error("Invoice file not available for this student.");
+    return buildSafeFilename(joined, extension, fallbackBase);
+  }, []);
+
+  const handleVendorInvoiceDownload = useCallback(async () => {
+    if (!activeInvoiceDetails?.pdfUrl) {
+      toast.error("Invoice file not available.");
       return;
     }
 
-    window.open(url, "_blank", "noopener,noreferrer");
-  }, []);
+    const fallbackFilename = composeFilename(
+      [
+        selectedVendor?.name ?? "",
+        activeInvoiceDetails.month ?? "",
+        activeInvoiceDetails.year ? String(activeInvoiceDetails.year) : "",
+      ],
+      "pdf",
+      "invoice",
+    );
+
+    try {
+      await downloadFileFromPresignedUrl(
+        activeInvoiceDetails.pdfUrl,
+        fallbackFilename,
+      );
+    } catch (error) {
+      console.error("Failed to download invoice PDF", error);
+      toast.error("We couldn't download this invoice. Please try again.");
+    }
+  }, [
+    activeInvoiceDetails,
+    composeFilename,
+    selectedVendor,
+  ]);
+
+  const handleStudentInvoiceDownload = useCallback(
+    async (url, studentName) => {
+      if (!url) {
+        toast.error("Invoice file not available for this student.");
+        return;
+      }
+
+      const fallbackFilename = composeFilename(
+        [
+          studentName ?? "",
+          activeInvoiceDetails?.month ?? "",
+          activeInvoiceDetails?.year ? String(activeInvoiceDetails.year) : "",
+        ],
+        "pdf",
+        "student-invoice",
+      );
+
+      try {
+        await downloadFileFromPresignedUrl(url, fallbackFilename);
+      } catch (error) {
+        console.error("Failed to download student invoice", error);
+        toast.error("We couldn't download this invoice. Please try again.");
+      }
+    },
+    [activeInvoiceDetails?.month, activeInvoiceDetails?.year, composeFilename],
+  );
+
+  const handleStudentTimesheetDownload = useCallback(
+    async (url, studentName) => {
+      if (!url) {
+        toast.error("Timesheet not available for this student.");
+        return;
+      }
+
+      const fallbackFilename = composeFilename(
+        [
+          studentName ?? "",
+          activeInvoiceDetails?.month ?? "",
+          activeInvoiceDetails?.year ? String(activeInvoiceDetails.year) : "",
+        ],
+        "csv",
+        "timesheet",
+      );
+
+      try {
+        await downloadFileFromPresignedUrl(url, fallbackFilename);
+      } catch (error) {
+        console.error("Failed to download student timesheet", error);
+        toast.error("We couldn't download this timesheet. Please try again.");
+      }
+    },
+    [activeInvoiceDetails?.month, activeInvoiceDetails?.year, composeFilename],
+  );
 
   const vendorOverviewHighlights = useMemo(() => {
     if (!selectedVendor) {
@@ -1554,14 +1627,13 @@ export default function DistrictDashboard({
                       Total {activeInvoiceDetails.total}
                     </span>
                     {activeInvoiceDetails.pdfUrl ? (
-                      <a
-                        href={activeInvoiceDetails.pdfUrl}
-                        target="_blank"
-                        rel="noreferrer"
+                      <button
+                        type="button"
+                        onClick={handleVendorInvoiceDownload}
                         className="inline-flex items-center rounded-full bg-amber-500 px-3 py-1.5 text-sm font-semibold text-white shadow-sm transition hover:bg-amber-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
                       >
                         Download PDF Invoice
-                      </a>
+                      </button>
                     ) : (
                       <span className="text-xs text-slate-500">
                         Invoice file not available
@@ -1693,16 +1765,9 @@ export default function DistrictDashboard({
                         <div className="mt-4 max-h-[65vh] overflow-y-auto pr-1">
                           <ul className="space-y-3">
                             {filteredStudents.map((entry) => {
-                              const studentInvoiceUrl = entry.pdfUrl
-                                ? entry.pdfUrl
-                                : invoicePdfBase
-                                ? `${invoicePdfBase.replace(/\.pdf$/, "")}/${entry.id}.pdf`
-                                : null;
-                              const studentTimesheetUrl = entry.timesheetUrl
-                                ? entry.timesheetUrl
-                                : invoiceTimesheetBase
-                                ? `${invoiceTimesheetBase.replace(/\.csv$/, "")}/${entry.id}.csv`
-                                : null;
+                              const studentInvoiceUrl = entry.pdfUrl ?? null;
+                              const studentTimesheetUrl = entry.timesheetUrl ?? null;
+                              const studentName = entry.name ?? "";
 
                               return (
                                 <li
@@ -1712,7 +1777,12 @@ export default function DistrictDashboard({
                                   <div
                                     role={studentInvoiceUrl ? "button" : undefined}
                                     tabIndex={studentInvoiceUrl ? 0 : undefined}
-                                    onClick={() => handleStudentInvoiceOpen(studentInvoiceUrl)}
+                                    onClick={() =>
+                                      handleStudentInvoiceDownload(
+                                        studentInvoiceUrl,
+                                        studentName,
+                                      )
+                                    }
                                     onKeyDown={(event) => {
                                       if (
                                         !studentInvoiceUrl ||
@@ -1722,7 +1792,10 @@ export default function DistrictDashboard({
                                       }
 
                                       event.preventDefault();
-                                      handleStudentInvoiceOpen(studentInvoiceUrl);
+                                      handleStudentInvoiceDownload(
+                                        studentInvoiceUrl,
+                                        studentName,
+                                      );
                                     }}
                                     aria-disabled={!studentInvoiceUrl}
                                     className={`flex flex-col gap-3 px-4 py-3 text-sm text-slate-700 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60 sm:flex-row sm:items-center sm:justify-between ${
@@ -1751,30 +1824,38 @@ export default function DistrictDashboard({
                                         <span className="font-semibold text-slate-900">{entry.amount}</span>
                                       ) : null}
                                       {studentInvoiceUrl ? (
-                                        <a
-                                          href={studentInvoiceUrl}
-                                          target="_blank"
-                                          rel="noreferrer"
-                                          onClick={(event) => event.stopPropagation()}
+                                        <button
+                                          type="button"
+                                          onClick={(event) => {
+                                            event.stopPropagation();
+                                            handleStudentInvoiceDownload(
+                                              studentInvoiceUrl,
+                                              studentName,
+                                            );
+                                          }}
                                           className="inline-flex items-center rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700 transition hover:bg-amber-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
                                         >
-                                          View invoice PDF
-                                        </a>
+                                          Download invoice PDF
+                                        </button>
                                       ) : (
                                         <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">
                                           Invoice not available
                                         </span>
                                       )}
                                       {studentTimesheetUrl ? (
-                                        <a
-                                          href={studentTimesheetUrl}
-                                          target="_blank"
-                                          rel="noreferrer"
-                                          onClick={(event) => event.stopPropagation()}
+                                        <button
+                                          type="button"
+                                          onClick={(event) => {
+                                            event.stopPropagation();
+                                            handleStudentTimesheetDownload(
+                                              studentTimesheetUrl,
+                                              studentName,
+                                            );
+                                          }}
                                           className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700 transition hover:bg-slate-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
                                         >
                                           Timesheet CSV
-                                        </a>
+                                        </button>
                                       ) : null}
                                     </div>
                                   </div>
