@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth0 } from "@auth0/auth0-react";
 import toast from "react-hot-toast";
-import JSZip from "jszip";
 import { CheckCircle2, Plus } from "lucide-react";
 
 import {
@@ -13,8 +12,7 @@ import {
   activateDistrictMembership,
 } from "../api/districts";
 import { formatPostalAddress } from "../api/common";
-import { fetchInvoicePresignedUrl } from "../api/invoices";
-import { buildSafeFilename } from "../utils/downloadFile";
+import { fetchInvoicePresignedUrl, fetchVendorInvoiceArchive } from "../api/invoices";
 
 const menuItems = [
   {
@@ -1198,15 +1196,6 @@ export default function DistrictDashboard({
 
   const studentInvoiceCount = activeInvoiceDetails?.students?.length ?? 0;
 
-  const composeFilename = useCallback((parts, extension, fallbackBase) => {
-    const joined = parts
-      .map((part) => (typeof part === "string" ? part.trim() : ""))
-      .filter(Boolean)
-      .join(" - ");
-
-    return buildSafeFilename(joined, extension, fallbackBase);
-  }, []);
-
   const openInvoiceUrl = useCallback((url, errorMessage) => {
     if (!url) {
       if (errorMessage) {
@@ -1277,145 +1266,84 @@ export default function DistrictDashboard({
     requestInvoiceUrl,
   ]);
 
+
   const handleDownloadAllInvoicesZip = useCallback(async () => {
     if (!activeInvoiceDetails) {
       toast.error("Select a month to download invoices.");
       return;
     }
 
-    const students = activeInvoiceDetails.students ?? [];
-    if (!students.length) {
+    if (!studentInvoiceCount) {
       toast.error("No student invoices are available for this month.");
+      return;
+    }
+
+    const vendorId = selectedVendor?.id ?? null;
+    if (vendorId == null) {
+      toast.error("We couldn't determine the vendor for this download.");
+      return;
+    }
+
+    const monthName = activeInvoiceDetails.month ?? "";
+    const yearValue = activeInvoiceDetails.year ?? null;
+    const monthIndex = MONTH_INDEX[monthName] ?? null;
+    let normalizedMonth = null;
+
+    if (monthIndex != null && typeof yearValue === "number") {
+      normalizedMonth = `${yearValue}-${String(monthIndex + 1).padStart(2, "0")}`;
+    } else {
+      const sanitized = `${monthName}`.trim().replace(/\s+/g, "-");
+      if (sanitized) {
+        normalizedMonth = yearValue ? `${sanitized}-${yearValue}` : sanitized;
+      }
+    }
+
+    if (!normalizedMonth) {
+      toast.error("This month's invoices are missing schedule details.");
       return;
     }
 
     setDownloadingInvoices(true);
 
     try {
-      const zip = new JSZip();
-      const usedFilenames = new Set();
-      let bundledCount = 0;
-      const invoiceId = activeInvoiceDetails.id ?? null;
-
-      for (let index = 0; index < students.length; index += 1) {
-        const entry = students[index];
-        const pdfKey = entry?.pdfS3Key ?? activeInvoiceDetails.pdfS3Key ?? null;
-        let downloadUrl = entry?.pdfUrl ?? activeInvoiceDetails.pdfUrl ?? null;
-
-        if (pdfKey) {
-          try {
-            downloadUrl = await requestInvoiceUrl(pdfKey, invoiceId);
-          } catch (error) {
-            console.error("Failed to fetch presigned URL for student invoice", {
-              error,
-              invoiceId,
-              pdfKey,
-              studentId: entry?.id ?? null,
-            });
-            if (!downloadUrl) {
-              continue;
-            }
-          }
-        } else if (!downloadUrl) {
-          continue;
-        }
-
-        try {
-          const response = await fetch(downloadUrl);
-          if (!response.ok) {
-            throw new Error(`Failed to fetch invoice (status ${response.status})`);
-          }
-
-          const fileBuffer = await response.arrayBuffer();
-          const fallbackBase = `invoice-${entry?.id ?? index + 1}`;
-          const desiredName = composeFilename(
-            [
-              entry?.name ?? "Student Invoice",
-              selectedVendor?.name ?? "",
-              activeInvoiceDetails.month ?? "",
-              activeInvoiceDetails.year
-                ? String(activeInvoiceDetails.year)
-                : "",
-            ],
-            "pdf",
-            fallbackBase,
-          );
-
-          const normalizedExt = desiredName.toLowerCase().endsWith(".pdf")
-            ? ".pdf"
-            : ".pdf";
-          const baseName = desiredName.endsWith(normalizedExt)
-            ? desiredName.slice(0, -normalizedExt.length)
-            : desiredName;
-
-          let candidateName = desiredName;
-          let suffix = 2;
-          while (usedFilenames.has(candidateName)) {
-            candidateName = `${baseName} (${suffix})${normalizedExt}`;
-            suffix += 1;
-          }
-
-          usedFilenames.add(candidateName);
-          zip.file(candidateName, fileBuffer);
-          bundledCount += 1;
-        } catch (error) {
-          console.error("Failed to include student invoice in ZIP bundle", {
-            error,
-            downloadUrl,
-            studentId: entry?.id ?? null,
-            studentName: entry?.name ?? null,
-          });
-        }
-      }
-
-      if (!bundledCount) {
-        toast.error("We couldn't prepare any invoices to download.");
-        return;
-      }
-
-      const zipBlob = await zip.generateAsync({ type: "blob" });
-      const zipName = composeFilename(
-        [
-          selectedVendor?.name ?? "Vendor",
-          activeInvoiceDetails.month ?? "",
-          activeInvoiceDetails.year ? String(activeInvoiceDetails.year) : "",
-          "Student Invoices",
-        ],
-        "zip",
-        "student-invoices",
+      const accessToken = await getAccessTokenSilently();
+      const response = await fetchVendorInvoiceArchive(
+        vendorId,
+        normalizedMonth,
+        accessToken,
       );
 
-      const blobUrl = window.URL.createObjectURL(zipBlob);
+      const downloadUrl =
+        typeof response?.download_url === "string"
+          ? response.download_url.trim()
+          : "";
 
-      try {
-        const link = document.createElement("a");
-        link.href = blobUrl;
-        link.download = zipName;
-        link.rel = "noopener noreferrer";
-        link.style.display = "none";
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-      } finally {
-        window.URL.revokeObjectURL(blobUrl);
+      if (!downloadUrl) {
+        throw new Error("Missing download URL in archive response");
       }
 
-      toast.success(
-        `Downloading ${bundledCount} student invoice${bundledCount === 1 ? "" : "s"}.`,
+      openInvoiceUrl(
+        downloadUrl,
+        "We couldn't open the invoice archive. Please try again.",
       );
+      toast.success("Your ZIP archive is ready with a CSV summary.");
     } catch (error) {
-      console.error("Failed to bundle student invoices", error);
-      toast.error("We couldn't bundle these invoices. Please try again.");
+      console.error("Failed to prepare invoice archive", {
+        error,
+        vendorId,
+        normalizedMonth,
+      });
+      toast.error("We couldn't prepare the invoice archive. Please try again.");
     } finally {
       setDownloadingInvoices(false);
     }
   }, [
     activeInvoiceDetails,
-    composeFilename,
-    requestInvoiceUrl,
-    selectedVendor?.name,
+    getAccessTokenSilently,
+    openInvoiceUrl,
+    selectedVendor?.id,
+    studentInvoiceCount,
   ]);
-
   const vendorOverviewHighlights = useMemo(() => {
     if (!selectedVendor) {
       return [];
@@ -1754,7 +1682,7 @@ export default function DistrictDashboard({
                         Download all invoices for {activeInvoiceDetails.month} {activeInvoiceDetails.year}
                       </h5>
                       <p className="mt-1 text-sm text-slate-600">
-                        Get a zipped archive containing every student invoice included in this month's billing.
+                        Get a zipped archive containing every student invoice for this month along with a CSV summary for quick review.
                       </p>
                       <div className="mt-4 flex flex-wrap items-center gap-3">
                         <button
@@ -1769,7 +1697,7 @@ export default function DistrictDashboard({
                         >
                           {downloadingInvoices
                             ? "Preparing download…"
-                            : "Download all invoices (.zip)"}
+                            : "Download ZIP + CSV"}
                         </button>
                         <span className="text-xs text-slate-500">
                           {studentInvoiceCount
@@ -1779,7 +1707,7 @@ export default function DistrictDashboard({
                       </div>
                       {studentInvoiceCount ? (
                         <p className="mt-2 text-xs text-slate-500">
-                          Download to review each student's documentation without browsing an itemized list.
+                          The archive opens in a new tab and includes every PDF plus a CSV summary of filenames, S3 keys, dates, and sizes.
                         </p>
                       ) : (
                         <p className="mt-2 text-xs text-slate-500">

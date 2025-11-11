@@ -240,9 +240,16 @@ def generate_presigned_url(
     )
 
 
+def get_s3_client() -> BaseClient:
+    """Return a configured S3 client instance."""
+
+    return _client()
+
+
 __all__ = [
     "upload_file",
     "upload_bytes",
     "generate_presigned_url",
     "sanitize_object_key",
+    "get_s3_client",
 ]
