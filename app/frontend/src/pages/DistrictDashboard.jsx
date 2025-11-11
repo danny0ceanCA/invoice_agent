@@ -12,6 +12,7 @@ import {
   activateDistrictMembership,
 } from "../api/districts";
 import { formatPostalAddress } from "../api/common";
+import { fetchInvoicePresignedUrl } from "../api/invoices";
 import { buildSafeFilename, downloadFileFromPresignedUrl } from "../utils/downloadFile";
 
 const menuItems = [
@@ -136,6 +137,7 @@ const aggregateStudentEntries = (entries) => {
         amountValue: 0,
         services: new Map(),
         pdfUrls: new Set(),
+        pdfKeys: new Set(),
         timesheetUrls: new Set(),
         entryCount: 0,
       });
@@ -158,6 +160,9 @@ const aggregateStudentEntries = (entries) => {
 
     if (entry.pdfUrl) {
       group.pdfUrls.add(entry.pdfUrl);
+    }
+    if (entry.pdfS3Key) {
+      group.pdfKeys.add(entry.pdfS3Key);
     }
     if (entry.timesheetUrl) {
       group.timesheetUrls.add(entry.timesheetUrl);
@@ -188,6 +193,7 @@ const aggregateStudentEntries = (entries) => {
             ? `${services.length} services`
             : null,
         pdfUrl: group.pdfUrls.size ? Array.from(group.pdfUrls)[0] : null,
+        pdfS3Key: group.pdfKeys.size ? Array.from(group.pdfKeys)[0] : null,
         timesheetUrl: group.timesheetUrls.size
           ? Array.from(group.timesheetUrls)[0]
           : null,
@@ -746,6 +752,7 @@ export default function DistrictDashboard({
                     amount: currencyFormatter.format(amountValue),
                     amountValue,
                     pdfUrl: student.pdf_url ?? null,
+                    pdfS3Key: student.pdf_s3_key ?? null,
                     timesheetUrl: student.timesheet_url ?? null,
                   };
                 });
@@ -757,6 +764,7 @@ export default function DistrictDashboard({
                 status: invoice.status ? invoice.status.trim() : "",
                 processedOn: invoice.processed_on ?? "Processing",
                 pdfUrl: invoice.download_url ?? invoice.pdf_url ?? null,
+                pdfS3Key: invoice.pdf_s3_key ?? null,
                 timesheetCsvUrl: invoice.timesheet_csv_url ?? null,
                 students,
               };
@@ -1271,7 +1279,9 @@ export default function DistrictDashboard({
 
   const openInvoiceUrl = useCallback((url, errorMessage) => {
     if (!url) {
-      toast.error(errorMessage);
+      if (errorMessage) {
+        toast.error(errorMessage);
+      }
       return;
     }
 
@@ -1283,15 +1293,101 @@ export default function DistrictDashboard({
     }
   }, []);
 
-  const handleVendorInvoiceDownload = useCallback(() => {
-    openInvoiceUrl(activeInvoiceDetails?.pdfUrl, "Invoice file not available.");
-  }, [activeInvoiceDetails?.pdfUrl, openInvoiceUrl]);
+  const requestInvoiceUrl = useCallback(
+    async (s3Key, invoiceId) => {
+      const accessToken = await getAccessTokenSilently();
+      const response = await fetchInvoicePresignedUrl(s3Key, accessToken);
+      const rawUrl = typeof response?.url === "string" ? response.url.trim() : "";
+
+      if (!rawUrl) {
+        throw new Error("Presigned URL missing from response");
+      }
+
+      if (invoiceId == null) {
+        return rawUrl;
+      }
+
+      const cacheBuster = `_=${encodeURIComponent(String(invoiceId))}`;
+      return `${rawUrl}${rawUrl.includes("?") ? "&" : "?"}${cacheBuster}`;
+    },
+    [getAccessTokenSilently],
+  );
+
+  const handleVendorInvoiceDownload = useCallback(async () => {
+    const fallbackUrl = activeInvoiceDetails?.pdfUrl ?? null;
+    const s3Key = activeInvoiceDetails?.pdfS3Key ?? null;
+    const invoiceId = activeInvoiceDetails?.id ?? null;
+
+    if (s3Key) {
+      try {
+        const presignedUrl = await requestInvoiceUrl(s3Key, invoiceId);
+        openInvoiceUrl(presignedUrl, "Invoice file not available.");
+        return;
+      } catch (error) {
+        console.error("Failed to fetch vendor invoice presigned URL", {
+          error,
+          invoiceId,
+          s3Key,
+        });
+        toast.error("Unable to fetch this invoice. Please try again.");
+      }
+    }
+
+    if (fallbackUrl) {
+      openInvoiceUrl(fallbackUrl, "Invoice file not available.");
+      return;
+    }
+
+    toast.error("Invoice file not available.");
+  }, [
+    activeInvoiceDetails?.id,
+    activeInvoiceDetails?.pdfS3Key,
+    activeInvoiceDetails?.pdfUrl,
+    openInvoiceUrl,
+    requestInvoiceUrl,
+  ]);
 
   const handleStudentInvoiceDownload = useCallback(
-    (url) => {
-      openInvoiceUrl(url, "Invoice file not available for this student.");
+    async (entry) => {
+      const fallbackUrl = entry?.pdfUrl ?? activeInvoiceDetails?.pdfUrl ?? null;
+      const s3Key = entry?.pdfS3Key ?? activeInvoiceDetails?.pdfS3Key ?? null;
+      const invoiceId = activeInvoiceDetails?.id ?? entry?.originalLineItemId ?? null;
+
+      if (s3Key) {
+        try {
+          const presignedUrl = await requestInvoiceUrl(s3Key, invoiceId);
+          openInvoiceUrl(
+            presignedUrl,
+            "Invoice file not available for this student.",
+          );
+          return;
+        } catch (error) {
+          console.error("Failed to fetch student invoice presigned URL", {
+            error,
+            invoiceId,
+            s3Key,
+          });
+          toast.error("Unable to fetch this invoice. Please try again.");
+        }
+      }
+
+      if (fallbackUrl) {
+        openInvoiceUrl(
+          fallbackUrl,
+          "Invoice file not available for this student.",
+        );
+        return;
+      }
+
+      toast.error("Invoice file not available for this student.");
     },
-    [openInvoiceUrl],
+    [
+      activeInvoiceDetails?.id,
+      activeInvoiceDetails?.pdfS3Key,
+      activeInvoiceDetails?.pdfUrl,
+      openInvoiceUrl,
+      requestInvoiceUrl,
+    ],
   );
 
   const handleStudentTimesheetDownload = useCallback(
@@ -1729,7 +1825,13 @@ export default function DistrictDashboard({
                         <div className="mt-4 max-h-[65vh] overflow-y-auto pr-1">
                           <ul className="space-y-3">
                             {filteredStudents.map((entry) => {
-                              const studentInvoiceUrl = entry.pdfUrl ?? null;
+                              const studentInvoiceUrl =
+                                entry.pdfUrl ?? activeInvoiceDetails?.pdfUrl ?? null;
+                              const studentInvoiceKey =
+                                entry.pdfS3Key ?? activeInvoiceDetails?.pdfS3Key ?? null;
+                              const studentInvoiceAvailable = Boolean(
+                                studentInvoiceUrl || studentInvoiceKey,
+                              );
                               const studentTimesheetUrl = entry.timesheetUrl ?? null;
                               return (
                                 <li
@@ -1737,25 +1839,23 @@ export default function DistrictDashboard({
                                   className="rounded-xl border border-slate-200 bg-white shadow-sm"
                                 >
                                   <div
-                                    role={studentInvoiceUrl ? "button" : undefined}
-                                    tabIndex={studentInvoiceUrl ? 0 : undefined}
-                                    onClick={() =>
-                                      handleStudentInvoiceDownload(studentInvoiceUrl)
-                                    }
+                                    role={studentInvoiceAvailable ? "button" : undefined}
+                                    tabIndex={studentInvoiceAvailable ? 0 : undefined}
+                                    onClick={() => handleStudentInvoiceDownload(entry)}
                                     onKeyDown={(event) => {
                                       if (
-                                        !studentInvoiceUrl ||
+                                        !studentInvoiceAvailable ||
                                         (event.key !== "Enter" && event.key !== " ")
                                       ) {
                                         return;
                                       }
 
                                       event.preventDefault();
-                                      handleStudentInvoiceDownload(studentInvoiceUrl);
+                                      handleStudentInvoiceDownload(entry);
                                     }}
-                                    aria-disabled={!studentInvoiceUrl}
+                                    aria-disabled={!studentInvoiceAvailable}
                                     className={`flex flex-col gap-3 px-4 py-3 text-sm text-slate-700 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60 sm:flex-row sm:items-center sm:justify-between ${
-                                      studentInvoiceUrl
+                                      studentInvoiceAvailable
                                         ? "cursor-pointer hover:bg-amber-50"
                                         : "cursor-default"
                                     }`}
@@ -1779,12 +1879,12 @@ export default function DistrictDashboard({
                                       {entry.amount ? (
                                         <span className="font-semibold text-slate-900">{entry.amount}</span>
                                       ) : null}
-                                      {studentInvoiceUrl ? (
+                                      {studentInvoiceAvailable ? (
                                         <button
                                           type="button"
                                           onClick={(event) => {
                                             event.stopPropagation();
-                                            handleStudentInvoiceDownload(studentInvoiceUrl);
+                                            handleStudentInvoiceDownload(entry);
                                           }}
                                           className="inline-flex items-center rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700 transition hover:bg-amber-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
                                         >
