@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from io import BytesIO
 import re
@@ -15,6 +16,9 @@ from reportlab.pdfgen import canvas
 
 from app.backend.src.services.metrics import pdf_generation_seconds
 from app.backend.src.services.s3 import upload_bytes
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,8 +36,10 @@ def _safe_token(raw: str) -> str:
     """
 
     token = (raw or "").strip()
+    token = token.encode("ascii", errors="ignore").decode("ascii")
     token = re.sub(r"\s+", "_", token)             # normalize whitespace to single underscores
-    token = re.sub(r"[^A-Za-z0-9._-]", "_", token) # drop slashes and odd chars
+    token = re.sub(r"[\\/]+", "_", token)         # replace path separators explicitly
+    token = re.sub(r"[^A-Za-z0-9._-]", "_", token) # drop remaining unsafe chars
     token = re.sub(r"_+", "_", token)               # collapse runs of underscores
     return token.strip("_")
 
@@ -59,6 +65,7 @@ def generate_invoice_pdf(
     """Render a student-level invoice PDF and upload it to S3."""
 
     filename = _build_filename(student, service_month)
+    logger.info("Uploading invoice PDF with filename '%s'", filename)
     start = perf_counter()
     buffer = BytesIO()
     pdf_canvas = canvas.Canvas(buffer, pagesize=letter)
