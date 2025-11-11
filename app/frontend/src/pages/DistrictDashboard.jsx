@@ -2160,16 +2160,16 @@ export default function DistrictDashboard({
                         <table className="min-w-full divide-y divide-slate-200 text-sm">
                           <thead>
                             <tr>
-                              <th className="py-2 pr-4 text-left text-xs font-semibold uppercase tracking-widest text-slate-500">
+                              <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-widest text-slate-500 first:pl-0 last:pr-0">
                                 Invoice
                               </th>
-                              <th className="py-2 pr-4 text-right text-xs font-semibold uppercase tracking-widest text-slate-500">
+                              <th className="px-4 py-2 text-right text-xs font-semibold uppercase tracking-widest text-slate-500 first:pl-0 last:pr-0">
                                 Amount
                               </th>
-                              <th className="py-2 pr-4 text-left text-xs font-semibold uppercase tracking-widest text-slate-500">
+                              <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-widest text-slate-500 first:pl-0 last:pr-0">
                                 Status
                               </th>
-                              <th className="py-2 pr-4 text-left text-xs font-semibold uppercase tracking-widest text-slate-500">
+                              <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-widest text-slate-500 first:pl-0 last:pr-0">
                                 Uploaded
                               </th>
                             </tr>
@@ -2179,13 +2179,13 @@ export default function DistrictDashboard({
                               <tr
                                 key={`${document.invoiceId ?? document.invoiceName ?? "invoice"}-${document.s3Key ?? index}`}
                               >
-                                <td className="whitespace-nowrap py-3 pr-4 font-medium text-slate-900">
+                                <td className="whitespace-nowrap px-4 py-3 font-medium text-slate-900 first:pl-0 last:pr-0">
                                   {document.invoiceName}
                                 </td>
-                                <td className="whitespace-nowrap py-3 pr-4 text-right font-medium text-slate-900">
+                                <td className="whitespace-nowrap px-4 py-3 text-right font-medium text-slate-900 first:pl-0 last:pr-0">
                                   {document.amountDisplay}
                                 </td>
-                                <td className="whitespace-nowrap py-3 pr-4">
+                                <td className="whitespace-nowrap px-4 py-3 first:pl-0 last:pr-0">
                                   {document.status ? (
                                     <span
                                       className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold ${getInvoiceStatusBadgeClasses(
@@ -2198,7 +2198,7 @@ export default function DistrictDashboard({
                                     <span className="text-xs text-slate-500">Pending</span>
                                   )}
                                 </td>
-                                <td className="whitespace-nowrap py-3 pr-4 text-slate-600">
+                                <td className="whitespace-nowrap px-4 py-3 text-slate-600 first:pl-0 last:pr-0">
                                   {document.uploadedAtDisplay ?? "—"}
                                 </td>
                               </tr>
