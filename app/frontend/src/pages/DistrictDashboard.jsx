@@ -781,6 +781,7 @@ export default function DistrictDashboard({
   const [vendorProfiles, setVendorProfiles] = useState([]);
   const [vendorsLoading, setVendorsLoading] = useState(false);
   const [vendorsError, setVendorsError] = useState(null);
+  const [activeInvoiceDetails, setActiveInvoiceDetails] = useState(null);
   const [districtProfile, setDistrictProfile] = useState(null);
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileError, setProfileError] = useState(null);
@@ -1438,7 +1439,7 @@ export default function DistrictDashboard({
     selectedVendorName,
   ]);
 
-  const activeInvoiceDetails = useMemo(() => {
+  const computedActiveInvoiceDetails = useMemo(() => {
     if (!selectedVendor || !selectedInvoiceKey) {
       return null;
     }
@@ -1462,6 +1463,10 @@ export default function DistrictDashboard({
       students: aggregatedStudents,
     };
   }, [selectedInvoiceKey, selectedVendor]);
+
+  useEffect(() => {
+    setActiveInvoiceDetails(computedActiveInvoiceDetails);
+  }, [computedActiveInvoiceDetails]);
 
   const studentInvoiceCount = activeInvoiceDetails?.students?.length ?? 0;
   const invoiceDocumentCount = invoiceDocuments.length;
