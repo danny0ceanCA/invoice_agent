@@ -100,6 +100,7 @@ class DistrictVendorInvoiceStudent(BaseModel):
     service: str | None
     amount: float
     pdf_url: str | None = None
+    pdf_s3_key: str | None = None
     timesheet_url: str | None = None
 
 
@@ -115,6 +116,7 @@ class DistrictVendorInvoice(BaseModel):
     processed_on: str | None
     download_url: str | None
     pdf_url: str | None
+    pdf_s3_key: str | None = None
     timesheet_csv_url: str | None
     students: list[DistrictVendorInvoiceStudent]
 
