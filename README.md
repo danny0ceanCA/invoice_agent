@@ -1,4 +1,4 @@
-# ASCS x SCUSD Invoice Agent
+``# ASCS x SCUSD Invoice Agent
 
 This repository hosts the multi-tenant invoice automation platform combining a FastAPI
 backend with a React + Vite frontend. The current commit provides the project scaffolding,

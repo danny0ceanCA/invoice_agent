@@ -1,26 +1,16 @@
 """Routes for the natural-language analytics agent endpoint."""
 
 from __future__ import annotations
-
 from collections.abc import Mapping
 from typing import Any
-
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
-
-from agents import Runner
-
+from agents import Agent, Runner
 from app.backend.src.core.config import get_settings
 from app.backend.src.core.security import get_current_user
 from app.backend.src.models import User
 
 LOGGER = structlog.get_logger(__name__)
-
-try:  # pragma: no cover - optional dependency in certain environments
-    from agents import Agent
-except ImportError:  # pragma: no cover - executed when SDK is absent
-    Agent = None  # type: ignore[assignment]
-
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 _AGENT: Agent | None = None
@@ -29,7 +19,6 @@ _AGENT_INITIALIZED = False
 
 def _build_agent_tools(settings: Any) -> list[dict[str, Any]]:
     """Return the tool configuration supplied to the Agent SDK."""
-
     tools: list[dict[str, Any]] = []
 
     tools.append(
@@ -68,7 +57,6 @@ def _build_agent_tools(settings: Any) -> list[dict[str, Any]]:
 
 def _ensure_agent_available() -> Agent | None:
     """Create the analytics agent instance when the SDK and config are present."""
-
     global _AGENT_INITIALIZED, _AGENT
 
     if _AGENT_INITIALIZED:
@@ -76,13 +64,8 @@ def _ensure_agent_available() -> Agent | None:
 
     _AGENT_INITIALIZED = True
 
-    if Agent is None:
-        LOGGER.info("analytics_agent_sdk_missing")
-        return None
-
     try:
         settings = get_settings()
-
         required_settings = {
             "database_url": settings.database_url,
             "aws_region": settings.aws_region,
@@ -93,10 +76,7 @@ def _ensure_agent_available() -> Agent | None:
 
         missing = [key for key, value in required_settings.items() if not value]
         if missing:
-            LOGGER.warning(
-                "analytics_agent_missing_configuration",
-                missing=missing,
-            )
+            LOGGER.warning("analytics_agent_missing_configuration", missing=missing)
             return None
 
         agent_tools = _build_agent_tools(settings)
@@ -109,12 +89,19 @@ def _ensure_agent_available() -> Agent | None:
             ),
         )
         _AGENT.tools = agent_tools
+
+        # Extra guard to ensure valid Agent instance
+        if not hasattr(_AGENT, "name"):
+            LOGGER.warning("analytics_agent_invalid_instance")
+            return None
+
         LOGGER.info(
             "analytics_agent_initialized",
             database=required_settings["database_url"],
             bucket=required_settings["aws_s3_bucket"],
         )
-    except Exception as exc:  # pragma: no cover - defensive logging
+
+    except Exception as exc:  # defensive logging
         LOGGER.warning("analytics_agent_initialization_failed", error=str(exc))
         _AGENT = None
 
@@ -123,23 +110,18 @@ def _ensure_agent_available() -> Agent | None:
 
 def _normalize_agent_result(result: Any) -> tuple[str, str, dict[str, Any]]:
     """Convert the agent SDK response into display text, HTML, and extras."""
-
     if isinstance(result, Mapping):
         text = str(result.get("text") or "")
         html = str(result.get("html") or "")
-        extras = {
-            key: value
-            for key, value in result.items()
-            if key not in {"text", "html"}
-        }
+        extras = {k: v for k, v in result.items() if k not in {"text", "html"}}
         return text, html, extras
 
     if hasattr(result, "model_dump"):
-        payload = result.model_dump()  # type: ignore[call-arg]
+        payload = result.model_dump()
         return _normalize_agent_result(payload)
 
     if hasattr(result, "dict"):
-        payload = result.dict()  # type: ignore[call-arg]
+        payload = result.dict()
         return _normalize_agent_result(payload)
 
     text = str(result) if result is not None else ""
@@ -149,7 +131,6 @@ def _normalize_agent_result(result: Any) -> tuple[str, str, dict[str, Any]]:
 @router.post("/agent")
 async def run_agent(request: dict, user: User = Depends(get_current_user)) -> dict[str, Any]:
     """Execute the analytics agent and format its response."""
-
     query = str(request.get("query") or "").strip()
     if not query:
         raise HTTPException(
@@ -158,7 +139,6 @@ async def run_agent(request: dict, user: User = Depends(get_current_user)) -> di
         )
 
     agent = _ensure_agent_available()
-
     if agent is None:
         text = (
             "Analytics assistant is temporarily unavailable. "
@@ -168,9 +148,18 @@ async def run_agent(request: dict, user: User = Depends(get_current_user)) -> di
         return {"text": text, "html": html}
 
     try:
-        runner = Runner(agent)
-        result = await runner.run(query)
-    except Exception as exc:  # pragma: no cover - defensive logging
+        sdk_result = await Runner.run(agent, query)
+
+        # Convert the SDK Result object to a dict for normalization
+        if hasattr(sdk_result, "final_output"):
+            result = {
+                "text": sdk_result.final_output,
+                "html": f"<p>{sdk_result.final_output}</p>",
+            }
+        else:
+            result = sdk_result
+
+    except Exception as exc:
         LOGGER.error("analytics_agent_query_failed", error=str(exc))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -186,5 +175,5 @@ async def run_agent(request: dict, user: User = Depends(get_current_user)) -> di
     return response
 
 
-if Agent is not None:  # pragma: no cover - eager initialization when SDK available
+if Agent is not None:
     _ensure_agent_available()
