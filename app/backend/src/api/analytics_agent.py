@@ -7,7 +7,6 @@ from typing import Any
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
 
 from app.backend.src.core.config import get_settings
 from app.backend.src.core.security import get_current_user
@@ -22,37 +21,50 @@ except ImportError:  # pragma: no cover - executed when SDK is absent
 
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
-
-
-class AnalyticsAgentRequest(BaseModel):
-    """Schema describing the incoming analytics agent request."""
-
-    query: str = Field(..., description="Natural-language analytics prompt")
-
-    def cleaned_query(self) -> str:
-        """Return a stripped query or raise a validation error."""
-
-        value = (self.query or "").strip()
-        if not value:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="The query field cannot be empty.",
-            )
-        return value
-
-
-class AnalyticsAgentResponse(BaseModel):
-    """Normalized response returned to the frontend."""
-
-    text: str
-    html: str
-
-
 _AGENT: Agent | None = None
 _AGENT_INITIALIZED = False
 
 
-def _initialize_agent() -> Agent | None:
+def _build_agent_tools(settings: Any) -> list[dict[str, Any]]:
+    """Return the tool configuration supplied to the Agent SDK."""
+
+    tools: list[dict[str, Any]] = []
+
+    tools.append(
+        {
+            "type": "sql",
+            "name": "district_invoice_database",
+            "description": (
+                "Execute read-only SQL queries against the district invoice database "
+                "to retrieve invoices, vendors, students, and approval details."
+            ),
+            "connection": settings.database_url,
+            "readonly": True,
+        }
+    )
+
+    tools.append(
+        {
+            "type": "s3",
+            "name": "district_invoice_file_storage",
+            "description": (
+                "Access the AWS S3 bucket storing vendor invoice files. List invoice "
+                "objects by vendor or month prefixes and generate presigned download "
+                "URLs valid for one hour."
+            ),
+            "bucket": settings.aws_s3_bucket,
+            "region": settings.aws_region,
+            "access_key_id": settings.aws_access_key_id,
+            "secret_access_key": settings.aws_secret_access_key,
+            "presign_ttl_seconds": 3600,
+            "local_cache_path": settings.local_storage_path,
+        }
+    )
+
+    return tools
+
+
+def _ensure_agent_available() -> Agent | None:
     """Lazily create the analytics agent instance when available."""
 
     global _AGENT_INITIALIZED, _AGENT
@@ -71,13 +83,7 @@ def _initialize_agent() -> Agent | None:
         _AGENT = Agent(
             name="district_analytics_agent",
             description="Answers district finance and operations questions.",
-            tools=[
-                {
-                    "type": "sql",
-                    "connection": settings.database_url,
-                    "readonly": True,
-                }
-            ],
+            tools=_build_agent_tools(settings),
         )
     except Exception as exc:  # pragma: no cover - defensive logging
         LOGGER.warning("analytics_agent_initialization_failed", error=str(exc))
@@ -86,13 +92,18 @@ def _initialize_agent() -> Agent | None:
     return _AGENT
 
 
-def _normalize_agent_result(result: Any) -> tuple[str, str]:
-    """Convert the agent SDK response into display text and HTML."""
+def _normalize_agent_result(result: Any) -> tuple[str, str, dict[str, Any]]:
+    """Convert the agent SDK response into display text, HTML, and extras."""
 
     if isinstance(result, Mapping):
         text = str(result.get("text") or "")
         html = str(result.get("html") or "")
-        return text, html
+        extras = {
+            key: value
+            for key, value in result.items()
+            if key not in {"text", "html"}
+        }
+        return text, html, extras
 
     if hasattr(result, "model_dump"):
         payload = result.model_dump()  # type: ignore[call-arg]
@@ -103,23 +114,26 @@ def _normalize_agent_result(result: Any) -> tuple[str, str]:
         return _normalize_agent_result(payload)
 
     text = str(result) if result is not None else ""
-    return text, ""
+    return text, "", {}
 
 
-@router.post("/agent", response_model=AnalyticsAgentResponse)
-async def run_agent(
-    payload: AnalyticsAgentRequest,
-    user: User = Depends(get_current_user),
-) -> AnalyticsAgentResponse:
+@router.post("/agent")
+async def run_agent(request: dict, user: User = Depends(get_current_user)) -> dict[str, Any]:
     """Execute the analytics agent and format its response."""
 
-    query = payload.cleaned_query()
-    agent = _initialize_agent()
+    query = str(request.get("query") or "").strip()
+    if not query:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A natural-language query is required.",
+        )
+
+    agent = _ensure_agent_available()
 
     if agent is None:
         text = "Analytics assistant is not configured."
         html = f"<p>{text} Received query: {query}</p>"
-        return AnalyticsAgentResponse(text=text, html=html)
+        return {"text": text, "html": html}
 
     try:
         result = agent.query(prompt=query, context={"district_id": user.district_id})
@@ -130,8 +144,10 @@ async def run_agent(
             detail="Analytics agent failed to process the request.",
         ) from exc
 
-    text, html = _normalize_agent_result(result)
+    text, html, extras = _normalize_agent_result(result)
     if not html:
         html = f"<p>{text}</p>" if text else "<p>No details available.</p>"
 
-    return AnalyticsAgentResponse(text=text, html=html)
+    response: dict[str, Any] = {"text": text, "html": html}
+    response.update(extras)
+    return response
