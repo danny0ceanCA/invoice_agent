@@ -17,7 +17,7 @@ from app.backend.src.models import User
 LOGGER = structlog.get_logger(__name__)
 
 try:  # pragma: no cover - optional dependency in certain environments
-    from agentsdk import Agent
+    from agents import Agent
 except ImportError:  # pragma: no cover - executed when SDK is absent
     Agent = None  # type: ignore[assignment]
 
