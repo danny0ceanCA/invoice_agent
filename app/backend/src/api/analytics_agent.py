@@ -8,6 +8,8 @@ from typing import Any
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from agents import Runner
+
 from app.backend.src.core.config import get_settings
 from app.backend.src.core.security import get_current_user
 from app.backend.src.models import User
@@ -166,7 +168,7 @@ async def run_agent(request: dict, user: User = Depends(get_current_user)) -> di
         return {"text": text, "html": html}
 
     try:
-        result = agent.query(prompt=query, context={"district_id": user.district_id})
+        result = Runner.run_sync(agent, query)
     except Exception as exc:  # pragma: no cover - defensive logging
         LOGGER.error("analytics_agent_query_failed", error=str(exc))
         raise HTTPException(
