@@ -5,6 +5,7 @@ from . import (
     admin_users,
     admin_districts,
     analytics,
+    analytics_agent,
     auth,
     debug,
     districts,
@@ -30,4 +31,5 @@ __all__ = [
     "uploads",
     "users",
     "vendors",
+    "analytics_agent",
 ]
