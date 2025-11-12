@@ -97,11 +97,16 @@ def _ensure_agent_available() -> Agent | None:
             )
             return None
 
+        agent_tools = _build_agent_tools(settings)
+
         _AGENT = Agent(
             name="district_analytics_agent",
-            description="Answers district finance and operations questions.",
-            tools=_build_agent_tools(settings),
+            instructions=(
+                "You are an AI analytics assistant that answers finance and operations "
+                "questions using district data."
+            ),
         )
+        _AGENT.tools = agent_tools
         LOGGER.info(
             "analytics_agent_initialized",
             database=required_settings["database_url"],
