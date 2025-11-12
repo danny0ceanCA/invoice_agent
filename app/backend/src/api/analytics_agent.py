@@ -1,150 +1,137 @@
-"""AI-powered analytics router for natural language queries."""
+"""Routes for the natural-language analytics agent endpoint."""
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.backend.src.core.config import get_settings
 from app.backend.src.core.security import get_current_user
 from app.backend.src.models import User
 
-try:  # pragma: no cover - optional dependency in some environments
+LOGGER = structlog.get_logger(__name__)
+
+try:  # pragma: no cover - optional dependency in certain environments
     from agentsdk import Agent
-except ImportError:  # pragma: no cover - graceful fallback when SDK missing
+except ImportError:  # pragma: no cover - executed when SDK is absent
     Agent = None  # type: ignore[assignment]
 
-
-LOGGER = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
 
 class AnalyticsAgentRequest(BaseModel):
-    """Expected payload from the frontend analytics assistant."""
+    """Schema describing the incoming analytics agent request."""
 
-    query: str
+    query: str = Field(..., description="Natural-language analytics prompt")
 
-    def normalized_query(self) -> str:
-        """Return the sanitized query string or raise if invalid."""
+    def cleaned_query(self) -> str:
+        """Return a stripped query or raise a validation error."""
 
-        candidate = (self.query or "").strip()
-        if not candidate:
+        value = (self.query or "").strip()
+        if not value:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="A natural-language query is required.",
+                detail="The query field cannot be empty.",
             )
-        return candidate
+        return value
 
 
 class AnalyticsAgentResponse(BaseModel):
-    """Normalized response returned to the frontend assistant."""
+    """Normalized response returned to the frontend."""
 
     text: str
     html: str
-    csv_url: str | None = None
+
+
+_AGENT: Agent | None = None
+_AGENT_INITIALIZED = False
 
 
 def _initialize_agent() -> Agent | None:
-    """Instantiate the analytics agent if the SDK is available."""
+    """Lazily create the analytics agent instance when available."""
 
-    if Agent is None:  # pragma: no cover - handled at runtime
-        LOGGER.warning("analytics_agent_sdk_unavailable")
+    global _AGENT_INITIALIZED, _AGENT
+
+    if _AGENT_INITIALIZED:
+        return _AGENT
+
+    _AGENT_INITIALIZED = True
+
+    if Agent is None:
+        LOGGER.info("analytics_agent_sdk_missing")
         return None
 
-    settings = get_settings()
-    connection_url = settings.database_url
-
-    return Agent(
-        name="district_analytics_agent",
-        description="Provides natural-language analytics over invoices, vendors, and students",
-        tools=[
-            {
-                "type": "sql",
-                "connection": connection_url,
-                "tables": ["invoices", "students", "vendors"],
-                "readonly": True,
-            },
-            {
-                "type": "custom",
-                "name": "render_table",
-                "description": "Render JSON query results as HTML table",
-            },
-        ],
-    )
-
-
-_ANALYTICS_AGENT = _initialize_agent()
-
-
-def _ensure_agent_available() -> Agent:
-    """Return the configured analytics agent or raise a service error."""
-
-    if _ANALYTICS_AGENT is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Analytics agent is currently unavailable.",
+    try:
+        settings = get_settings()
+        _AGENT = Agent(
+            name="district_analytics_agent",
+            description="Answers district finance and operations questions.",
+            tools=[
+                {
+                    "type": "sql",
+                    "connection": settings.database_url,
+                    "readonly": True,
+                }
+            ],
         )
-    return _ANALYTICS_AGENT
+    except Exception as exc:  # pragma: no cover - defensive logging
+        LOGGER.warning("analytics_agent_initialization_failed", error=str(exc))
+        _AGENT = None
+
+    return _AGENT
 
 
-def _normalize_agent_result(result: Any) -> AnalyticsAgentResponse:
-    """Convert arbitrary agent SDK responses into the public schema."""
-
-    if isinstance(result, AnalyticsAgentResponse):
-        return result
-
-    text = ""
-    html = ""
-    csv_url: str | None = None
+def _normalize_agent_result(result: Any) -> tuple[str, str]:
+    """Convert the agent SDK response into display text and HTML."""
 
     if isinstance(result, Mapping):
         text = str(result.get("text") or "")
         html = str(result.get("html") or "")
-        csv_url_value = result.get("csv_url") or result.get("csvUrl")
-        if isinstance(csv_url_value, str) and csv_url_value:
-            csv_url = csv_url_value
-    elif hasattr(result, "model_dump"):
-        data = result.model_dump()  # type: ignore[call-arg]
-        return _normalize_agent_result(data)
-    elif hasattr(result, "dict"):
-        data = result.dict()  # type: ignore[call-arg]
-        return _normalize_agent_result(data)
-    else:
-        # Fall back to treating the result as plain text
-        text = str(result) if result is not None else ""
+        return text, html
 
-    return AnalyticsAgentResponse(text=text, html=html, csv_url=csv_url)
+    if hasattr(result, "model_dump"):
+        payload = result.model_dump()  # type: ignore[call-arg]
+        return _normalize_agent_result(payload)
+
+    if hasattr(result, "dict"):
+        payload = result.dict()  # type: ignore[call-arg]
+        return _normalize_agent_result(payload)
+
+    text = str(result) if result is not None else ""
+    return text, ""
 
 
 @router.post("/agent", response_model=AnalyticsAgentResponse)
 async def run_agent(
-    request: AnalyticsAgentRequest,
+    payload: AnalyticsAgentRequest,
     user: User = Depends(get_current_user),
 ) -> AnalyticsAgentResponse:
-    """Execute the analytics agent against the provided natural language query."""
+    """Execute the analytics agent and format its response."""
 
-    query = request.normalized_query()
+    query = payload.cleaned_query()
+    agent = _initialize_agent()
 
-    agent = _ensure_agent_available()
-    context = {"district_id": user.district_id}
+    if agent is None:
+        text = "Analytics assistant is not configured."
+        html = f"<p>{text} Received query: {query}</p>"
+        return AnalyticsAgentResponse(text=text, html=html)
 
     try:
-        result = agent.query(prompt=query, context=context)
-    except HTTPException:
-        raise
+        result = agent.query(prompt=query, context={"district_id": user.district_id})
     except Exception as exc:  # pragma: no cover - defensive logging
-        LOGGER.error(
-            "analytics_agent_query_failed",
-            error=str(exc),
-            district_id=user.district_id,
-        )
+        LOGGER.error("analytics_agent_query_failed", error=str(exc))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Analytics agent failed to process the request.",
         ) from exc
 
-    return _normalize_agent_result(result)
+    text, html = _normalize_agent_result(result)
+    if not html:
+        html = f"<p>{text}</p>" if text else "<p>No details available.</p>"
+
+    return AnalyticsAgentResponse(text=text, html=html)

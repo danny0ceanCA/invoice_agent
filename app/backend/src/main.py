@@ -8,7 +8,6 @@ from .api import (
     admin_users,
     admin_districts,
     analytics,
-    analytics_agent,
     auth,
     debug,
     districts,
@@ -19,6 +18,7 @@ from .api import (
     uploads,
     users,
 )
+from app.api import analytics_agent
 from .core.logging import configure_logging
 
 
