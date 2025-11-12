@@ -168,7 +168,7 @@ async def run_agent(request: dict, user: User = Depends(get_current_user)) -> di
         return {"text": text, "html": html}
 
     try:
-        result = Runner.run_sync(agent, query)
+        result = await Runner.run(agent, query)
     except Exception as exc:  # pragma: no cover - defensive logging
         LOGGER.error("analytics_agent_query_failed", error=str(exc))
         raise HTTPException(
