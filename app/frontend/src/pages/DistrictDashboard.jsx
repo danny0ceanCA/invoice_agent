@@ -2579,8 +2579,7 @@ export default function DistrictDashboard({
                   : "Select an option from the menu to get started."}
               </p>
             </div>
-          )
-        )}
+          )}
       </section>
 
       {showProfileForm ? (
