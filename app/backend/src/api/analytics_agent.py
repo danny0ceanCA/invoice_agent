@@ -65,7 +65,7 @@ def _build_agent_tools(settings: Any) -> list[dict[str, Any]]:
 
 
 def _ensure_agent_available() -> Agent | None:
-    """Lazily create the analytics agent instance when available."""
+    """Create the analytics agent instance when the SDK and config are present."""
 
     global _AGENT_INITIALIZED, _AGENT
 
@@ -80,10 +80,32 @@ def _ensure_agent_available() -> Agent | None:
 
     try:
         settings = get_settings()
+
+        required_settings = {
+            "database_url": settings.database_url,
+            "aws_region": settings.aws_region,
+            "aws_s3_bucket": settings.aws_s3_bucket,
+            "aws_access_key_id": settings.aws_access_key_id,
+            "aws_secret_access_key": settings.aws_secret_access_key,
+        }
+
+        missing = [key for key, value in required_settings.items() if not value]
+        if missing:
+            LOGGER.warning(
+                "analytics_agent_missing_configuration",
+                missing=missing,
+            )
+            return None
+
         _AGENT = Agent(
             name="district_analytics_agent",
             description="Answers district finance and operations questions.",
             tools=_build_agent_tools(settings),
+        )
+        LOGGER.info(
+            "analytics_agent_initialized",
+            database=required_settings["database_url"],
+            bucket=required_settings["aws_s3_bucket"],
         )
     except Exception as exc:  # pragma: no cover - defensive logging
         LOGGER.warning("analytics_agent_initialization_failed", error=str(exc))
@@ -131,7 +153,10 @@ async def run_agent(request: dict, user: User = Depends(get_current_user)) -> di
     agent = _ensure_agent_available()
 
     if agent is None:
-        text = "Analytics assistant is not configured."
+        text = (
+            "Analytics assistant is temporarily unavailable. "
+            "Please try again later."
+        )
         html = f"<p>{text} Received query: {query}</p>"
         return {"text": text, "html": html}
 
@@ -151,3 +176,7 @@ async def run_agent(request: dict, user: User = Depends(get_current_user)) -> di
     response: dict[str, Any] = {"text": text, "html": html}
     response.update(extras)
     return response
+
+
+if Agent is not None:  # pragma: no cover - eager initialization when SDK available
+    _ensure_agent_available()
