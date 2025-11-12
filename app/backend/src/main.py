@@ -8,6 +8,7 @@ from .api import (
     admin_users,
     admin_districts,
     analytics,
+    analytics_agent,
     auth,
     debug,
     districts,
@@ -41,6 +42,7 @@ def create_app() -> FastAPI:
     app.include_router(invoices.router, prefix="/api")
     app.include_router(jobs.router, prefix="/api")
     app.include_router(analytics.router, prefix="/api")
+    app.include_router(analytics_agent.router, prefix="/api")
     app.include_router(admin.router, prefix="/api")
     app.include_router(admin_users.router, prefix="/api")
     app.include_router(admin_districts.router, prefix="/api")
