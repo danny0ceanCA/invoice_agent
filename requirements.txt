@@ -15,4 +15,5 @@ sqlalchemy
 structlog
 uvicorn
 httpx
+python-dotenv
 python-jose[cryptography]
