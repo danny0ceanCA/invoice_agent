@@ -428,6 +428,12 @@ async def run_agent(request: dict, user: User = Depends(get_current_user)) -> di
     try:
         context = _build_context(user, request.get("context"))
         response = await _execute_responses_workflow(query, context)
+        # DEBUG LOGGING – dump the raw Responses API object
+        try:
+            from pprint import pformat
+            LOGGER.warning("DEBUG_OPENAI_RESPONSE_RAW", raw=pformat(response))
+        except Exception as e:
+            LOGGER.warning("DEBUG_OPENAI_RESPONSE_RAW_FAILED", error=str(e))
     except RuntimeError as exc:
         LOGGER.warning("analytics_agent_unavailable", error=str(exc))
         raise HTTPException(
