@@ -194,16 +194,54 @@ TOOLS = [
     }
 ]
 
-def _extract_final_text(response):
-    """Extract message text from Responses API output format."""
+def _extract_final_output(response: Any) -> Any:
+    """Extract the final model output from the Responses API payload."""
 
     output_items = getattr(response, "output", None) or []
+    text_segments: list[str] = []
+
     for item in output_items:
-        if getattr(item, "type", None) == "message":
-            contents = getattr(item, "content", []) or []
-            for c in contents:
-                if getattr(c, "type", None) == "output_text":
-                    return c.text
+        item_type = getattr(item, "type", None)
+        if item_type is None and isinstance(item, Mapping):
+            item_type = item.get("type")
+
+        if item_type != "message":
+            # Ignore tool calls or other intermediate artifacts.
+            continue
+
+        contents = getattr(item, "content", None)
+        if contents is None and isinstance(item, Mapping):
+            contents = item.get("content")
+        contents = contents or []
+
+        for content in contents:
+            content_type = getattr(content, "type", None)
+            if content_type is None and isinstance(content, Mapping):
+                content_type = content.get("type")
+
+            if content_type != "output_text":
+                continue
+
+            text_value = getattr(content, "text", None)
+            if text_value is None and isinstance(content, Mapping):
+                text_value = content.get("text")
+
+            if not isinstance(text_value, str):
+                continue
+
+            normalized = text_value.strip()
+            if normalized and normalized[0] in "[{":
+                try:
+                    return json.loads(normalized)
+                except json.JSONDecodeError:
+                    # Fall back to treating it as plain text if parsing fails.
+                    pass
+
+            text_segments.append(text_value)
+
+    if text_segments:
+        return "".join(text_segments)
+
     return ""
 
 
@@ -247,6 +285,15 @@ def _try_parse_json(value: str) -> Any:
 
 def _format_final_output(final_output: Any) -> tuple[str, str]:
     """Convert the agent's final output into text and HTML payloads."""
+
+    if isinstance(final_output, str):
+        parsed_output = _try_parse_json(final_output)
+        if parsed_output is not None:
+            return _format_final_output(parsed_output)
+
+        text = final_output
+        html = f"<p>{escape(text)}</p>" if text else ""
+        return text, html
 
     if isinstance(final_output, list) and final_output and all(
         isinstance(item, Mapping) for item in final_output
@@ -442,21 +489,25 @@ async def run_agent(request: dict, user: User = Depends(get_current_user)) -> di
             detail="Analytics agent failed to process the request.",
         ) from exc
 
-    # FIXED: extract proper output from Responses API
-    final_text = _extract_final_text(response)
-    parsed_output = _try_parse_json(final_text)
-    final_output = parsed_output if parsed_output is not None else final_text
+    final_output = _extract_final_output(response)
     text, html = _format_final_output(final_output)
 
     response_payload: dict[str, Any] = {"text": text, "html": html}
 
+    rows_payload: list[Mapping[str, Any]] | None = None
     if isinstance(final_output, Mapping):
-        for key, value in final_output.items():
-            response_payload.setdefault(key, value)
-    elif isinstance(final_output, list) and final_output and all(
+        rows_value = final_output.get("rows")
+        if isinstance(rows_value, list) and all(
+            isinstance(item, Mapping) for item in rows_value
+        ):
+            rows_payload = rows_value
+    elif isinstance(final_output, list) and all(
         isinstance(item, Mapping) for item in final_output
     ):
-        response_payload.setdefault("rows", final_output)
+        rows_payload = final_output
+
+    if rows_payload is not None:
+        response_payload["rows"] = rows_payload
 
     return response_payload
 
