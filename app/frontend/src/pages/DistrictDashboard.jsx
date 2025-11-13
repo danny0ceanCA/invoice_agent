@@ -989,71 +989,76 @@ export default function DistrictDashboard({
     [analyticsError],
   );
 
-  const handleAnalyticsSubmit = useCallback(
-    async (event) => {
-      event.preventDefault();
-      const candidate = analyticsQuery.trim();
-      if (!candidate) {
-        setAnalyticsError("Ask a question to explore your analytics.");
-        return;
-      }
+  const submitAnalyticsQuery = useCallback(async () => {
+    const candidate = analyticsQuery.trim();
+    if (!candidate) {
+      setAnalyticsError("Ask a question to explore your analytics.");
+      return;
+    }
 
-      if (!isAuthenticated) {
-        setAnalyticsError("Sign in to use the analytics assistant.");
-        return;
-      }
+    if (!isAuthenticated) {
+      setAnalyticsError("Sign in to use the analytics assistant.");
+      return;
+    }
 
-      setAnalyticsLoading(true);
-      setAnalyticsError(null);
-      setAnalyticsResponse(null);
-      try {
-        const accessToken = await getAccessTokenSilently();
-        const response = await fetch("/api/analytics/agent", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-          },
-          body: JSON.stringify({ query: candidate }),
-        });
+    setAnalyticsLoading(true);
+    setAnalyticsError(null);
+    setAnalyticsResponse(null);
+    try {
+      const accessToken = await getAccessTokenSilently();
+      const response = await fetch("/api/analytics/agent", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        },
+        body: JSON.stringify({ query: candidate }),
+      });
 
-        if (!response.ok) {
-          let message = "We couldn't process your question. Try again in a moment.";
-          try {
-            const payload = await response.json();
-            if (payload?.detail) {
-              message = payload.detail;
-            }
-          } catch (parseError) {
-            console.error("analytics_agent_error_parse_failed", parseError);
+      if (!response.ok) {
+        let message = "We couldn't process your question. Try again in a moment.";
+        try {
+          const payload = await response.json();
+          if (payload?.detail) {
+            message = payload.detail;
           }
-          throw new Error(message);
+        } catch (parseError) {
+          console.error("analytics_agent_error_parse_failed", parseError);
         }
-
-        const data = await response.json();
-        setAnalyticsResponse({
-          text: typeof data?.text === "string" ? data.text : "",
-          html: typeof data?.html === "string" ? data.html : "",
-          csv_url:
-            typeof data?.csv_url === "string"
-              ? data.csv_url
-              : typeof data?.csvUrl === "string"
-              ? data.csvUrl
-              : null,
-        });
-      } catch (error) {
-        console.error("analytics_agent_request_failed", error);
-        setAnalyticsResponse(null);
-        setAnalyticsError(
-          error instanceof Error && error.message
-            ? error.message
-            : "We couldn't complete that request. Please try again later.",
-        );
-      } finally {
-        setAnalyticsLoading(false);
+        throw new Error(message);
       }
+
+      const data = await response.json();
+      setAnalyticsResponse({
+        text: typeof data?.text === "string" ? data.text : "",
+        html: typeof data?.html === "string" ? data.html : "",
+        csv_url:
+          typeof data?.csv_url === "string"
+            ? data.csv_url
+            : typeof data?.csvUrl === "string"
+            ? data.csvUrl
+            : null,
+      });
+    } catch (error) {
+      console.error("analytics_agent_request_failed", error);
+      setAnalyticsResponse(null);
+      setAnalyticsError(
+        error instanceof Error && error.message
+          ? error.message
+          : "We couldn't complete that request. Please try again later.",
+      );
+    } finally {
+      setAnalyticsLoading(false);
+    }
+  }, [analyticsQuery, getAccessTokenSilently, isAuthenticated]);
+
+  const handleAnalyticsSubmit = useCallback(
+    (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      submitAnalyticsQuery();
     },
-    [analyticsQuery, getAccessTokenSilently, isAuthenticated],
+    [submitAnalyticsQuery],
   );
 
   const loadMemberships = useCallback(async () => {
@@ -2349,7 +2354,8 @@ export default function DistrictDashboard({
                   disabled={analyticsLoading}
                 />
                 <button
-                  type="submit"
+                  type="button"
+                  onClick={submitAnalyticsQuery}
                   className="inline-flex items-center justify-center rounded-xl bg-amber-500 px-4 py-3 text-sm font-semibold text-white shadow transition hover:bg-amber-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/70 disabled:cursor-not-allowed disabled:opacity-60"
                   disabled={analyticsLoading}
                 >
