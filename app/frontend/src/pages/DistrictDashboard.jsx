@@ -12,7 +12,6 @@ import {
   activateDistrictMembership,
 } from "../api/districts";
 import { formatPostalAddress } from "../api/common";
-import ChatAgent from "../components/ChatAgent.jsx";
 import {
   fetchInvoicePresignedUrl,
   fetchVendorInvoiceArchive,
@@ -805,10 +804,6 @@ export default function DistrictDashboard({
   const [invoiceDocumentsError, setInvoiceDocumentsError] = useState(null);
   const invoiceDocumentsCacheRef = useRef({});
   const [exportingInvoiceCsv, setExportingInvoiceCsv] = useState(false);
-  const [analyticsQuery, setAnalyticsQuery] = useState("");
-  const [analyticsResponse, setAnalyticsResponse] = useState(null);
-  const [analyticsLoading, setAnalyticsLoading] = useState(false);
-  const [analyticsError, setAnalyticsError] = useState(null);
 
   const activeItem = menuItems.find((item) => item.key === activeKey) ?? menuItems[0];
   const selectedVendor = vendorProfiles.find((vendor) => vendor.id === selectedVendorId) ?? null;
@@ -978,89 +973,6 @@ export default function DistrictDashboard({
     const normalized = rawValue.replace(/[^a-zA-Z0-9-]/g, "").toUpperCase();
     setNewDistrictKey(normalized);
   }, []);
-
-  const handleAnalyticsQueryChange = useCallback(
-    (event) => {
-      const value = event.target.value ?? "";
-      setAnalyticsQuery(value);
-      if (analyticsError) {
-        setAnalyticsError(null);
-      }
-    },
-    [analyticsError],
-  );
-
-  const submitAnalyticsQuery = useCallback(async () => {
-    const candidate = analyticsQuery.trim();
-    if (!candidate) {
-      setAnalyticsError("Ask a question to explore your analytics.");
-      return;
-    }
-
-    if (!isAuthenticated) {
-      setAnalyticsError("Sign in to use the analytics assistant.");
-      return;
-    }
-
-    setAnalyticsLoading(true);
-    setAnalyticsError(null);
-    setAnalyticsResponse(null);
-    try {
-      const accessToken = await getAccessTokenSilently();
-      const response = await fetch("/api/analytics/agent", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
-        },
-        body: JSON.stringify({ query: candidate }),
-      });
-
-      if (!response.ok) {
-        let message = "We couldn't process your question. Try again in a moment.";
-        try {
-          const payload = await response.json();
-          if (payload?.detail) {
-            message = payload.detail;
-          }
-        } catch (parseError) {
-          console.error("analytics_agent_error_parse_failed", parseError);
-        }
-        throw new Error(message);
-      }
-
-      const data = await response.json();
-      setAnalyticsResponse({
-        text: typeof data?.text === "string" ? data.text : "",
-        html: typeof data?.html === "string" ? data.html : "",
-        csv_url:
-          typeof data?.csv_url === "string"
-            ? data.csv_url
-            : typeof data?.csvUrl === "string"
-            ? data.csvUrl
-            : null,
-      });
-    } catch (error) {
-      console.error("analytics_agent_request_failed", error);
-      setAnalyticsResponse(null);
-      setAnalyticsError(
-        error instanceof Error && error.message
-          ? error.message
-          : "We couldn't complete that request. Please try again later.",
-      );
-    } finally {
-      setAnalyticsLoading(false);
-    }
-  }, [analyticsQuery, getAccessTokenSilently, isAuthenticated]);
-
-  const handleAnalyticsSubmit = useCallback(
-    (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      submitAnalyticsQuery();
-    },
-    [submitAnalyticsQuery],
-  );
 
   const loadMemberships = useCallback(async () => {
     if (!isAuthenticated) {
@@ -2336,69 +2248,7 @@ export default function DistrictDashboard({
           </div>
 
         ) : activeItem.key === "analytics" ? (
-          <div className="mt-8">
-            <div className="analytics-chat rounded-2xl border border-slate-200 bg-slate-50 p-6 shadow-sm">
-              <h4 className="text-xl font-semibold text-slate-900">AI Analytics Assistant</h4>
-              <p className="mt-2 text-sm text-slate-600">
-                Ask natural-language questions about invoices, students, or vendors to discover spending insights.
-              </p>
-              <form
-                onSubmit={handleAnalyticsSubmit}
-                className="mt-4 flex flex-col gap-3 sm:flex-row"
-              >
-                <input
-                  type="text"
-                  value={analyticsQuery}
-                  onChange={handleAnalyticsQueryChange}
-                  placeholder="Ask about invoices, students, or vendors..."
-                  className="w-full flex-1 rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 shadow-sm transition focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-200"
-                  disabled={analyticsLoading}
-                />
-                <button
-                  type="button"
-                  onClick={submitAnalyticsQuery}
-                  className="inline-flex items-center justify-center rounded-xl bg-amber-500 px-4 py-3 text-sm font-semibold text-white shadow transition hover:bg-amber-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/70 disabled:cursor-not-allowed disabled:opacity-60"
-                  disabled={analyticsLoading}
-                >
-                  {analyticsLoading ? "Analyzing…" : "Ask"}
-                </button>
-              </form>
-              {analyticsError ? (
-                <p className="mt-3 text-sm font-medium text-red-600">{analyticsError}</p>
-              ) : null}
-              {analyticsLoading ? (
-                <p className="mt-3 text-sm text-slate-500">Analyzing your question…</p>
-              ) : null}
-              {analyticsResponse ? (
-                <div className="mt-6 space-y-4">
-                  {analyticsResponse.text ? (
-                    <p className="text-sm leading-relaxed text-slate-700">{analyticsResponse.text}</p>
-                  ) : null}
-                  {analyticsResponse.html ? (
-                    <div
-                      className="overflow-x-auto rounded-xl border border-slate-200 bg-white p-4 shadow-inner"
-                      dangerouslySetInnerHTML={{ __html: analyticsResponse.html }}
-                    />
-                  ) : null}
-                  {analyticsResponse.csv_url ? (
-                    <a
-                      href={analyticsResponse.csv_url}
-                      className="inline-flex w-full items-center justify-center rounded-xl border border-amber-400 bg-amber-500 px-4 py-3 text-sm font-semibold text-white shadow transition hover:bg-amber-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/70 sm:w-auto"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      download
-                    >
-                      Download CSV
-                    </a>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
-            <div style={{ marginTop: "2rem" }}>
-              <h2>Analytics Assistant</h2>
-              <ChatAgent />
-            </div>
-          </div>
+          <div className="mt-8" />
         ) : activeItem.key === "settings" ? (
             <div className="mt-8 space-y-6">
               <div className="space-y-6">
