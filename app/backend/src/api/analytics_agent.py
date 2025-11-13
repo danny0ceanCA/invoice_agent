@@ -155,39 +155,36 @@ def list_s3(prefix: str, max_items: int = 100) -> list[dict[str, Any]]:
 TOOLS = [
     {
         "type": "function",
-        "function": {
-            "name": "run_sql",
-            "description": "Execute a read-only SQL SELECT query.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "A complete SQL SELECT statement.",
-                    }
-                },
-                "required": ["query"],
+        "name": "run_sql",
+        "description": "Execute a read-only SQL SELECT query.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "A complete SQL SELECT statement."
+                }
             },
-        },
+            "required": ["query"]
+        }
     },
     {
         "type": "function",
-        "function": {
-            "name": "list_s3",
-            "description": "List objects in the analytics S3 bucket.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "prefix": {"type": "string"},
-                    "max_items": {
-                        "type": "integer",
-                        "minimum": 1,
-                        "maximum": 500,
-                    },
-                },
-            },
-        },
-    },
+        "name": "list_s3",
+        "description": "List objects inside the invoice S3 bucket.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "prefix": {"type": "string"},
+                "max_items": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 500,
+                    "default": 100
+                }
+            }
+        }
+    }
 ]
 
 
@@ -364,19 +361,15 @@ async def _execute_responses_workflow(query: str, context: Mapping[str, Any]) ->
         {"role": "user", "content": [{"type": "input_text", "text": query}]}
     )
 
-    create_kwargs: dict[str, Any] = {}
+    def _create_response() -> Any:
+        return client.responses.create(
+            model=DEFAULT_MODEL,
+            input=messages,
+            tools=TOOLS,
+            tool_choice="auto",
+        )
 
-    if context:
-        create_kwargs["metadata"] = {"context": json.dumps(context, default=_json_default)}
-
-    response = await asyncio.to_thread(
-        client.responses.create,
-        model=DEFAULT_MODEL,
-        input=messages,
-        tools=TOOLS,
-        tool_choice="auto",
-        **create_kwargs,
-    )
+    response = await asyncio.to_thread(_create_response)
 
     while True:
         status = getattr(response, "status", "completed")
