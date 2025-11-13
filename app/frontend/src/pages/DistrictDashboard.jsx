@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { useAuth0 } from "@auth0/auth0-react";
 import toast from "react-hot-toast";
 import { CheckCircle2, Plus } from "lucide-react";
@@ -34,9 +35,8 @@ const menuItems = [
   {
     key: "analytics",
     label: "Analytics",
-    description:
-      "Dive into spending trends, utilization rates, and budget forecasts to inform leadership decisions.",
-    comingSoon: false,
+    description: null,
+    route: "/analytics",
   },
   {
     key: "settings",
@@ -1848,7 +1848,19 @@ export default function DistrictDashboard({
             <nav className="space-y-1 px-2 pb-4">
               {menuItems.map((item) => {
                 const isActive = activeKey === item.key;
-                return (
+                return item.route ? (
+                  <Link
+                    key={item.key}
+                    to={item.route}
+                    className={`group flex w-full items-center rounded-xl px-4 py-3 text-left text-sm font-medium transition ${
+                      isActive
+                        ? "bg-slate-100 text-slate-900"
+                        : "text-slate-200 hover:bg-white/10 hover:text-white"
+                    }`}
+                  >
+                    <span>{item.label}</span>
+                  </Link>
+                ) : (
                   <button
                     key={item.key}
                     onClick={() => setActiveKey(item.key)}
@@ -2248,7 +2260,7 @@ export default function DistrictDashboard({
           </div>
 
         ) : activeItem.key === "analytics" ? (
-          <div className="mt-8" />
+          null
         ) : activeItem.key === "settings" ? (
             <div className="mt-8 space-y-6">
               <div className="space-y-6">
