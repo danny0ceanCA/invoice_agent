@@ -163,13 +163,13 @@ TOOLS = [
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "A complete SQL SELECT statement."
+                        "description": "A complete SQL SELECT statement.",
                     }
                 },
                 "required": ["query"],
                 "additionalProperties": False,
-            }
-        }
+            },
+        },
     },
     {
         "type": "function",
@@ -179,20 +179,25 @@ TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "prefix": {"type": "string"},
+                    "prefix": {
+                        "type": "string",
+                        "description": "Prefix for S3 object lookup.",
+                    },
                     "max_items": {
                         "type": "integer",
                         "minimum": 1,
                         "maximum": 500,
-                        "default": 100
-                    }
+                        "default": 100,
+                    },
                 },
                 "required": ["prefix"],
                 "additionalProperties": False,
-            }
-        }
+            },
+        },
     }
 ]
+
+
 def _extract_final_output(response: Any) -> Any:
     """Extract the final model output from the Responses API payload."""
 
@@ -328,48 +333,66 @@ def _format_final_output(final_output: Any) -> tuple[str, str]:
     return text, html
 
 
-async def _process_tool_calls(tool_calls: Any) -> list[dict[str, str]]:
-    """Execute tool calls requested by the model."""
+async def _process_tool_calls(tool_calls: Any):
+    """Execute model-requested tool calls.
+
+    Accepts either:
+      - an object with attribute `.tool_calls`, or
+      - a dict that contains {"tool_calls": [...]}.
+    """
 
     outputs: list[dict[str, str]] = []
-    for call in getattr(tool_calls, "tool_calls", []) or []:
-        function = getattr(call, "function", None)
-        name = getattr(function, "name", "")
-        arguments_raw = getattr(function, "arguments", "{}")
-        try:
-            arguments = json.loads(arguments_raw or "{}")
-        except json.JSONDecodeError:
-            arguments = {}
 
-        LOGGER.info("analytics_agent_tool_invocation", tool=name, arguments=arguments)
+    # Accept both attr-style and dict-style containers
+    if isinstance(tool_calls, dict):
+        calls = tool_calls.get("tool_calls", []) or []
+    else:
+        calls = getattr(tool_calls, "tool_calls", []) or []
+
+    for call in calls:
+        if isinstance(call, Mapping):
+            function = call.get("function")
+            call_id = call.get("id")
+        else:
+            function = getattr(call, "function", None)
+            call_id = getattr(call, "id", None)
+
+        if isinstance(function, Mapping):
+            name = function.get("name")
+            args_raw = function.get("arguments")
+        else:
+            name = getattr(function, "name", None) if function else None
+            args_raw = getattr(function, "arguments", None) if function else None
+
+        try:
+            args = json.loads(args_raw or "{}")
+        except Exception:
+            args = {}
 
         try:
             if name == "run_sql":
-                if "query" not in arguments:
-                    output = json.dumps(
-                        {"error": "the run_sql tool requires a query parameter"},
-                        default=_json_default,
-                    )
-                    outputs.append({"tool_call_id": call.id, "output": output})
-                    continue
-                result = await asyncio.to_thread(run_sql, arguments["query"])
+                query = str(args.get("query", "")).strip()
+                result = await asyncio.to_thread(run_sql, query)
             elif name == "list_s3":
-                prefix = str(arguments.get("prefix", ""))
-                max_items = arguments.get("max_items", 100)
+                prefix = str(args.get("prefix", "")).strip()
+                max_items = int(args.get("max_items", 100))
                 result = await asyncio.to_thread(list_s3, prefix, max_items)
             else:
-                raise ValueError(f"Unknown tool requested: {name}")
-            output = json.dumps(result, default=_json_default)
-        except Exception as exc:  # pragma: no cover - defensive logging
-            LOGGER.error("analytics_agent_tool_failed", tool=name, error=str(exc))
-            output = json.dumps(
-                {"error": f"Tool {name} failed: {exc}"},
-                default=_json_default,
-            )
+                result = {"error": f"Unknown tool {name}"}
+        except Exception as exc:
+            result = {"error": str(exc)}
 
-        outputs.append({"tool_call_id": call.id, "output": output})
+        outputs.append(
+            {
+                "tool_call_id": call_id,
+                "output": json.dumps(result, default=_json_default),
+            }
+        )
 
-    return outputs
+    if not outputs:
+        return None
+
+    return {"tool_call_outputs": outputs}
 
 
 async def _execute_responses_workflow(query: str, context: Mapping[str, Any]) -> Any:
@@ -426,9 +449,6 @@ async def _execute_responses_workflow(query: str, context: Mapping[str, Any]) ->
     while True:
         status = getattr(response, "status", "completed")
 
-        if status == "completed":
-            return response
-
         if status == "requires_action":
             required_action = getattr(response, "required_action", None)
             if not required_action:
@@ -444,9 +464,28 @@ async def _execute_responses_workflow(query: str, context: Mapping[str, Any]) ->
             response = await asyncio.to_thread(
                 client.responses.submit_tool_outputs,
                 response.id,
-                tool_outputs=tool_outputs,
+                tool_call_outputs=tool_outputs["tool_call_outputs"],
             )
             continue
+
+        if status == "completed":
+            # Fallback: some SDK/model builds surface function calls directly in `output`
+            # even though the status is 'completed'. If we see them, execute now and resubmit.
+            output_items = getattr(response, "output", None) or []
+            pending_calls = [
+                it for it in output_items
+                if getattr(it, "type", None) == "function_call"
+            ]
+            if pending_calls:
+                tool_outputs = await _process_tool_calls({"tool_calls": pending_calls})
+                response = await asyncio.to_thread(
+                    client.responses.submit_tool_outputs,
+                    response.id,
+                    tool_call_outputs=tool_outputs["tool_call_outputs"],
+                )
+                continue
+
+            return response
 
         if status in {"failed", "cancelled"}:
             raise RuntimeError(f"Analytics run ended with status '{status}'.")
