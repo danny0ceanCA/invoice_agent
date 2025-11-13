@@ -336,7 +336,7 @@ async def _execute_responses_workflow(query: str, context: Mapping[str, Any]) ->
     )
 
     messages: list[dict[str, Any]] = [
-        {"role": "system", "content": [{"type": "text", "text": system_prompt}]}
+        {"role": "system", "content": [{"type": "input_text", "text": system_prompt}]}
     ]
 
     if context:
@@ -346,7 +346,7 @@ async def _execute_responses_workflow(query: str, context: Mapping[str, Any]) ->
                 "role": "system",
                 "content": [
                     {
-                        "type": "text",
+                        "type": "input_text",
                         "text": f"User context (JSON): {context_text}",
                     }
                 ],
@@ -354,7 +354,7 @@ async def _execute_responses_workflow(query: str, context: Mapping[str, Any]) ->
         )
 
     messages.append(
-        {"role": "user", "content": [{"type": "text", "text": query}]}
+        {"role": "user", "content": [{"type": "input_text", "text": query}]}
     )
 
     create_kwargs: dict[str, Any] = {
