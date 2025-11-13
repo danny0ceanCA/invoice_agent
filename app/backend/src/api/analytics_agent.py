@@ -154,6 +154,7 @@ def list_s3(prefix: str, max_items: int = 100) -> list[dict[str, Any]]:
 
 TOOLS = [
     {
+        "name": "run_sql",
         "type": "function",
         "function": {
             "name": "run_sql",
@@ -174,6 +175,7 @@ TOOLS = [
         },
     },
     {
+        "name": "list_s3",
         "type": "function",
         "function": {
             "name": "list_s3",
