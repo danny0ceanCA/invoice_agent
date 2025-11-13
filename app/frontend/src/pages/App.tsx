@@ -11,6 +11,7 @@ import AdminDashboard from "./AdminDashboard.jsx";
 import AdminUserDashboard from "./AdminUserDashboard.jsx";
 import AdminCreateDistrict from "./AdminCreateDistrict.jsx";
 import VendorDistrictKeys from "./VendorDistrictKeys.jsx";
+import Analytics from "./Analytics.jsx";
 import {
   fetchCurrentUser,
   type ApiError,
@@ -106,6 +107,7 @@ export function App() {
           )
         }
       />
+      <Route path="/analytics" element={<Analytics />} />
       <Route
         path="/admin/users"
         element={profile?.role === "admin" ? <AdminUserDashboard /> : <Navigate to="/" replace />}
