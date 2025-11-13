@@ -364,16 +364,19 @@ async def _execute_responses_workflow(query: str, context: Mapping[str, Any]) ->
         {"role": "user", "content": [{"type": "input_text", "text": query}]}
     )
 
-    create_kwargs: dict[str, Any] = {
-        "model": DEFAULT_MODEL,
-        "input": messages,
-        "tools": TOOLS,
-    }
+    create_kwargs: dict[str, Any] = {}
 
     if context:
         create_kwargs["metadata"] = {"context": json.dumps(context, default=_json_default)}
 
-    response = await asyncio.to_thread(client.responses.create, **create_kwargs)
+    response = await asyncio.to_thread(
+        client.responses.create,
+        model=DEFAULT_MODEL,
+        input=messages,
+        tools=TOOLS,
+        tool_choice="auto",
+        **create_kwargs,
+    )
 
     while True:
         status = getattr(response, "status", "completed")
