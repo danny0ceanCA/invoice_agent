@@ -167,7 +167,7 @@ TOOLS = [
                     }
                 },
                 "required": ["query"],
-                "additionalProperties": False
+                "additionalProperties": False,
             }
         }
     },
@@ -188,7 +188,7 @@ TOOLS = [
                     }
                 },
                 "required": ["prefix"],
-                "additionalProperties": False
+                "additionalProperties": False,
             }
         }
     }
