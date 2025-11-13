@@ -156,46 +156,43 @@ TOOLS = [
     {
         "type": "function",
         "name": "run_sql",
-        "function": {
-            "name": "run_sql",
-            "description": "Execute a read-only SQL SELECT query.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "A complete SQL SELECT statement."
-                    }
-                },
-                "required": ["query"],
-                "additionalProperties": False,
+        "description": "Execute a read-only SQL SELECT query.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "A complete SQL SELECT statement."
+                }
             },
-        },
+            "required": ["query"],
+            "additionalProperties": False
+        }
     },
     {
         "type": "function",
         "name": "list_s3",
-        "function": {
-            "name": "list_s3",
-            "description": "List invoice files in the S3 bucket.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "prefix": {"type": "string"},
-                    "max_items": {
-                        "type": "integer",
-                        "minimum": 1,
-                        "maximum": 500,
-                        "default": 100,
-                    },
+        "description": "List invoice files in your S3 bucket.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "prefix": {
+                    "type": "string",
+                    "description": "Prefix for filtering S3 object keys"
                 },
-                "required": ["prefix"],
-                "additionalProperties": False,
+                "max_items": {
+                    "type": "integer",
+                    "description": "Max objects to return",
+                    "minimum": 1,
+                    "maximum": 500,
+                    "default": 100
+                }
             },
-        },
-    },
+            "required": ["prefix"],
+            "additionalProperties": False
+        }
+    }
 ]
-
 
 def _extract_final_text(response):
     """Extract message text from Responses API output format."""
