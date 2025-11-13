@@ -366,7 +366,7 @@ async def _execute_responses_workflow(query: str, context: Mapping[str, Any]) ->
     }
 
     if context:
-        create_kwargs["metadata"] = {"context": context}
+        create_kwargs["metadata"] = {"context": json.dumps(context, default=_json_default)}
 
     response = await asyncio.to_thread(client.responses.create, **create_kwargs)
 
