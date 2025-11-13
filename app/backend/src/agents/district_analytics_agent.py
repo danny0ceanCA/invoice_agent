@@ -1,30 +1,26 @@
-"""Analytics Agent built on OpenAI AgentKit primitives."""
+"""District analytics agent implemented with iterative tool calling."""
 
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
 from html import escape
-from typing import Any, Callable, Iterable, Mapping
+from typing import Any, Mapping, Sequence
 
-import boto3
 import structlog
 from openai import OpenAI
 from pydantic import BaseModel
-from sqlalchemy import create_engine, text as sql_text
+from sqlalchemy import text as sql_text
 from sqlalchemy.engine import Engine
 
 from app.backend.src.core.config import get_settings
+from app.backend.src.db import get_engine
+from app.backend.src.services.s3 import get_s3_client
 
 LOGGER = structlog.get_logger(__name__)
 
 DEFAULT_MODEL = "gpt-4.1-mini"
 MAX_ITERATIONS = 8
-
-_SQL_ENGINE: Engine | None = None
-_OPENAI_CLIENT: OpenAI | None = None
-_OPENAI_API_KEY: str | None = None
-_S3_CLIENT: Any | None = None
 
 
 class AgentResponse(BaseModel):
@@ -36,8 +32,8 @@ class AgentResponse(BaseModel):
 
 
 @dataclass
-class AnalyticsToolContext:
-    """Runtime context provided to tool handlers."""
+class AgentContext:
+    """Runtime context shared between the workflow and tools."""
 
     query: str
     user_context: dict[str, Any] = field(default_factory=dict)
@@ -51,601 +47,328 @@ class AnalyticsToolContext:
             if value is None:
                 return None
             return int(value)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError):  # pragma: no cover - defensive
             return None
 
 
-def _json_default(value: Any) -> Any:
-    if hasattr(value, "isoformat"):
-        return value.isoformat()  # type: ignore[return-value]
-    return str(value)
-
-
-def _render_html_table(rows: Iterable[Mapping[str, Any]]) -> str:
-    """Render tabular rows as a HTML table."""
-
-    rows = list(rows)
-    if not rows:
-        return "<table><thead><tr><th>No results</th></tr></thead><tbody></tbody></table>"
-
-    headers = list(rows[0].keys())
-    header_html = "".join(f"<th>{escape(str(header))}</th>" for header in headers)
-
-    body_cells: list[str] = []
-    for row in rows:
-        row_cells = []
-        for header in headers:
-            value = row.get(header, "")
-            row_cells.append(f"<td>{escape(str(value))}</td>")
-        body_cells.append(f"<tr>{''.join(row_cells)}</tr>")
-
-    body_html = "".join(body_cells)
-    return f"<table><thead><tr>{header_html}</tr></thead><tbody>{body_html}</tbody></table>"
-
-
-def _safe_html(text: str) -> str:
-    if not text:
-        return ""
-    return f"<p>{escape(text)}</p>"
-
-
-def _parse_json(value: str) -> Any:
-    try:
-        return json.loads(value)
-    except json.JSONDecodeError:
-        return None
-
-
-def _format_agent_response(raw_output: Any, context: AnalyticsToolContext) -> AgentResponse:
-    """Convert model output into AgentResponse."""
-
-    if isinstance(raw_output, AgentResponse):
-        return raw_output
-
-    if isinstance(raw_output, str):
-        parsed = _parse_json(raw_output.strip()) if raw_output.strip() else None
-        if parsed is None:
-            text = raw_output.strip()
-            html = _safe_html(text)
-            rows = context.last_rows
-            return AgentResponse(text=text, html=html, rows=rows)
-        raw_output = parsed
-
-    if isinstance(raw_output, Mapping):
-        text_value = str(raw_output.get("text", "")) if "text" in raw_output else ""
-        html_value = raw_output.get("html")
-        rows_value = raw_output.get("rows")
-
-        rows: list[dict[str, Any]] | None = None
-        if isinstance(rows_value, list) and all(isinstance(item, Mapping) for item in rows_value):
-            rows = [dict(item) for item in rows_value]  # type: ignore[arg-type]
-
-        html: str
-        if isinstance(html_value, str) and html_value.strip():
-            html = html_value
-        elif rows:
-            html = _render_html_table(rows)
-        else:
-            html = _safe_html(text_value)
-
-        if not text_value and rows:
-            text_value = "See the table below for details."
-
-        return AgentResponse(text=text_value, html=html, rows=rows)
-
-    if isinstance(raw_output, list) and raw_output and all(
-        isinstance(item, Mapping) for item in raw_output
-    ):
-        rows = [dict(item) for item in raw_output]  # type: ignore[arg-type]
-        html = _render_html_table(rows)
-        return AgentResponse(text="See the table below for details.", html=html, rows=rows)
-
-    if raw_output is None and context.last_rows:
-        html = _render_html_table(context.last_rows)
-        return AgentResponse(text="See the table below for details.", html=html, rows=context.last_rows)
-
-    text = str(raw_output) if raw_output is not None else ""
-    return AgentResponse(text=text, html=_safe_html(text), rows=context.last_rows)
-
-
+@dataclass
 class Tool:
-    """Minimal Tool abstraction compatible with AgentKit expectations."""
+    """Descriptor for a callable tool exposed to the model."""
 
-    def __init__(
-        self,
-        name: str,
-        description: str,
-        input_schema: Mapping[str, Any],
-        handler: Callable[[AnalyticsToolContext, Mapping[str, Any]], Any],
-    ) -> None:
-        self.name = name
-        self.description = description
-        self.input_schema = dict(input_schema)
-        self._handler = handler
+    name: str
+    description: str
+    input_schema: Mapping[str, Any]
+    handler: Any
 
     def schema(self) -> dict[str, Any]:
         return {
             "type": "function",
             "name": self.name,
             "description": self.description,
-            "parameters": self.input_schema,
+            "parameters": dict(self.input_schema),
         }
 
-    def invoke(self, context: AnalyticsToolContext, arguments: Mapping[str, Any]) -> Any:
-        return self._handler(context, arguments)
+    def invoke(self, context: AgentContext, arguments: Mapping[str, Any]) -> Any:
+        return self.handler(context, arguments)
 
 
 class Workflow:
-    """Workflow coordinates LLM reasoning with tool invocations."""
+    """Coordinates model reasoning and tool usage."""
 
-    def __init__(self, system_prompt: str, max_iterations: int = MAX_ITERATIONS) -> None:
+    def __init__(self, system_prompt: str, *, max_iterations: int = MAX_ITERATIONS) -> None:
         self.system_prompt = system_prompt
         self.max_iterations = max_iterations
 
-    def execute(
-        self,
-        agent: "Agent",
-        query: str,
-        user_context: dict[str, Any],
-    ) -> AgentResponse:
-        context = AnalyticsToolContext(query=query, user_context=user_context or {})
+    def execute(self, agent: "Agent", query: str, user_context: dict[str, Any]) -> AgentResponse:
+        context = AgentContext(query=query, user_context=user_context or {})
         messages: list[dict[str, Any]] = [
-            {
-                "role": "system",
-                "content": [
-                    {"type": "input_text", "text": self.system_prompt},
-                    {
-                        "type": "input_text",
-                        "text": (
-                            "Return JSON with keys text, html, rows. "
-                            "Prefer HTML tables when tabular data is returned."
-                        ),
-                    },
-                ],
-            }
-        ]
-
-        if user_context:
-            messages.append(
-                {
-                    "role": "developer",
-                    "content": [
-                        {
-                            "type": "input_text",
-                            "text": f"User context JSON: {json.dumps(user_context, default=_json_default)}",
-                        }
-                    ],
-                }
-            )
-
-        messages.append(
+            {"role": "system", "content": self.system_prompt},
             {
                 "role": "user",
-                "content": [
+                "content": json.dumps(
                     {
-                        "type": "input_text",
-                        "text": query,
+                        "query": query,
+                        "context": context.user_context,
                     }
-                ],
-            }
-        )
-
-        tool_schemas = [tool.schema() for tool in agent.tools]
-        executed_call_signatures: set[str] = set()
+                ),
+            },
+        ]
 
         for iteration in range(self.max_iterations):
-            LOGGER.info("district_analytics_agent_iteration", iteration=iteration)
-            response = agent.client.responses.create(
+            LOGGER.debug("agent_iteration_start", iteration=iteration)
+            completion = agent.client.chat.completions.create(
                 model=agent.model,
-                input=messages,
-                tools=tool_schemas,
-                tool_choice="auto",
+                messages=messages,
+                temperature=0,
+                response_format={"type": "json_object"},
             )
+            message = completion.choices[0].message
+            raw_content = message.content or ""
+            messages.append({"role": "assistant", "content": raw_content})
 
-            tool_calls = _extract_tool_calls(response)
-            if tool_calls:
-                LOGGER.info("district_analytics_agent_tool_calls", count=len(tool_calls))
-                for call in tool_calls:
-                    signature = f"{call.name}:{call.arguments}:{call.call_id}"
-                    if signature in executed_call_signatures:
-                        continue
-                    executed_call_signatures.add(signature)
+            try:
+                payload = json.loads(raw_content)
+            except json.JSONDecodeError:
+                LOGGER.warning("agent_invalid_json", iteration=iteration, content=raw_content)
+                text = raw_content.strip()
+                html = _safe_html(text)
+                return AgentResponse(text=text, html=html, rows=context.last_rows)
 
-                    tool = agent.get_tool(call.name)
-                    if tool is None:
-                        payload = {
-                            "tool": call.name,
-                            "error": f"Unknown tool '{call.name}'",
-                        }
-                        messages.append(
-                            {
-                                "role": "developer",
-                                "content": [
-                                    {
-                                        "type": "input_text",
-                                        "text": json.dumps(payload),
-                                    }
-                                ],
-                            }
-                        )
-                        continue
+            action = (payload.get("action") or "").lower()
+            if action == "call_tool":
+                tool_name = payload.get("tool")
+                if not tool_name:
+                    raise RuntimeError("Tool response missing name.")
+                tool = agent.lookup_tool(tool_name)
+                arguments = payload.get("arguments") or {}
+                if not isinstance(arguments, Mapping):
+                    raise RuntimeError("Tool arguments must be an object.")
 
-                    try:
-                        arguments = json.loads(call.arguments or "{}")
-                        if not isinstance(arguments, Mapping):
-                            raise ValueError("Tool arguments must be an object.")
-                    except Exception as exc:  # pragma: no cover - defensive
-                        arguments = {}
-                        payload = {
-                            "tool": call.name,
-                            "error": f"Unable to parse arguments: {exc}",
-                        }
-                        messages.append(
-                            {
-                                "role": "developer",
-                                "content": [
-                                    {
-                                        "type": "input_text",
-                                        "text": json.dumps(payload),
-                                    }
-                                ],
-                            }
-                        )
-                        continue
+                try:
+                    tool_result = tool.invoke(context, arguments)
+                    tool_payload = {"tool": tool.name, "result": tool_result}
+                except Exception as exc:  # pragma: no cover - defensive
+                    LOGGER.warning("tool_execution_failed", tool=tool.name, error=str(exc))
+                    context.last_error = str(exc)
+                    tool_payload = {"tool": tool.name, "error": str(exc)}
+                    tool_result = None
 
-                    try:
-                        result = tool.invoke(context, arguments)
-                        context.last_error = None
-                    except Exception as exc:  # pragma: no cover - defensive
-                        LOGGER.warning(
-                            "district_analytics_agent_tool_error",
-                            tool=tool.name,
-                            error=str(exc),
-                        )
-                        result = {"error": str(exc)}
-                        context.last_error = str(exc)
+                if isinstance(tool_result, list):
+                    if tool_result and all(isinstance(item, Mapping) for item in tool_result):
+                        context.last_rows = [dict(item) for item in tool_result]  # type: ignore[arg-type]
+                    else:
+                        context.last_rows = []
+                elif tool_result is None:
+                    # keep previous rows
+                    pass
+                else:
+                    context.last_rows = None
 
-                    if isinstance(result, list) and result and all(
-                        isinstance(item, Mapping) for item in result
-                    ):
-                        context.last_rows = [dict(item) for item in result]  # type: ignore[arg-type]
-                    elif isinstance(result, dict) and "rows" in result:
-                        rows_value = result.get("rows")
-                        if isinstance(rows_value, list) and all(
-                            isinstance(item, Mapping) for item in rows_value
-                        ):
-                            context.last_rows = [dict(item) for item in rows_value]  # type: ignore[arg-type]
-                    elif isinstance(result, dict) and "error" in result:
-                        context.last_rows = None
-
-                    messages.append(
-                        {
-                            "role": "developer",
-                            "content": [
-                                {
-                                    "type": "input_text",
-                                    "text": json.dumps(
-                                        {
-                                            "tool": tool.name,
-                                            "arguments": arguments,
-                                            "result": result,
-                                        },
-                                        default=_json_default,
-                                    ),
-                                }
-                            ],
-                        }
-                    )
-
+                tool_message = json.dumps(tool_payload, default=_json_default)
+                messages.append({"role": "tool", "name": tool.name, "content": tool_message})
                 continue
 
-            final_output = _extract_final_output(response)
-            if final_output is not None:
-                LOGGER.info("district_analytics_agent_completed")
-                return _format_agent_response(final_output, context)
+            if action == "final":
+                return _finalise_response(payload, context)
 
-            messages.append(
-                {
-                    "role": "developer",
-                    "content": [
-                        {
-                            "type": "input_text",
-                            "text": "No answer produced. Please try summarising previous tool results.",
-                        }
-                    ],
-                }
-            )
+            LOGGER.warning("agent_unknown_action", action=action)
+            text = raw_content.strip()
+            return AgentResponse(text=text, html=_safe_html(text), rows=context.last_rows)
 
         raise RuntimeError("Agent workflow exceeded iteration limit.")
 
 
 class Agent:
-    """Agent orchestrates workflow execution with the OpenAI client."""
+    """Agent orchestrating workflow execution with the OpenAI client."""
 
-    def __init__(self, client: OpenAI, model: str, workflow: Workflow, tools: list[Tool]):
+    def __init__(
+        self,
+        *,
+        client: OpenAI,
+        model: str,
+        workflow: Workflow,
+        tools: Sequence[Tool],
+    ) -> None:
         self.client = client
         self.model = model
         self.workflow = workflow
-        self.tools = tools
-        self._tool_map = {tool.name: tool for tool in tools}
+        self.tools = list(tools)
+        self._tool_lookup = {tool.name: tool for tool in self.tools}
 
-    def get_tool(self, name: str) -> Tool | None:
-        return self._tool_map.get(name)
+    def lookup_tool(self, name: str) -> Tool:
+        if name not in self._tool_lookup:
+            raise RuntimeError(f"Unknown tool '{name}'.")
+        return self._tool_lookup[name]
 
     def run(self, query: str, user_context: dict[str, Any]) -> AgentResponse:
         return self.workflow.execute(self, query, user_context)
 
 
-@dataclass
-class ToolCall:
-    name: str
-    arguments: str
-    call_id: str | None = None
+def _json_default(value: Any) -> Any:
+    if hasattr(value, "isoformat"):
+        return value.isoformat()  # type: ignore[return-value]
+    return value
 
 
-def _extract_tool_calls(response: Any) -> list[ToolCall]:
-    """Extract tool calls from a Responses API payload."""
-
-    tool_calls: list[ToolCall] = []
-    output_items = getattr(response, "output", None) or []
-
-    for item in output_items:
-        item_type = getattr(item, "type", None) or getattr(item, "get", lambda _: None)("type")
-        if isinstance(item, Mapping):
-            item_type = item.get("type")
-
-        if item_type in {"tool_call", "function_call"}:
-            function = getattr(item, "function", None)
-            if isinstance(item, Mapping):
-                function = item.get("function", function)
-            name = None
-            arguments = "{}"
-            if function:
-                name = getattr(function, "name", None)
-                if isinstance(function, Mapping):
-                    name = function.get("name", name)
-                arguments = getattr(function, "arguments", arguments)
-                if isinstance(function, Mapping):
-                    arguments = function.get("arguments", arguments)
-            call_id = getattr(item, "id", None)
-            if isinstance(item, Mapping):
-                call_id = item.get("id", call_id)
-            if name:
-                tool_calls.append(ToolCall(name=name, arguments=arguments or "{}", call_id=call_id))
-            continue
-
-        if item_type != "message":
-            continue
-
-        contents = getattr(item, "content", None)
-        if isinstance(item, Mapping):
-            contents = item.get("content", contents)
-        contents = contents or []
-        for content in contents:
-            content_type = getattr(content, "type", None)
-            if isinstance(content, Mapping):
-                content_type = content.get("type", content_type)
-
-            if content_type not in {"tool_call", "function_call"}:
-                continue
-
-            function = getattr(content, "function", None)
-            if isinstance(content, Mapping):
-                function = content.get("function", function)
-            name = None
-            arguments = "{}"
-            if function:
-                name = getattr(function, "name", None)
-                if isinstance(function, Mapping):
-                    name = function.get("name", name)
-                arguments = getattr(function, "arguments", arguments)
-                if isinstance(function, Mapping):
-                    arguments = function.get("arguments", arguments)
-            call_id = getattr(content, "id", None)
-            if isinstance(content, Mapping):
-                call_id = content.get("id", call_id)
-            if name:
-                tool_calls.append(ToolCall(name=name, arguments=arguments or "{}", call_id=call_id))
-
-    return tool_calls
+def _safe_html(text: str) -> str:
+    if not text:
+        return "<p></p>"
+    return f"<p>{escape(text)}</p>"
 
 
-def _extract_final_output(response: Any) -> Any:
-    output_items = getattr(response, "output", None) or []
-    text_segments: list[str] = []
+def _render_html_table(rows: Sequence[Mapping[str, Any]]) -> str:
+    headers = list(rows[0].keys())
+    header_html = "".join(f"<th>{escape(str(header))}</th>" for header in headers)
+    body_rows: list[str] = []
+    for row in rows:
+        cells = "".join(f"<td>{escape(str(row.get(header, '')))}</td>" for header in headers)
+        body_rows.append(f"<tr>{cells}</tr>")
+    body_html = "".join(body_rows)
+    return f"<table><thead><tr>{header_html}</tr></thead><tbody>{body_html}</tbody></table>"
 
-    for item in output_items:
-        item_type = getattr(item, "type", None)
-        if isinstance(item, Mapping):
-            item_type = item.get("type", item_type)
 
-        if item_type != "message":
-            continue
-
-        contents = getattr(item, "content", None)
-        if isinstance(item, Mapping):
-            contents = item.get("content", contents)
-        contents = contents or []
-
-        for content in contents:
-            content_type = getattr(content, "type", None)
-            if isinstance(content, Mapping):
-                content_type = content.get("type", content_type)
-
-            if content_type != "output_text":
-                continue
-
-            text_value = getattr(content, "text", None)
-            if isinstance(content, Mapping):
-                text_value = content.get("text", text_value)
-            if isinstance(text_value, str):
-                text_segments.append(text_value)
-
-    if text_segments:
-        combined = "".join(text_segments).strip()
-        if combined:
-            parsed = _parse_json(combined) if combined[0] in "[{" else None
-            if parsed is not None:
-                return parsed
-            return combined
-
+def _coerce_rows(candidate: Any) -> list[dict[str, Any]] | None:
+    if isinstance(candidate, list) and all(isinstance(item, Mapping) for item in candidate):
+        return [dict(item) for item in candidate]  # type: ignore[arg-type]
     return None
 
 
-def _get_sql_engine(settings) -> Engine:
-    global _SQL_ENGINE
-    if _SQL_ENGINE is None:
-        _SQL_ENGINE = create_engine(settings.database_url)
-    return _SQL_ENGINE
+def _finalise_response(payload: Mapping[str, Any], context: AgentContext) -> AgentResponse:
+    text_value = str(payload.get("text") or "").strip()
+    rows_value = _coerce_rows(payload.get("rows"))
+    html_value = payload.get("html") if isinstance(payload.get("html"), str) else None
+
+    rows: list[dict[str, Any]] | None = rows_value or context.last_rows
+
+    if not text_value and rows:
+        text_value = "See the table below for details."
+
+    if rows:
+        html = html_value or _render_html_table(rows)
+    else:
+        html = html_value or _safe_html(text_value)
+
+    return AgentResponse(text=text_value or "", html=html, rows=rows)
 
 
-def _get_openai_client(settings) -> OpenAI:
-    global _OPENAI_CLIENT, _OPENAI_API_KEY
-    api_key = settings.openai_api_key
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is not configured.")
-
-    if _OPENAI_CLIENT is None or api_key != _OPENAI_API_KEY:
-        _OPENAI_CLIENT = OpenAI(api_key=api_key)
-        _OPENAI_API_KEY = api_key
-    return _OPENAI_CLIENT
-
-
-def _get_s3_client(settings):
-    global _S3_CLIENT
-    if _S3_CLIENT is None:
-        session = boto3.session.Session(
-            aws_access_key_id=settings.aws_access_key_id,
-            aws_secret_access_key=settings.aws_secret_access_key,
-            region_name=settings.aws_region,
-        )
-        _S3_CLIENT = session.client("s3")
-    return _S3_CLIENT
-
-
-def _apply_district_scoping(query: str, district_id: int | None) -> str:
+def _apply_district_filter(query: str, district_id: int | None) -> tuple[str, dict[str, Any]]:
+    parameters: dict[str, Any] = {}
     if district_id is None:
-        return query
+        return query, parameters
 
-    replacements = ["{{district_id}}", "{district_id}", ":district_id"]
-    for token in replacements:
-        if token in query:
-            return query.replace(token, str(district_id))
+    parameters["district_id"] = district_id
 
-    return f"WITH district_scope AS (SELECT {district_id} AS district_id)\n{query}"
+    normalized = query.strip()
+    normalized = normalized[:-1] if normalized.endswith(";") else normalized
+    lower = normalized.lower()
 
+    if "district_id" in lower:
+        return normalized, parameters
 
-def _run_sql_handler(context: AnalyticsToolContext, arguments: Mapping[str, Any]) -> list[dict[str, Any]]:
-    query = str(arguments.get("query", "")).strip()
-    if not query:
-        raise ValueError("SQL query must be provided.")
+    if " where " in lower:
+        filtered = f"{normalized}\n  AND district_id = :district_id"
+    else:
+        filtered = f"{normalized}\nWHERE district_id = :district_id"
 
-    normalized = query.lstrip().lower()
-    if not (normalized.startswith("select") or normalized.startswith("with")):
-        raise ValueError("Only SELECT or WITH queries are allowed.")
-
-    scoped_query = _apply_district_scoping(query, context.district_id)
-
-    settings = get_settings()
-    engine = _get_sql_engine(settings)
-
-    rows: list[dict[str, Any]] = []
-    with engine.connect() as connection:
-        result = connection.execute(sql_text(scoped_query))
-        for row in result:
-            rows.append(dict(row._mapping))
-
-    return rows
+    return filtered, parameters
 
 
-def _list_s3_handler(context: AnalyticsToolContext, arguments: Mapping[str, Any]) -> list[dict[str, Any]]:
-    prefix = str(arguments.get("prefix", "")).strip()
-    if not prefix:
-        raise ValueError("prefix is required")
-    max_items_raw = arguments.get("max_items", 20)
-    try:
-        max_items = max(1, min(int(max_items_raw), 500))
-    except (TypeError, ValueError):
-        max_items = 20
+def _build_run_sql_tool(engine: Engine) -> Tool:
+    description = "Execute a read-only SQL query against the analytics warehouse."
+    schema = {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Complete SQL statement starting with SELECT or WITH.",
+            }
+        },
+        "required": ["query"],
+        "additionalProperties": False,
+    }
 
-    settings = get_settings()
-    client = _get_s3_client(settings)
+    def handler(context: AgentContext, arguments: Mapping[str, Any]) -> list[dict[str, Any]]:
+        query = arguments.get("query")
+        if not isinstance(query, str) or not query.strip():
+            raise ValueError("SQL query must be a non-empty string.")
 
-    paginator = client.get_paginator("list_objects_v2")
-    page_iterator = paginator.paginate(Bucket=settings.aws_s3_bucket, Prefix=prefix)
+        normalized = query.lstrip().lower()
+        if not (normalized.startswith("select") or normalized.startswith("with")):
+            raise ValueError("Only SELECT and WITH statements are permitted.")
 
-    objects: list[dict[str, Any]] = []
-    for page in page_iterator:
-        for entry in page.get("Contents", []) or []:
-            objects.append(
-                {
-                    "key": entry.get("Key"),
-                    "size": entry.get("Size"),
-                    "last_modified": _json_default(entry.get("LastModified")),
-                }
-            )
-            if len(objects) >= max_items:
-                return objects
-        if len(objects) >= max_items:
-            break
+        filtered_query, parameters = _apply_district_filter(query, context.district_id)
 
-    return objects
+        rows: list[dict[str, Any]] = []
+        with engine.connect() as connection:
+            result = connection.execute(sql_text(filtered_query), parameters)
+            for row in result:
+                rows.append(dict(row._mapping))
+
+        return rows
+
+    return Tool(name="run_sql", description=description, input_schema=schema, handler=handler)
+
+
+def _build_list_s3_tool() -> Tool:
+    description = "List invoice files stored in S3."
+    schema = {
+        "type": "object",
+        "properties": {
+            "prefix": {
+                "type": "string",
+                "description": "Key prefix to filter objects (e.g. 'invoices/').",
+            },
+            "max_items": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 500,
+                "default": 20,
+            },
+        },
+        "required": ["prefix"],
+        "additionalProperties": False,
+    }
+
+    def handler(context: AgentContext, arguments: Mapping[str, Any]) -> list[dict[str, Any]]:
+        prefix = arguments.get("prefix")
+        if not isinstance(prefix, str):
+            raise ValueError("prefix must be a string")
+
+        max_items = arguments.get("max_items", 20)
+        try:
+            resolved_max = max(1, min(int(max_items), 500))
+        except (TypeError, ValueError):
+            resolved_max = 20
+
+        client = get_s3_client()
+        settings = get_settings()
+        paginator = client.get_paginator("list_objects_v2")
+        page_iterator = paginator.paginate(Bucket=settings.aws_s3_bucket, Prefix=prefix)
+
+        objects: list[dict[str, Any]] = []
+        for page in page_iterator:
+            for entry in page.get("Contents", []) or []:
+                objects.append(
+                    {
+                        "key": entry.get("Key"),
+                        "size": entry.get("Size"),
+                        "last_modified": _json_default(entry.get("LastModified")),
+                    }
+                )
+                if len(objects) >= resolved_max:
+                    return objects
+
+            if len(objects) >= resolved_max:
+                break
+
+        return objects
+
+    return Tool(name="list_s3", description=description, input_schema=schema, handler=handler)
+
+
+def _build_system_prompt() -> str:
+    return (
+        "You are a district analytics assistant for school finance teams. "
+        "Use the available tools to answer questions about invoices and spending. "
+        "When writing SQL, use SQLite syntax including strftime for date grouping. "
+        "Always respect any provided district_id by filtering queries with 'district_id = :district_id'. "
+        "Decide between tools: use list_s3 for file listing requests, and run_sql for data analysis. "
+        "Respond in JSON with either {\"action\": \"call_tool\", \"tool\": name, \"arguments\": {...}} "
+        "or {\"action\": \"final\", \"text\": str, \"rows\": [..], \"html\": optional}. "
+        "Keep summaries concise and reference table columns when relevant."
+    )
 
 
 def _build_agent() -> Agent:
     settings = get_settings()
-    client = _get_openai_client(settings)
+    if not settings.openai_api_key:
+        raise RuntimeError("OPENAI_API_KEY is not configured.")
 
-    run_sql_tool = Tool(
-        name="run_sql",
-        description="Execute a read-only SQL query using the analytics database (SQLite dialect).",
-        input_schema={
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "Full SQL SELECT statement (SQLite dialect).",
-                }
-            },
-            "required": ["query"],
-            "additionalProperties": False,
-        },
-        handler=_run_sql_handler,
-    )
-
-    list_s3_tool = Tool(
-        name="list_s3",
-        description="List invoice files from the district S3 bucket.",
-        input_schema={
-            "type": "object",
-            "properties": {
-                "prefix": {
-                    "type": "string",
-                    "description": "Prefix to filter invoice keys (e.g. invoices/).",
-                },
-                "max_items": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 500,
-                    "default": 20,
-                },
-            },
-            "required": ["prefix"],
-            "additionalProperties": False,
-        },
-        handler=_list_s3_handler,
-    )
-
-    workflow = Workflow(
-        system_prompt=(
-            "You are the district analytics assistant. "
-            "Interpret natural language questions, decide whether to query SQL or list S3 objects, "
-            "and provide accurate summaries. Use SQLite syntax (strftime('%Y', column)). "
-            "When answering, always return JSON with keys text, html, rows."
-        )
-    )
-
-    return Agent(client=client, model=DEFAULT_MODEL, workflow=workflow, tools=[run_sql_tool, list_s3_tool])
+    client = OpenAI(api_key=settings.openai_api_key)
+    engine = get_engine()
+    workflow = Workflow(system_prompt=_build_system_prompt(), max_iterations=MAX_ITERATIONS)
+    tools = [_build_run_sql_tool(engine), _build_list_s3_tool()]
+    return Agent(client=client, model=DEFAULT_MODEL, workflow=workflow, tools=tools)
 
 
 _AGENT: Agent | None = None
@@ -659,19 +382,16 @@ def _get_agent() -> Agent:
 
 
 def run_analytics_agent(query: str, user_context: dict[str, Any] | None = None) -> AgentResponse:
-    query = (query or "").strip()
-    if not query:
-        raise ValueError("A query is required for the analytics agent.")
-
-    context = dict(user_context or {})
+    if not isinstance(query, str) or not query.strip():
+        raise ValueError("A query is required.")
 
     try:
         agent = _get_agent()
-        return agent.run(query=query, user_context=context)
-    except Exception as exc:
-        LOGGER.error("district_analytics_agent_failure", error=str(exc))
-        text = f"Analytics agent failed: {exc}"
-        return AgentResponse(text=text, html=_safe_html(text), rows=None)
+    except Exception as exc:  # pragma: no cover - configuration issue
+        LOGGER.error("analytics_agent_init_failed", error=str(exc))
+        raise
+
+    return agent.run(query.strip(), user_context or {})
 
 
-__all__ = ["AgentResponse", "run_analytics_agent"]
+__all__ = ["AgentResponse", "run_analytics_agent", "AgentContext", "Tool", "Workflow", "Agent"]
