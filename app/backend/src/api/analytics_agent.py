@@ -155,6 +155,7 @@ def list_s3(prefix: str, max_items: int = 100) -> list[dict[str, Any]]:
 TOOLS = [
     {
         "type": "function",
+        "name": "run_sql",
         "function": {
             "name": "run_sql",
             "description": "Execute a read-only SQL SELECT query.",
@@ -173,9 +174,10 @@ TOOLS = [
     },
     {
         "type": "function",
+        "name": "list_s3",
         "function": {
             "name": "list_s3",
-            "description": "List objects inside the invoice S3 bucket.",
+            "description": "List invoice files in the S3 bucket.",
             "parameters": {
                 "type": "object",
                 "properties": {
