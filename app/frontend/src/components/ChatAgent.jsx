@@ -10,23 +10,60 @@ export default function ChatAgent() {
   }, []);
 
   if (!token) {
-    return <div>Loading chat...</div>;
+    return (
+      <div style={{ padding: "2rem", textAlign: "center", color: "#6b7280" }}>
+        Loading assistant...
+      </div>
+    );
   }
 
   const agent = new ChatKit({
     baseUrl: "/api/agents/analytics",
     token: async () => token,
-    passThrough: true
+    passThrough: true,
   });
 
   return (
-    <div style={{
-      height: "600px",
-      border: "1px solid #ccc",
-      borderRadius: "8px",
-      marginTop: "2rem"
-    }}>
-      <agent.Chat />
-    </div>
+    <>
+      <h3
+        style={{
+          fontSize: "1.25rem",
+          fontWeight: "600",
+          marginBottom: "0.5rem",
+        }}
+      >
+        AI Analytics Assistant
+      </h3>
+
+      <p
+        style={{
+          color: "#6b7280",
+          marginBottom: "1rem",
+          fontSize: "0.9rem",
+        }}
+      >
+        Ask natural-language questions about spending, invoices, vendors, or students.
+      </p>
+
+      <div
+        style={{
+          height: "600px",
+          border: "1px solid #e5e7eb",
+          borderRadius: "12px",
+          marginTop: "2rem",
+          padding: "1rem",
+          background: "white",
+          boxShadow: "0 2px 8px rgba(0,0,0,0.06)",
+        }}
+      >
+        <agent.Chat
+          style={{
+            height: "100%",
+            width: "100%",
+            borderRadius: "8px",
+          }}
+        />
+      </div>
+    </>
   );
 }

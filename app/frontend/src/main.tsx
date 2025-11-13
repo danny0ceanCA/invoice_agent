@@ -6,7 +6,6 @@ import { BrowserRouter } from "react-router-dom";
 import { App } from "./pages/App";
 
 import "./styles/global.css";
-import "@openai/chatkit/dist/chatkit.css";
 
 const domain = import.meta.env.VITE_AUTH0_DOMAIN;
 const clientId = import.meta.env.VITE_AUTH0_CLIENT_ID;
