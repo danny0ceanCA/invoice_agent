@@ -155,44 +155,40 @@ def list_s3(prefix: str, max_items: int = 100) -> list[dict[str, Any]]:
 TOOLS = [
     {
         "type": "function",
-        "function": {
-            "name": "run_sql",
-            "description": "Execute a read-only SQL SELECT query.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "A complete SQL SELECT statement.",
-                    }
-                },
-                "required": ["query"],
-                "additionalProperties": False,
+        "name": "run_sql",
+        "description": "Execute a read-only SQL SELECT query.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "A complete SQL SELECT statement.",
+                }
             },
+            "required": ["query"],
+            "additionalProperties": False,
         },
     },
     {
         "type": "function",
-        "function": {
-            "name": "list_s3",
-            "description": "List invoice files in your S3 bucket.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "prefix": {
-                        "type": "string",
-                        "description": "Prefix for S3 object lookup.",
-                    },
-                    "max_items": {
-                        "type": "integer",
-                        "minimum": 1,
-                        "maximum": 500,
-                        "default": 100,
-                    },
+        "name": "list_s3",
+        "description": "List invoice files in your S3 bucket.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "prefix": {
+                    "type": "string",
+                    "description": "Prefix for S3 object lookup.",
                 },
-                "required": ["prefix"],
-                "additionalProperties": False,
+                "max_items": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 500,
+                    "default": 100,
+                },
             },
+            "required": ["prefix"],
+            "additionalProperties": False,
         },
     }
 ]
@@ -411,12 +407,23 @@ async def _execute_responses_workflow(query: str, context: Mapping[str, Any]) ->
 
     system_prompt = (
         "You are an analytics assistant. Use the available tools to answer questions. "
-        "Return concise explanations and include JSON-formatted tabular data when appropriate."
+        "Return concise explanations and include JSON-formatted tabular data when appropriate. "
+        "Database dialect = SQLite. When filtering dates use strftime('%Y', <date_col>) and "
+        "strftime('%m', <date_col>) (e.g., strftime('%Y','invoice_date')='2025' and strftime('%m','invoice_date')='11')."
     )
 
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": [{"type": "input_text", "text": system_prompt}]}
     ]
+
+    # (optional) lightweight visibility on the tools we are sending
+    try:
+        LOGGER.info(
+            "analytics_agent_tools_shape",
+            tools=TOOLS,
+        )
+    except Exception:
+        pass
 
     if context:
         context_text = json.dumps(context, default=_json_default)
