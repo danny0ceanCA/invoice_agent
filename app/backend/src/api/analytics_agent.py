@@ -7,6 +7,12 @@ import asyncio
 import json
 from typing import Any, Iterable, Mapping
 
+# HTTP fallback for tool-output submission when SDK method isn't present
+try:  # httpx is a transitive dep of openai>=1.x
+    import httpx  # type: ignore
+except Exception:  # pragma: no cover
+    httpx = None  # type: ignore
+
 import boto3
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -194,6 +200,65 @@ TOOLS = [
 ]
 
 
+def _submit_tool_outputs(client: OpenAI, settings, response_id: str, tool_outputs: list[dict[str, str]]) -> None:
+    """
+    Submit tool outputs to the Responses API, working across SDK versions.
+    1) Prefer the official SDK method if it exists.
+    2) Otherwise, POST directly to the REST endpoint.
+    """
+
+    # 1) Try SDK method (present on newer openai Python SDKs)
+    try:
+        submit = getattr(getattr(client, "responses", None), "submit_tool_outputs", None)
+        if callable(submit):
+            submit(response_id, tool_outputs=tool_outputs)
+            return
+    except Exception as e:
+        LOGGER.warning("analytics_agent_submit_tool_outputs_sdk_failed", error=str(e))
+
+    # 2) Raw HTTP fallback (handle both endpoint spellings for compatibility)
+    headers = {
+        "Authorization": f"Bearer {settings.openai_api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {"tool_outputs": tool_outputs}
+
+    endpoints = (
+        f"https://api.openai.com/v1/responses/{response_id}/submit_tool_outputs",
+        f"https://api.openai.com/v1/responses/{response_id}/tool_outputs",
+    )
+
+    last_err = None
+    for url in endpoints:
+        try:
+            if httpx is not None:
+                resp = httpx.post(url, headers=headers, json=payload, timeout=30.0)
+                if 200 <= resp.status_code < 300:
+                    LOGGER.info("analytics_agent_tool_submit_path", path=url)
+                    return
+                if resp.status_code != 404:
+                    resp.raise_for_status()
+            else:
+                import requests  # type: ignore
+
+                resp = requests.post(url, headers=headers, json=payload, timeout=30)
+                if 200 <= resp.status_code < 300:
+                    LOGGER.info("analytics_agent_tool_submit_path", path=url)
+                    return
+                if resp.status_code != 404:
+                    resp.raise_for_status()
+        except Exception as e:  # pragma: no cover - defensive
+            last_err = str(e)
+            LOGGER.warning("analytics_agent_tool_submit_fallback_failed", path=url, error=last_err)
+            continue
+
+    raise RuntimeError(
+        "Unable to submit tool outputs via SDK or HTTP fallback. Last error: {last_err}".format(
+            last_err=last_err
+        )
+    )
+
+
 def _extract_final_output(response: Any) -> Any:
     """Extract the final model output from the Responses API payload."""
 
@@ -329,8 +394,8 @@ def _format_final_output(final_output: Any) -> tuple[str, str]:
     return text, html
 
 
-async def _process_tool_calls(tool_calls: Any) -> list[dict[str, str]]:
-    """Execute model-requested tool calls and return a list suitable for
+async def _process_tool_calls(tool_calls: Any) -> dict[str, list[dict[str, str]]] | None:
+    """Execute model-requested tool calls and return a dict suitable for
     Responses.submit_tool_outputs(tool_outputs=[...]).
 
     Accepts either:
@@ -386,7 +451,10 @@ async def _process_tool_calls(tool_calls: Any) -> list[dict[str, str]]:
             }
         )
 
-    return outputs
+    if not outputs:
+        return None
+
+    return {"tool_outputs": outputs}
 
 
 async def _execute_responses_workflow(query: str, context: Mapping[str, Any]) -> Any:
@@ -466,18 +534,14 @@ async def _execute_responses_workflow(query: str, context: Mapping[str, Any]) ->
             if not tool_outputs:
                 raise RuntimeError("Model requested tools but none could be executed.")
 
-            submit_fn = getattr(client.responses, "submit_tool_outputs", None)
-            if not callable(submit_fn):
-                raise RuntimeError(
-                    "Your installed 'openai' SDK does not support Responses.submit_tool_outputs(). "
-                    "Upgrade with: pip install -U openai"
-                )
-
-            response = await asyncio.to_thread(
-                submit_fn,
+            await asyncio.to_thread(
+                _submit_tool_outputs,
+                client,
+                settings,
                 response.id,
-                tool_outputs=tool_outputs,
+                tool_outputs["tool_outputs"],
             )
+            response = await asyncio.to_thread(client.responses.retrieve, response.id)
             continue
 
         if status == "completed":
@@ -490,18 +554,16 @@ async def _execute_responses_workflow(query: str, context: Mapping[str, Any]) ->
             ]
             if pending_calls:
                 tool_outputs = await _process_tool_calls({"tool_calls": pending_calls})
-                submit_fn = getattr(client.responses, "submit_tool_outputs", None)
-                if not callable(submit_fn):
-                    raise RuntimeError(
-                        "Your installed 'openai' SDK does not support Responses.submit_tool_outputs(). "
-                        "Upgrade with: pip install -U openai"
-                    )
-
-                response = await asyncio.to_thread(
-                    submit_fn,
+                if not tool_outputs:
+                    raise RuntimeError("Model requested tools but none could be executed.")
+                await asyncio.to_thread(
+                    _submit_tool_outputs,
+                    client,
+                    settings,
                     response.id,
-                    tool_outputs=tool_outputs,
+                    tool_outputs["tool_outputs"],
                 )
+                response = await asyncio.to_thread(client.responses.retrieve, response.id)
                 continue
 
             return response
