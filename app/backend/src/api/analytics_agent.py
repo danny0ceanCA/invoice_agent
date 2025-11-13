@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Callable
+
+import boto3
 import structlog
+from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import APIRouter, Depends, HTTPException, status
-from agents import Agent, Runner
+from sqlalchemy import create_engine, text
+
+from agents import Agent, Runner, tool
 from app.backend.src.core.config import get_settings
 from app.backend.src.core.security import get_current_user
 from app.backend.src.models import User
@@ -17,42 +22,70 @@ _AGENT: Agent | None = None
 _AGENT_INITIALIZED = False
 
 
-def _build_agent_tools(settings: Any) -> list[dict[str, Any]]:
-    """Return the tool configuration supplied to the Agent SDK."""
-    tools: list[dict[str, Any]] = []
+def _build_agent_functions(settings: Any) -> list[Callable[..., Any]]:
+    """Create the callable tool functions supplied to the Agent SDK."""
 
-    tools.append(
-        {
-            "type": "sql",
-            "name": "district_invoice_database",
-            "description": (
-                "Execute read-only SQL queries against the district invoice database "
-                "to retrieve invoices, vendors, students, and approval details."
-            ),
-            "connection": settings.database_url,
-            "readonly": True,
-        }
+    engine = create_engine(settings.database_url, future=True)
+    s3_client = boto3.client(
+        "s3",
+        region_name=settings.aws_region,
+        aws_access_key_id=settings.aws_access_key_id,
+        aws_secret_access_key=settings.aws_secret_access_key,
     )
 
-    tools.append(
-        {
-            "type": "s3",
-            "name": "district_invoice_file_storage",
-            "description": (
-                "Access the AWS S3 bucket storing vendor invoice files. List invoice "
-                "objects by vendor or month prefixes and generate presigned download "
-                "URLs valid for one hour."
-            ),
-            "bucket": settings.aws_s3_bucket,
-            "region": settings.aws_region,
-            "access_key_id": settings.aws_access_key_id,
-            "secret_access_key": settings.aws_secret_access_key,
-            "presign_ttl_seconds": 3600,
-            "local_cache_path": settings.local_storage_path,
-        }
-    )
+    @tool
+    def district_invoice_database(query: str) -> list[dict[str, Any]]:
+        """Execute a read-only SQL query against the district invoice database."""
 
-    return tools
+        normalized = (query or "").strip()
+        if not normalized:
+            raise ValueError("SQL query is required.")
+
+        if not normalized.lower().startswith("select"):
+            raise ValueError("Only read-only SELECT queries are permitted.")
+
+        if ";" in normalized.rstrip(";"):
+            raise ValueError("Multiple SQL statements are not supported.")
+
+        with engine.connect() as connection:
+            result = connection.execute(text(normalized))
+            rows = [dict(row._mapping) for row in result]
+
+        return rows
+
+    @tool
+    def district_invoice_file_storage(prefix: str = "", max_items: int = 100) -> list[dict[str, Any]]:
+        """List invoice files stored in the district's S3 bucket."""
+
+        paginator = s3_client.get_paginator("list_objects_v2")
+        try:
+            page_iterator = paginator.paginate(
+                Bucket=settings.aws_s3_bucket,
+                Prefix=prefix or "",
+                PaginationConfig={"MaxItems": max(1, max_items)},
+            )
+        except (BotoCoreError, ClientError) as exc:  # pragma: no cover - defensive
+            raise RuntimeError("Unable to access invoice file storage.") from exc
+
+        items: list[dict[str, Any]] = []
+        for page in page_iterator:
+            for obj in page.get("Contents", []):
+                if len(items) >= max_items:
+                    return items
+
+                last_modified = obj.get("LastModified")
+                items.append(
+                    {
+                        "key": obj.get("Key"),
+                        "size": obj.get("Size"),
+                        "last_modified": last_modified.isoformat() if last_modified else None,
+                        "storage_class": obj.get("StorageClass"),
+                    }
+                )
+
+        return items
+
+    return [district_invoice_database, district_invoice_file_storage]
 
 
 def _ensure_agent_available() -> Agent | None:
@@ -79,7 +112,7 @@ def _ensure_agent_available() -> Agent | None:
             LOGGER.warning("analytics_agent_missing_configuration", missing=missing)
             return None
 
-        agent_tools = _build_agent_tools(settings)
+        agent_functions = _build_agent_functions(settings)
 
         _AGENT = Agent(
             name="district_analytics_agent",
@@ -87,8 +120,8 @@ def _ensure_agent_available() -> Agent | None:
                 "You are an AI analytics assistant that answers finance and operations "
                 "questions using district data."
             ),
+            functions=agent_functions,
         )
-        _AGENT.tools = agent_tools
 
         # Extra guard to ensure valid Agent instance
         if not hasattr(_AGENT, "name"):
