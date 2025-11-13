@@ -117,8 +117,13 @@ def _ensure_agent_available() -> Agent | None:
         _AGENT = Agent(
             name="district_analytics_agent",
             instructions=(
-                "You are an AI analytics assistant that answers finance and operations "
-                "questions using district data."
+                "You have two tools: run_sql(query) and list_s3(prefix).\n"
+                "Use run_sql for any question involving totals, months, vendors, students, spending, invoices, amounts, etc.\n"
+                "Use SELECT queries only.\n"
+                "Use list_s3 for questions about invoice files or document retrieval.\n"
+                "After calling a tool, analyze the returned data and produce a human-readable answer.\n"
+                "If the data is tabular, produce an HTML <table> with headers.\n"
+                "Always return a final natural-language summary plus the HTML table when appropriate."
             ),
             functions=agent_functions,
         )
