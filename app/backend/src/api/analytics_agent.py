@@ -205,6 +205,19 @@ TOOLS = [
 ]
 
 
+def _extract_final_text(response):
+    """Extract message text from Responses API output format."""
+
+    output_items = getattr(response, "output", None) or []
+    for item in output_items:
+        if getattr(item, "type", None) == "message":
+            contents = getattr(item, "content", []) or []
+            for c in contents:
+                if getattr(c, "type", None) == "output_text":
+                    return c.text
+    return ""
+
+
 def _render_html_table(rows: Iterable[Mapping[str, Any]]) -> str:
     """Render a list of mapping rows as an HTML table."""
 
@@ -428,7 +441,8 @@ async def run_agent(request: dict, user: User = Depends(get_current_user)) -> di
             detail="Analytics agent failed to process the request.",
         ) from exc
 
-    final_text = getattr(response, "output_text", "") or ""
+    # FIXED: extract proper output from Responses API
+    final_text = _extract_final_text(response)
     parsed_output = _try_parse_json(final_text)
     final_output = parsed_output if parsed_output is not None else final_text
     text, html = _format_final_output(final_output)
