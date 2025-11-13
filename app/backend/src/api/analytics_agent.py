@@ -329,8 +329,9 @@ def _format_final_output(final_output: Any) -> tuple[str, str]:
     return text, html
 
 
-async def _process_tool_calls(tool_calls: Any):
-    """Execute model-requested tool calls.
+async def _process_tool_calls(tool_calls: Any) -> list[dict[str, str]]:
+    """Execute model-requested tool calls and return a list suitable for
+    Responses.submit_tool_outputs(tool_outputs=[...]).
 
     Accepts either:
       - an object with attribute `.tool_calls`, or
@@ -385,10 +386,7 @@ async def _process_tool_calls(tool_calls: Any):
             }
         )
 
-    if not outputs:
-        return None
-
-    return {"tool_call_outputs": outputs}
+    return outputs
 
 
 async def _execute_responses_workflow(query: str, context: Mapping[str, Any]) -> Any:
@@ -468,10 +466,17 @@ async def _execute_responses_workflow(query: str, context: Mapping[str, Any]) ->
             if not tool_outputs:
                 raise RuntimeError("Model requested tools but none could be executed.")
 
+            submit_fn = getattr(client.responses, "submit_tool_outputs", None)
+            if not callable(submit_fn):
+                raise RuntimeError(
+                    "Your installed 'openai' SDK does not support Responses.submit_tool_outputs(). "
+                    "Upgrade with: pip install -U openai"
+                )
+
             response = await asyncio.to_thread(
-                client.responses.submit_tool_outputs,
+                submit_fn,
                 response.id,
-                tool_call_outputs=tool_outputs["tool_call_outputs"],
+                tool_outputs=tool_outputs,
             )
             continue
 
@@ -485,10 +490,17 @@ async def _execute_responses_workflow(query: str, context: Mapping[str, Any]) ->
             ]
             if pending_calls:
                 tool_outputs = await _process_tool_calls({"tool_calls": pending_calls})
+                submit_fn = getattr(client.responses, "submit_tool_outputs", None)
+                if not callable(submit_fn):
+                    raise RuntimeError(
+                        "Your installed 'openai' SDK does not support Responses.submit_tool_outputs(). "
+                        "Upgrade with: pip install -U openai"
+                    )
+
                 response = await asyncio.to_thread(
-                    client.responses.submit_tool_outputs,
+                    submit_fn,
                     response.id,
-                    tool_call_outputs=tool_outputs["tool_call_outputs"],
+                    tool_outputs=tool_outputs,
                 )
                 continue
 
