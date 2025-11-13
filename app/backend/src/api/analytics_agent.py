@@ -155,45 +155,44 @@ def list_s3(prefix: str, max_items: int = 100) -> list[dict[str, Any]]:
 TOOLS = [
     {
         "type": "function",
-        "name": "run_sql",
-        "description": "Execute a read-only SQL SELECT query.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "A complete SQL SELECT statement."
-                }
-            },
-            "required": ["query"],
-            "additionalProperties": False
+        "function": {
+            "name": "run_sql",
+            "description": "Execute a read-only SQL SELECT query.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "A complete SQL SELECT statement."
+                    }
+                },
+                "required": ["query"],
+                "additionalProperties": False
+            }
         }
     },
     {
         "type": "function",
-        "name": "list_s3",
-        "description": "List invoice files in your S3 bucket.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "prefix": {
-                    "type": "string",
-                    "description": "Prefix for filtering S3 object keys"
+        "function": {
+            "name": "list_s3",
+            "description": "List invoice files in your S3 bucket.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prefix": {"type": "string"},
+                    "max_items": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 500,
+                        "default": 100
+                    }
                 },
-                "max_items": {
-                    "type": "integer",
-                    "description": "Max objects to return",
-                    "minimum": 1,
-                    "maximum": 500,
-                    "default": 100
-                }
-            },
-            "required": ["prefix"],
-            "additionalProperties": False
+                "required": ["prefix"],
+                "additionalProperties": False
+            }
         }
     }
 ]
-
 def _extract_final_output(response: Any) -> Any:
     """Extract the final model output from the Responses API payload."""
 
