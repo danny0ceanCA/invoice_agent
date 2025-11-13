@@ -4,14 +4,15 @@ from __future__ import annotations
 
 from html import escape
 import asyncio
-import inspect
 import json
-import time
 from typing import Any, Iterable, Mapping
 
+import boto3
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
 from openai import OpenAI
+from sqlalchemy import create_engine, text as sql_text
+from sqlalchemy.engine import Engine
 
 from app.backend.src.core.config import get_settings
 from app.backend.src.core.security import get_current_user
@@ -22,78 +23,14 @@ LOGGER = structlog.get_logger(__name__)
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
 
-class AnalyticsAgentConfig:
-    """Configuration required to execute the hosted analytics agent."""
-
-    def __init__(
-        self,
-        *,
-        agent_id: str,
-        api_key: str,
-        polling_interval: float = 0.5,
-        max_poll_attempts: int = 120,
-    ) -> None:
-        self.agent_id = agent_id
-        self.api_key = api_key
-        self.polling_interval = polling_interval
-        self.max_poll_attempts = max_poll_attempts
+DEFAULT_MODEL = "gpt-4.1-mini"
+DEFAULT_POLL_INTERVAL = 0.5
 
 
-_AGENT: AnalyticsAgentConfig | None = None
-
-
-def _ensure_agent_available() -> AnalyticsAgentConfig | Any:
-    """Return the analytics agent configuration if the feature is enabled."""
-
-    global _AGENT
-    if _AGENT is not None:
-        return _AGENT
-
-    settings = get_settings()
-    api_key = settings.openai_api_key
-    agent_id = (
-        settings.get("ANALYTICS_AGENT_ID")
-        or settings.get("analytics_agent_id")
-        or settings.get("OPENAI_ANALYTICS_AGENT_ID")
-    )
-
-    if not api_key or not agent_id:
-        LOGGER.warning(
-            "analytics_agent_missing_configuration",
-            missing=[
-                key
-                for key, value in {
-                    "OPENAI_API_KEY": api_key,
-                    "ANALYTICS_AGENT_ID": agent_id,
-                }.items()
-                if not value
-            ],
-        )
-        raise RuntimeError("Analytics agent configuration is incomplete.")
-
-    poll_seconds = settings.get("ANALYTICS_AGENT_POLL_INTERVAL", 0.5)
-    max_attempts = settings.get("ANALYTICS_AGENT_MAX_POLLS", 120)
-
-    try:
-        polling_interval = max(0.1, float(poll_seconds))
-    except (TypeError, ValueError):
-        polling_interval = 0.5
-
-    try:
-        max_poll_attempts = max(1, int(max_attempts))
-    except (TypeError, ValueError):
-        max_poll_attempts = 120
-
-    _AGENT = AnalyticsAgentConfig(
-        agent_id=str(agent_id),
-        api_key=str(api_key),
-        polling_interval=polling_interval,
-        max_poll_attempts=max_poll_attempts,
-    )
-
-    LOGGER.info("analytics_agent_initialized", agent_id=_AGENT.agent_id)
-
-    return _AGENT
+_SQL_ENGINE: Engine | None = None
+_OPENAI_CLIENT: OpenAI | None = None
+_OPENAI_API_KEY: str | None = None
+_S3_CLIENT: Any | None = None
 
 
 def _build_context(user: User | None, request_context: Any) -> dict[str, Any]:
@@ -111,146 +48,159 @@ def _build_context(user: User | None, request_context: Any) -> dict[str, Any]:
     return context
 
 
-def _extract_rows(value: Any) -> list[dict[str, Any]] | None:
-    """Attempt to coerce arbitrary values into a list of mapping rows."""
+def _get_sql_engine(settings) -> Engine:
+    """Return a cached SQLAlchemy engine."""
 
-    if isinstance(value, Mapping):
-        rows = value.get("rows")
-        if isinstance(rows, Iterable):
-            return _extract_rows(rows)
-
-    if isinstance(value, Iterable) and not isinstance(value, (str, bytes)):
-        candidate_rows: list[dict[str, Any]] = []
-        for item in value:
-            if isinstance(item, Mapping):
-                candidate_rows.append({str(key): item[key] for key in item.keys()})
-            else:
-                return None
-        if candidate_rows:
-            return candidate_rows
-
-    return None
+    global _SQL_ENGINE
+    if _SQL_ENGINE is None:
+        _SQL_ENGINE = create_engine(settings.database_url)
+    return _SQL_ENGINE
 
 
-def _try_parse_json(value: str) -> Any:
-    """Parse JSON content when the payload appears to be structured data."""
+def _get_openai_client(settings) -> OpenAI:
+    """Return a cached OpenAI client configured with the API key."""
 
-    normalized = value.strip()
-    if not normalized or normalized[0] not in "[{":
-        return None
+    global _OPENAI_CLIENT, _OPENAI_API_KEY
+    api_key = settings.openai_api_key
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY is not configured.")
 
+    if _OPENAI_CLIENT is None or api_key != _OPENAI_API_KEY:
+        _OPENAI_CLIENT = OpenAI(api_key=api_key)
+        _OPENAI_API_KEY = api_key
+    return _OPENAI_CLIENT
+
+
+def _get_s3_client(settings):
+    """Return a cached boto3 S3 client configured from settings."""
+
+    global _S3_CLIENT
+    if _S3_CLIENT is None:
+        session = boto3.session.Session(
+            aws_access_key_id=settings.aws_access_key_id,
+            aws_secret_access_key=settings.aws_secret_access_key,
+            region_name=settings.aws_region,
+        )
+        _S3_CLIENT = session.client("s3")
+    return _S3_CLIENT
+
+
+def _json_default(value: Any) -> str:
+    """Serialize otherwise non-JSON-serializable values."""
+
+    if hasattr(value, "isoformat"):
+        return value.isoformat()  # type: ignore[return-value]
+    return str(value)
+
+
+def run_sql(query: str) -> list[dict[str, Any]]:
+    """Execute a read-only SQL query using SQLAlchemy."""
+
+    if not isinstance(query, str) or not query.strip():
+        raise ValueError("SQL query must be a non-empty string.")
+
+    normalized = query.strip().lower()
+    if not (normalized.startswith("select") or normalized.startswith("with")):
+        raise ValueError("Only SELECT queries are permitted.")
+
+    settings = get_settings()
+    engine = _get_sql_engine(settings)
+
+    rows: list[dict[str, Any]] = []
+    with engine.connect() as connection:
+        result = connection.execute(sql_text(query))
+        for row in result:
+            rows.append(dict(row._mapping))
+
+    return rows
+
+
+def list_s3(prefix: str, max_items: int = 100) -> list[dict[str, Any]]:
+    """List objects in the configured S3 bucket."""
+
+    settings = get_settings()
+    client = _get_s3_client(settings)
+
+    resolved_prefix = prefix or ""
     try:
-        return json.loads(normalized)
-    except json.JSONDecodeError:
-        return None
+        resolved_max = max(1, min(int(max_items), 500))
+    except (TypeError, ValueError):
+        resolved_max = 100
 
+    paginator = client.get_paginator("list_objects_v2")
+    page_iterator = paginator.paginate(
+        Bucket=settings.aws_s3_bucket,
+        Prefix=resolved_prefix,
+    )
 
-def _coerce_response_output(response: Any) -> Any:
-    """Normalize OpenAI response objects into consumable payloads."""
-
-    if response is None:
-        return None
-
-    output_items = getattr(response, "output", None) or []
-    text_segments: list[str] = []
-    detected_rows: list[dict[str, Any]] | None = None
-
-    for item in output_items:
-        item_type = getattr(item, "type", None)
-        if item_type == "message":
-            contents = getattr(item, "content", None) or []
-            for content in contents:
-                content_type = getattr(content, "type", None)
-                if content_type == "output_text":
-                    text_value = getattr(content, "text", "")
-                    if text_value:
-                        text_segments.append(str(text_value))
-                else:
-                    maybe_rows = _extract_rows(getattr(content, "output", None))
-                    if maybe_rows:
-                        detected_rows = maybe_rows
-        else:
-            maybe_rows = _extract_rows(getattr(item, "output", None))
-            if maybe_rows:
-                detected_rows = maybe_rows
-
-    combined_text = "\n\n".join(segment.strip() for segment in text_segments if segment).strip()
-
-    if detected_rows:
-        if combined_text:
-            return {"text": combined_text, "rows": detected_rows}
-        return detected_rows
-
-    if combined_text:
-        parsed = _try_parse_json(combined_text)
-        if parsed is not None:
-            rows = _extract_rows(parsed)
-            if rows:
-                return {"rows": rows}
-            return parsed
-        return combined_text
-
-    fallback_text = getattr(response, "output_text", None)
-    if isinstance(fallback_text, str) and fallback_text.strip():
-        parsed = _try_parse_json(fallback_text)
-        if parsed is not None:
-            rows = _extract_rows(parsed)
-            if rows:
-                return {"rows": rows}
-            return parsed
-        return fallback_text.strip()
-
-    return getattr(response, "model_dump", lambda: response)()
-
-
-async def _execute_agent_query(
-    agent_resource: AnalyticsAgentConfig | Any,
-    query: str,
-    context: Mapping[str, Any],
-) -> Any:
-    """Invoke either the stubbed agent or the hosted REST agent."""
-
-    query_callable = getattr(agent_resource, "query", None)
-    if callable(query_callable):
-        result = query_callable(prompt=query, context=dict(context))
-        if inspect.isawaitable(result):
-            result = await result
-        return result
-
-    if not isinstance(agent_resource, AnalyticsAgentConfig):
-        raise RuntimeError("Analytics agent is misconfigured.")
-
-    def _run_rest_agent() -> Any:
-        client = OpenAI(api_key=agent_resource.api_key)
-        request_kwargs: dict[str, Any] = {
-            "model": agent_resource.agent_id,
-            "input": query,
-        }
-        if context:
-            request_kwargs["metadata"] = {"context": dict(context)}
-
-        response = client.responses.create(**request_kwargs)
-        attempts = 0
-        while getattr(response, "status", "completed") not in {
-            "completed",
-            "failed",
-            "cancelled",
-        }:
-            attempts += 1
-            if attempts >= agent_resource.max_poll_attempts:
-                raise RuntimeError("Timed out waiting for analytics agent response.")
-
-            time.sleep(agent_resource.polling_interval)
-            response = client.responses.retrieve(response.id)
-
-        if getattr(response, "status", "completed") != "completed":
-            raise RuntimeError(
-                f"Analytics agent run ended with status {getattr(response, 'status', 'unknown')}."
+    objects: list[dict[str, Any]] = []
+    for page in page_iterator:
+        for entry in page.get("Contents", []) or []:
+            objects.append(
+                {
+                    "key": entry.get("Key"),
+                    "size": entry.get("Size"),
+                    "last_modified": _json_default(entry.get("LastModified")),
+                }
             )
+            if len(objects) >= resolved_max:
+                return objects
 
-        return _coerce_response_output(response)
+        if len(objects) >= resolved_max:
+            break
 
-    return await asyncio.to_thread(_run_rest_agent)
+    return objects
+
+
+TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "run_sql",
+            "description": (
+                "Execute a read-only SQL query against the analytics database. "
+                "Only SELECT statements are supported."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "A complete SELECT statement to execute.",
+                    }
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_s3",
+            "description": (
+                "List objects from the configured analytics S3 bucket. "
+                "Use this to discover available files."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prefix": {
+                        "type": "string",
+                        "description": "Prefix filter for the object keys.",
+                    },
+                    "max_items": {
+                        "type": "integer",
+                        "description": "Maximum number of objects to return (1-500).",
+                        "default": 100,
+                        "minimum": 1,
+                        "maximum": 500,
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+]
 
 
 def _render_html_table(rows: Iterable[Mapping[str, Any]]) -> str:
@@ -273,6 +223,22 @@ def _render_html_table(rows: Iterable[Mapping[str, Any]]) -> str:
 
     body_html = "".join(body_rows)
     return f"<table><thead><tr>{header_html}</tr></thead><tbody>{body_html}</tbody></table>"
+
+
+def _try_parse_json(value: str) -> Any:
+    """Parse JSON content when the payload appears to be structured data."""
+
+    if not isinstance(value, str):
+        return None
+
+    normalized = value.strip()
+    if not normalized or normalized[0] not in "[{":
+        return None
+
+    try:
+        return json.loads(normalized)
+    except json.JSONDecodeError:
+        return None
 
 
 def _format_final_output(final_output: Any) -> tuple[str, str]:
@@ -312,6 +278,127 @@ def _format_final_output(final_output: Any) -> tuple[str, str]:
     return text, html
 
 
+async def _process_tool_calls(tool_calls: Any) -> list[dict[str, str]]:
+    """Execute tool calls requested by the model."""
+
+    outputs: list[dict[str, str]] = []
+    for call in getattr(tool_calls, "tool_calls", []) or []:
+        function = getattr(call, "function", None)
+        name = getattr(function, "name", "")
+        arguments_raw = getattr(function, "arguments", "{}")
+        try:
+            arguments = json.loads(arguments_raw or "{}")
+        except json.JSONDecodeError:
+            arguments = {}
+
+        LOGGER.info("analytics_agent_tool_invocation", tool=name, arguments=arguments)
+
+        try:
+            if name == "run_sql":
+                query = str(arguments.get("query", ""))
+                result = await asyncio.to_thread(run_sql, query)
+            elif name == "list_s3":
+                prefix = str(arguments.get("prefix", ""))
+                max_items = arguments.get("max_items", 100)
+                result = await asyncio.to_thread(list_s3, prefix, max_items)
+            else:
+                raise ValueError(f"Unknown tool requested: {name}")
+            output = json.dumps(result, default=_json_default)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            LOGGER.error("analytics_agent_tool_failed", tool=name, error=str(exc))
+            output = json.dumps(
+                {"error": f"Tool {name} failed: {exc}"},
+                default=_json_default,
+            )
+
+        outputs.append({"tool_call_id": call.id, "output": output})
+
+    return outputs
+
+
+async def _execute_responses_workflow(query: str, context: Mapping[str, Any]) -> Any:
+    """Run the analytics workflow using the OpenAI Responses API."""
+
+    settings = get_settings()
+    client = _get_openai_client(settings)
+
+    poll_interval = getattr(settings, "poll_interval_seconds", None)
+    try:
+        poll_interval_seconds = max(
+            0.1, float(poll_interval) if poll_interval is not None else DEFAULT_POLL_INTERVAL
+        )
+    except (TypeError, ValueError):
+        poll_interval_seconds = DEFAULT_POLL_INTERVAL
+
+    system_prompt = (
+        "You are an analytics assistant. Use the available tools to answer questions. "
+        "Return concise explanations and include JSON-formatted tabular data when appropriate."
+    )
+
+    messages: list[dict[str, Any]] = [
+        {"role": "system", "content": [{"type": "text", "text": system_prompt}]}
+    ]
+
+    if context:
+        context_text = json.dumps(context, default=_json_default)
+        messages.append(
+            {
+                "role": "system",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": f"User context (JSON): {context_text}",
+                    }
+                ],
+            }
+        )
+
+    messages.append(
+        {"role": "user", "content": [{"type": "text", "text": query}]}
+    )
+
+    create_kwargs: dict[str, Any] = {
+        "model": DEFAULT_MODEL,
+        "input": messages,
+        "tools": TOOLS,
+    }
+
+    if context:
+        create_kwargs["metadata"] = {"context": context}
+
+    response = await asyncio.to_thread(client.responses.create, **create_kwargs)
+
+    while True:
+        status = getattr(response, "status", "completed")
+        if status == "requires_action":
+            required_action = getattr(response, "required_action", None)
+            if not required_action:
+                raise RuntimeError("Model requested action but no details were provided.")
+
+            tool_outputs = await _process_tool_calls(
+                getattr(required_action, "submit_tool_outputs", None)
+            )
+
+            if not tool_outputs:
+                raise RuntimeError("Model requested tools but none could be executed.")
+
+            response = await asyncio.to_thread(
+                client.responses.submit_tool_outputs,
+                response.id,
+                tool_outputs=tool_outputs,
+            )
+            continue
+
+        if status == "completed":
+            return response
+
+        if status in {"failed", "cancelled"}:
+            raise RuntimeError(f"Analytics run ended with status '{status}'.")
+
+        await asyncio.sleep(poll_interval_seconds)
+        response = await asyncio.to_thread(client.responses.retrieve, response.id)
+
+
 @router.post("/agent")
 async def run_agent(request: dict, user: User = Depends(get_current_user)) -> dict[str, Any]:
     """Execute the analytics agent and format its response."""
@@ -324,18 +411,14 @@ async def run_agent(request: dict, user: User = Depends(get_current_user)) -> di
         )
 
     try:
-        agent = _ensure_agent_available()
+        context = _build_context(user, request.get("context"))
+        response = await _execute_responses_workflow(query, context)
     except RuntimeError as exc:
         LOGGER.warning("analytics_agent_unavailable", error=str(exc))
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Analytics assistant is temporarily unavailable. Please try again later.",
         ) from exc
-
-    context = _build_context(user, request.get("context"))
-
-    try:
-        sdk_result = await _execute_agent_query(agent, query, context)
     except Exception as exc:  # pragma: no cover - defensive logging
         LOGGER.error("analytics_agent_query_failed", error=str(exc))
         raise HTTPException(
@@ -343,19 +426,22 @@ async def run_agent(request: dict, user: User = Depends(get_current_user)) -> di
             detail="Analytics agent failed to process the request.",
         ) from exc
 
-    final_output = getattr(sdk_result, "final_output", sdk_result)
+    final_text = getattr(response, "output_text", "") or ""
+    parsed_output = _try_parse_json(final_text)
+    final_output = parsed_output if parsed_output is not None else final_text
     text, html = _format_final_output(final_output)
 
-    if isinstance(final_output, list) and final_output and all(
-        isinstance(item, Mapping) for item in final_output
-    ):
-        text = text or "See the table below for details."
-    elif isinstance(final_output, str) and text:
-        html = html or f"<p>{escape(text)}</p>"
-
     response_payload: dict[str, Any] = {"text": text, "html": html}
+
     if isinstance(final_output, Mapping):
         for key, value in final_output.items():
             response_payload.setdefault(key, value)
+    elif isinstance(final_output, list) and final_output and all(
+        isinstance(item, Mapping) for item in final_output
+    ):
+        response_payload.setdefault("rows", final_output)
 
     return response_payload
+
+
+__all__ = ["run_agent"]
