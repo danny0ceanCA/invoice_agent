@@ -10,7 +10,16 @@ from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import create_engine, text
 
-from agents import Agent, Runner, tool
+from html import escape
+
+try:  # pragma: no cover - fallback for environments without the Agents SDK
+    from agents import Agent, Runner, function_tool
+except ImportError:  # pragma: no cover - graceful degradation for local tests
+    Agent = None  # type: ignore[assignment]
+    Runner = None  # type: ignore[assignment]
+
+    def function_tool(func: Callable[..., Any]) -> Callable[..., Any]:
+        return func
 from app.backend.src.core.config import get_settings
 from app.backend.src.core.security import get_current_user
 from app.backend.src.models import User
@@ -33,15 +42,16 @@ def _build_agent_functions(settings: Any) -> list[Callable[..., Any]]:
         aws_secret_access_key=settings.aws_secret_access_key,
     )
 
-    @tool
-    def district_invoice_database(query: str) -> list[dict[str, Any]]:
+    @function_tool
+    def run_sql(query: str) -> list[dict[str, Any]]:
         """Execute a read-only SQL query against the district invoice database."""
 
         normalized = (query or "").strip()
         if not normalized:
             raise ValueError("SQL query is required.")
 
-        if not normalized.lower().startswith("select"):
+        lowered = normalized.lower()
+        if not lowered.startswith("select"):
             raise ValueError("Only read-only SELECT queries are permitted.")
 
         if ";" in normalized.rstrip(";"):
@@ -53,16 +63,24 @@ def _build_agent_functions(settings: Any) -> list[Callable[..., Any]]:
 
         return rows
 
-    @tool
-    def district_invoice_file_storage(prefix: str = "", max_items: int = 100) -> list[dict[str, Any]]:
+    @function_tool
+    def list_invoice_files(prefix: str = "", max_items: int = 100) -> list[dict[str, Any]]:
         """List invoice files stored in the district's S3 bucket."""
+
+        sanitized_prefix = (prefix or "").strip()
+        try:
+            candidate_max = int(max_items)
+        except (TypeError, ValueError):
+            candidate_max = 100
+
+        safe_max_items = max(1, min(candidate_max, 500))
 
         paginator = s3_client.get_paginator("list_objects_v2")
         try:
             page_iterator = paginator.paginate(
                 Bucket=settings.aws_s3_bucket,
-                Prefix=prefix or "",
-                PaginationConfig={"MaxItems": max(1, max_items)},
+                Prefix=sanitized_prefix,
+                PaginationConfig={"MaxItems": safe_max_items},
             )
         except (BotoCoreError, ClientError) as exc:  # pragma: no cover - defensive
             raise RuntimeError("Unable to access invoice file storage.") from exc
@@ -70,7 +88,7 @@ def _build_agent_functions(settings: Any) -> list[Callable[..., Any]]:
         items: list[dict[str, Any]] = []
         for page in page_iterator:
             for obj in page.get("Contents", []):
-                if len(items) >= max_items:
+                if len(items) >= safe_max_items:
                     return items
 
                 last_modified = obj.get("LastModified")
@@ -85,7 +103,7 @@ def _build_agent_functions(settings: Any) -> list[Callable[..., Any]]:
 
         return items
 
-    return [district_invoice_database, district_invoice_file_storage]
+    return [run_sql, list_invoice_files]
 
 
 def _ensure_agent_available() -> Agent | None:
@@ -117,13 +135,23 @@ def _ensure_agent_available() -> Agent | None:
         _AGENT = Agent(
             name="district_analytics_agent",
             instructions=(
-                "You have two tools: run_sql(query) and list_s3(prefix).\n"
-                "Use run_sql for any question involving totals, months, vendors, students, spending, invoices, amounts, etc.\n"
-                "Use SELECT queries only.\n"
-                "Use list_s3 for questions about invoice files or document retrieval.\n"
-                "After calling a tool, analyze the returned data and produce a human-readable answer.\n"
-                "If the data is tabular, produce an HTML <table> with headers.\n"
-                "Always return a final natural-language summary plus the HTML table when appropriate."
+                "You are the District Analytics Assistant for school finance leaders.\n"
+                "You have access to two tools and must decide when to use them:\n"
+                "1. run_sql(query: str) -> rows: Executes read-only SQL SELECT queries "
+                "against the district invoice database. Use it for any question about "
+                "invoices, spending, totals, trends, vendors, students, or amounts. "
+                "All queries MUST start with SELECT and never modify data.\n"
+                "2. list_invoice_files(prefix: str = \"\", max_items: int = 100) -> list: "
+                "Lists invoice-related files from S3. Use it when the user asks about "
+                "files, documents, storage locations, or attachments.\n"
+                "Reason step-by-step, call the appropriate tool, and inspect the "
+                "results before answering. Provide clear SQL that targets the requested "
+                "information and includes filters or ordering as needed.\n"
+                "After every tool call, summarize the findings. When returning tabular "
+                "data, include an HTML <table> with column headers in your final "
+                "response along with a narrative summary.\n"
+                "If no tool is required, answer directly but still provide actionable "
+                "context."
             ),
             functions=agent_functions,
         )
@@ -146,24 +174,76 @@ def _ensure_agent_available() -> Agent | None:
     return _AGENT
 
 
+def _render_html_table(rows: list[Mapping[str, Any]]) -> str:
+    """Render a list of mapping rows as an HTML table."""
+
+    if not rows:
+        return "<table><thead><tr><th>No results</th></tr></thead><tbody></tbody></table>"
+
+    headers = list(rows[0].keys())
+    header_html = "".join(f"<th>{escape(str(header))}</th>" for header in headers)
+
+    body_rows = []
+    for row in rows:
+        cells = []
+        for header in headers:
+            value = row.get(header, "")
+            cells.append(f"<td>{escape(str(value))}</td>")
+        body_rows.append(f"<tr>{''.join(cells)}</tr>")
+
+    body_html = "".join(body_rows)
+    return f"<table><thead><tr>{header_html}</tr></thead><tbody>{body_html}</tbody></table>"
+
+
 def _normalize_agent_result(result: Any) -> tuple[str, str, dict[str, Any]]:
     """Convert the agent SDK response into display text, HTML, and extras."""
+
+    if hasattr(result, "model_dump"):
+        result = result.model_dump()
+    elif hasattr(result, "dict"):
+        result = result.dict()
+
+    extras: dict[str, Any] = {}
+
     if isinstance(result, Mapping):
         text = str(result.get("text") or "")
         html = str(result.get("html") or "")
         extras = {k: v for k, v in result.items() if k not in {"text", "html"}}
+
+        if not html:
+            for key in ("rows", "data", "results"):
+                candidate = extras.get(key)
+                if isinstance(candidate, list) and candidate and all(
+                    isinstance(item, Mapping) for item in candidate
+                ):
+                    html = _render_html_table(candidate)
+                    break
+
+        if not text and html:
+            text = "See the table below for details."
+
         return text, html, extras
 
-    if hasattr(result, "model_dump"):
-        payload = result.model_dump()
-        return _normalize_agent_result(payload)
+    if isinstance(result, list):
+        if not result:
+            html = _render_html_table([])
+            text = "No results were returned for that query."
+            extras = {"data": result}
+            return text, html, extras
 
-    if hasattr(result, "dict"):
-        payload = result.dict()
-        return _normalize_agent_result(payload)
+        if all(isinstance(item, Mapping) for item in result):
+            html = _render_html_table(result)
+            text = "See the table below for details."
+            extras = {"data": result}
+            return text, html, extras
+
+        text = str(result)
+        html = f"<p>{escape(text)}</p>"
+        return text, html, extras
 
     text = str(result) if result is not None else ""
-    return text, "", {}
+    html = f"<p>{escape(text)}</p>" if text else ""
+    return text, html, extras
 
 
 @router.post("/agent")
@@ -186,16 +266,20 @@ async def run_agent(request: dict, user: User = Depends(get_current_user)) -> di
         return {"text": text, "html": html}
 
     try:
-        sdk_result = await Runner.run(agent, query)
-
-        # Convert the SDK Result object to a dict for normalization
-        if hasattr(sdk_result, "final_output"):
-            result = {
-                "text": sdk_result.final_output,
-                "html": f"<p>{sdk_result.final_output}</p>",
-            }
+        if Runner is not None and hasattr(Runner, "run"):
+            sdk_result = await Runner.run(agent, query)
+            result = getattr(sdk_result, "final_output", sdk_result)
         else:
-            result = sdk_result
+            context: dict[str, Any] = {}
+            district_id = getattr(user, "district_id", None)
+            if district_id is not None:
+                context["district_id"] = district_id
+
+            if hasattr(agent, "query"):
+                legacy_result = agent.query(prompt=query, context=context)
+                result = legacy_result
+            else:  # pragma: no cover - defensive fallback
+                raise RuntimeError("Agent runner is unavailable.")
 
     except Exception as exc:
         LOGGER.error("analytics_agent_query_failed", error=str(exc))
