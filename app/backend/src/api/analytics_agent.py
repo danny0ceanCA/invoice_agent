@@ -154,20 +154,16 @@ def list_s3(prefix: str, max_items: int = 100) -> list[dict[str, Any]]:
 
 TOOLS = [
     {
-        "name": "run_sql",
         "type": "function",
         "function": {
             "name": "run_sql",
-            "description": (
-                "Execute a read-only SQL query against the analytics database. "
-                "Only SELECT statements are supported."
-            ),
+            "description": "Execute a read-only SQL SELECT query.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "A complete SELECT statement to execute.",
+                        "description": "A valid SQL SELECT query.",
                     }
                 },
                 "required": ["query"],
@@ -310,8 +306,14 @@ async def _process_tool_calls(tool_calls: Any) -> list[dict[str, str]]:
 
         try:
             if name == "run_sql":
-                query = str(arguments.get("query", ""))
-                result = await asyncio.to_thread(run_sql, query)
+                if "query" not in arguments:
+                    output = json.dumps(
+                        {"error": "the run_sql tool requires a query parameter"},
+                        default=_json_default,
+                    )
+                    outputs.append({"tool_call_id": call.id, "output": output})
+                    continue
+                result = await asyncio.to_thread(run_sql, arguments["query"])
             elif name == "list_s3":
                 prefix = str(arguments.get("prefix", ""))
                 max_items = arguments.get("max_items", 100)
@@ -385,6 +387,10 @@ async def _execute_responses_workflow(query: str, context: Mapping[str, Any]) ->
 
     while True:
         status = getattr(response, "status", "completed")
+
+        if status == "completed":
+            return response
+
         if status == "requires_action":
             required_action = getattr(response, "required_action", None)
             if not required_action:
@@ -403,9 +409,6 @@ async def _execute_responses_workflow(query: str, context: Mapping[str, Any]) ->
                 tool_outputs=tool_outputs,
             )
             continue
-
-        if status == "completed":
-            return response
 
         if status in {"failed", "cancelled"}:
             raise RuntimeError(f"Analytics run ended with status '{status}'.")
