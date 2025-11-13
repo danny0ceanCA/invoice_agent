@@ -12,6 +12,7 @@ import {
   activateDistrictMembership,
 } from "../api/districts";
 import { formatPostalAddress } from "../api/common";
+import ChatAgent from "../components/ChatAgent.jsx";
 import {
   fetchInvoicePresignedUrl,
   fetchVendorInvoiceArchive,
@@ -2392,6 +2393,10 @@ export default function DistrictDashboard({
                   ) : null}
                 </div>
               ) : null}
+            </div>
+            <div style={{ marginTop: "2rem" }}>
+              <h2>Analytics Assistant</h2>
+              <ChatAgent />
             </div>
           </div>
         ) : activeItem.key === "settings" ? (
