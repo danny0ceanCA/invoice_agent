@@ -154,6 +154,7 @@ def list_s3(prefix: str, max_items: int = 100) -> list[dict[str, Any]]:
 
 TOOLS = [
     {
+        "name": "run_sql",
         "type": "function",
         "function": {
             "name": "run_sql",
@@ -163,7 +164,7 @@ TOOLS = [
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "A valid SQL SELECT query.",
+                        "description": "A SQL SELECT query.",
                     }
                 },
                 "required": ["query"],
@@ -175,21 +176,13 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "list_s3",
-            "description": (
-                "List objects from the configured analytics S3 bucket. "
-                "Use this to discover available files."
-            ),
+            "description": "List objects from the analytics S3 bucket.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "prefix": {
-                        "type": "string",
-                        "description": "Prefix filter for the object keys.",
-                    },
+                    "prefix": {"type": "string"},
                     "max_items": {
                         "type": "integer",
-                        "description": "Maximum number of objects to return (1-500).",
-                        "default": 100,
                         "minimum": 1,
                         "maximum": 500,
                     },
