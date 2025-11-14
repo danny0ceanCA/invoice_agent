@@ -50,6 +50,8 @@ def analytics_agent_endpoint(
 ) -> dict[str, Any]:
     """Execute the district analytics agent and return the structured output."""
 
+    print("RAW PAYLOAD:", payload.dict())
+
     query = (payload.query or "").strip()
     if not query:
         raise HTTPException(
@@ -65,6 +67,8 @@ def analytics_agent_endpoint(
 
     if user and getattr(user, "district_id", None) is not None:
         context.setdefault("district_id", user.district_id)
+
+    print("RESOLVED CONTEXT:", context)
 
     try:
         return run_analytics_agent(query=query, user_context=context)
