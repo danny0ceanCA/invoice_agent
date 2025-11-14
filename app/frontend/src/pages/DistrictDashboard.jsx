@@ -2284,10 +2284,10 @@ export default function DistrictDashboard({
               <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">Analytics</p>
               <h4 className="mt-1 text-2xl font-semibold text-slate-900">AI Analytics Assistant</h4>
               <p className="mt-2 text-sm text-slate-600">
-                Ask natural-language questions about invoices, vendors, students, monthly totals, or spending summaries.
+                Ask natural-language questions about invoices, vendors, students, monthly totals, or spending.
               </p>
               <div className="mt-4">
-                <ChatAgent districtKey={districtProfile?.district_key} />
+                <ChatAgent />
               </div>
             </div>
           </div>

@@ -1,66 +1,112 @@
 import { useEffect, useRef, useState } from "react";
+import { useAuth0 } from "@auth0/auth0-react";
 
 export default function ChatAgent() {
-  const [messages, setMessages] = useState([
-    {
-      role: "assistant",
-      content:
-        "Hello! I'm your analytics assistant. Ask about invoices, students, vendors, months, or totals.",
-    },
-  ]);
+  const { isAuthenticated, getAccessTokenSilently } = useAuth0();
+  const [messages, setMessages] = useResilientMessages();
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const scrollRef = useRef(null);
 
-  // Auto-scroll chat
+  // Auto-scroll to bottom when messages change
   useEffect(() => {
     const container = scrollRef.current;
-    if (container) container.scrollTop = container.scrollHeight;
+    if (container) {
+      container.scrollTop = container.scrollHeight;
+    }
   }, [messages]);
 
-  async function sendMessage(e) {
+  async function handleSend(e) {
     e.preventDefault();
-    if (!input.trim()) return;
-
     const text = input.trim();
-    setInput("");
+    if (!text || sending) return;
 
-    // Add user message to UI
+    // Add user message immediately
     setMessages((prev) => [...prev, { role: "user", content: text }]);
+    setInput("");
     setSending(true);
 
     try {
+      if (!isAuthenticated) {
+        throw new Error("You must be signed in to use the analytics assistant.");
+      }
+
+      let token = "";
+      try {
+        token = await getAccessTokenSilently();
+      } catch (err) {
+        console.error("Failed to get access token for analytics agent:", err);
+        throw new Error("Authentication error. Please refresh and try again.");
+      }
+
       const res = await fetch("/api/agents/analytics", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: token ? `Bearer ${token}` : "",
+        },
         body: JSON.stringify({ query: text }),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => null);
 
-      // Use text + html from agent
-      const combined =
-        data.html && data.html.includes("<table>")
+      if (!res.ok) {
+        const msg =
+          (data && (data.detail || data.error || data.message)) ||
+          `Analytics agent error (status ${res.status}).`;
+        throw new Error(msg);
+      }
+
+      // Expecting shape: { text: string, html: string, rows?: [...] }
+      const safeText =
+        typeof data?.text === "string" && data.text.trim().length
+          ? data.text
+          : "";
+      const safeHtml =
+        typeof data?.html === "string" && data.html.trim().length
           ? data.html
-          : `<p>${data.text}</p>`;
+          : safeText
+          ? `<p>${escapeHtml(safeText)}</p>`
+          : "<p>(No details returned.)</p>";
 
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: combined, html: true },
-      ]);
-    } catch (err) {
       setMessages((prev) => [
         ...prev,
         {
           role: "assistant",
-          content:
-            "<p>Sorry — I couldn't reach the analytics agent. Please try again.</p>",
+          content: safeHtml,
           html: true,
         },
       ]);
+    } catch (err) {
+      console.error("analytics_chat_error", err);
+      const msg =
+        err instanceof Error && err.message
+          ? err.message
+          : "Something went wrong while calling the analytics agent.";
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: `<p>${escapeHtml(msg)}</p>`,
+          html: true,
+        },
+      ]);
+    } finally {
+      setSending(false);
     }
+  }
 
-    setSending(false);
+  if (!isAuthenticated) {
+    return (
+      <div
+        className="rounded-xl border border-slate-300 p-4 bg-white shadow"
+        style={{ height: "600px", display: "flex", alignItems: "center", justifyContent: "center" }}
+      >
+        <p className="text-sm text-slate-600">
+          Please sign in to use the Analytics Assistant.
+        </p>
+      </div>
+    );
   }
 
   return (
@@ -68,7 +114,7 @@ export default function ChatAgent() {
       className="rounded-xl border border-slate-300 p-4 bg-white shadow"
       style={{ height: "600px", display: "flex", flexDirection: "column" }}
     >
-      {/* Chat scroll area */}
+      {/* Scrollable chat area */}
       <div
         ref={scrollRef}
         className="flex-1 overflow-y-auto space-y-4 pr-2"
@@ -82,17 +128,21 @@ export default function ChatAgent() {
                 ? "bg-amber-500 text-white ml-auto"
                 : "bg-slate-100 text-slate-800 mr-auto shadow"
             }`}
-            dangerouslySetInnerHTML={
-              m.html ? { __html: m.content } : undefined
-            }
           >
-            {!m.html ? m.content : null}
+            {m.html ? (
+              <div
+                className="prose prose-sm max-w-none"
+                dangerouslySetInnerHTML={{ __html: m.content }}
+              />
+            ) : (
+              <span>{m.content}</span>
+            )}
           </div>
         ))}
       </div>
 
       {/* Input bar */}
-      <form onSubmit={sendMessage} className="mt-3 flex gap-2">
+      <form onSubmit={handleSend} className="mt-3 flex gap-2">
         <input
           type="text"
           className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-amber-400"
@@ -111,4 +161,28 @@ export default function ChatAgent() {
       </form>
     </div>
   );
+}
+
+/**
+ * Escape plain text when we need to embed it into HTML safely.
+ */
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+/**
+ * Custom hook to keep the initial assistant greeting without crashing on reload.
+ */
+function useResilientMessages() {
+  const [messages, setMessages] = useState(() => [
+    {
+      role: "assistant",
+      content:
+        "Hello! I'm your analytics assistant. Ask about invoices, students, vendors, months, or totals.",
+    },
+  ]);
+  return [messages, setMessages];
 }
