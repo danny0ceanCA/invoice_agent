@@ -122,13 +122,14 @@ export default function ChatAgent({ districtKey }) {
 
   return (
     <div
-      className="rounded-xl border border-slate-300 p-4 bg-white shadow"
-      style={{ height: "600px", display: "flex", flexDirection: "column" }}
+      className="rounded-xl border border-slate-300 bg-white shadow flex flex-col"
+      style={{ height: "600px" }}
     >
       {/* Scrollable chat area */}
       <div
         ref={scrollRef}
-        className="flex-1 overflow-y-auto space-y-4 pr-2"
+        className="flex-1 overflow-y-auto px-4 py-4 space-y-4"
+        style={{ minHeight: 0 }}
       >
         {messages.map((m, i) => (
           <div
@@ -148,24 +149,26 @@ export default function ChatAgent({ districtKey }) {
         ))}
       </div>
 
-      {/* Input */}
-      <form onSubmit={handleSend} className="mt-3 flex gap-2">
-        <input
-          type="text"
-          className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-amber-400"
-          placeholder="Ask a question about invoices…"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          disabled={sending}
-        />
-        <button
-          type="submit"
-          disabled={sending}
-          className="bg-amber-500 text-white px-4 py-2 rounded-lg text-sm font-semibold shadow hover:bg-amber-600 disabled:opacity-50"
-        >
-          {sending ? "…" : "Send"}
-        </button>
-      </form>
+      {/* Sticky bottom input bar */}
+      <div className="border-t border-slate-200 p-3 bg-white">
+        <form onSubmit={handleSend} className="flex gap-3">
+          <input
+            type="text"
+            className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-amber-400"
+            placeholder="Ask a question about invoices…"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            disabled={sending}
+          />
+          <button
+            type="submit"
+            disabled={sending}
+            className="bg-amber-500 text-white px-4 py-2 rounded-lg text-sm font-semibold shadow hover:bg-amber-600 disabled:opacity-50"
+          >
+            {sending ? "…" : "Send"}
+          </button>
+        </form>
+      </div>
     </div>
   );
 }
