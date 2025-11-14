@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-// Render ChatKit on the Analytics tab
 import ChatAgent from "../components/ChatAgent.jsx";
 import { useAuth0 } from "@auth0/auth0-react";
 import toast from "react-hot-toast";
@@ -2288,7 +2287,7 @@ export default function DistrictDashboard({
                 Ask natural-language questions about invoices, vendors, students, monthly totals, or spending summaries.
               </p>
               <div className="mt-4">
-                <ChatAgent districtKey={districtProfile?.district_key} />
+                <ChatAgent />
               </div>
             </div>
           </div>
