@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-// Render ChatKit on the Analytics tab
 import ChatAgent from "../components/ChatAgent.jsx";
 import { useAuth0 } from "@auth0/auth0-react";
 import toast from "react-hot-toast";
