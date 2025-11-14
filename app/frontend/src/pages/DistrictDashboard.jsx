@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 // Render ChatKit on the Analytics tab
 import ChatAgent from "../components/ChatAgent.jsx";
 import { useAuth0 } from "@auth0/auth0-react";
@@ -37,10 +37,9 @@ const menuItems = [
   {
     key: "analytics",
     label: "Analytics",
+    route: "/analytics",
     description:
       "Dive into spending trends, utilization rates, and budget insights. Ask questions using the AI Analytics Assistant to generate reports instantly.",
-    // We keep a route for deep links but still render within the same layout.
-    route: "/analytics",
   },
   {
     key: "settings",
@@ -831,13 +830,9 @@ export default function DistrictDashboard({
 
   // Keep the active tab in sync with the URL for deep links
   useEffect(() => {
-    if (location.pathname === "/analytics" && activeKey !== "analytics") {
+    if (location.pathname === "/analytics") {
       setActiveKey("analytics");
     }
-    if ((location.pathname === "/" || location.pathname === "") && activeKey !== "vendors") {
-      setActiveKey("vendors");
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname]);
 
   const normalizeVendorOverview = useCallback(
@@ -1870,21 +1865,32 @@ export default function DistrictDashboard({
             <nav className="space-y-1 px-2 pb-4">
               {menuItems.map((item) => {
                 const isActive = activeKey === item.key;
+                const className = `group flex w-full items-center rounded-xl px-4 py-3 text-left text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/70 ${
+                  isActive
+                    ? "bg-slate-100 text-slate-900"
+                    : "text-slate-200 hover:bg-white/10 hover:text-white"
+                }`;
+
+                if (item.key === "analytics") {
+                  return (
+                    <Link
+                      key={item.key}
+                      to={item.route ?? "/analytics"}
+                      onClick={() => setActiveKey("analytics")}
+                      className={className}
+                    >
+                      <span>{item.label}</span>
+                    </Link>
+                  );
+                }
+
                 const handleClick = () => {
                   if (item.route) navigate(item.route);
                   setActiveKey(item.key);
                 };
+
                 return (
-                  <button
-                    key={item.key}
-                    onClick={handleClick}
-                    className={`group flex w-full items-center rounded-xl px-4 py-3 text-left text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/70 ${
-                      isActive
-                        ? "bg-slate-100 text-slate-900"
-                        : "text-slate-200 hover:bg-white/10 hover:text-white"
-                    }`}
-                    type="button"
-                  >
+                  <button key={item.key} onClick={handleClick} className={className} type="button">
                     <span>{item.label}</span>
                   </button>
                 );
@@ -2274,19 +2280,16 @@ export default function DistrictDashboard({
           </div>
 
         ) : activeItem.key === "analytics" ? (
-          <div className="mt-8 space-y-4">
+          <div className="mt-8">
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">
-                Analytics
-              </p>
-              <h4 className="mt-1 text-2xl font-semibold text-slate-900">
-                AI Analytics Assistant
-              </h4>
+              <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">Analytics</p>
+              <h4 className="mt-1 text-2xl font-semibold text-slate-900">AI Analytics Assistant</h4>
               <p className="mt-2 text-sm text-slate-600">
-                Ask natural-language questions about invoices, vendors, students, and spending. The assistant can list S3 invoice files or run read-only SQL queries to summarize data.
+                Ask natural-language questions about invoices, vendors, students, monthly totals, or spending summaries.
               </p>
-              {/* ChatKit widget */}
-              <ChatAgent />
+              <div className="mt-4">
+                <ChatAgent />
+              </div>
             </div>
           </div>
         ) : activeItem.key === "settings" ? (
