@@ -131,13 +131,13 @@ export default function ChatAgent({ districtKey }) {
 
   return (
     <div
-      className="rounded-xl border border-slate-300 bg-white shadow flex flex-col"
+      className="rounded-xl border border-slate-300 bg-white shadow flex flex-col overflow-hidden"
       style={{ height: "600px" }}
     >
       {/* Scrollable chat area */}
       <div
         ref={scrollRef}
-        className="flex-1 overflow-y-auto px-4 py-4 space-y-4"
+        className="flex-1 overflow-y-auto px-4 py-4 space-y-4 flex-shrink"
         style={{ minHeight: 0 }}
       >
         {messages.map((m, i) => (
