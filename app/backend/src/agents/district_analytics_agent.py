@@ -64,6 +64,36 @@ Important invariants:
 - Vendors may hold multiple district_keys (serve multiple districts).
 - There is NO column called amount_due, invoice_total, balance_due, due_amount, invoice_amount, etc.
 - The ONLY correct invoice money field is invoices.total_cost.
+
+When building SQL, the model MUST prioritise queries that:
+- Use invoices.district_key = :district_key for tenant scoping.
+- Use invoices.student_name for student lookups.
+- Join vendors only when searching by vendor name.
+- Treat service_month as free-form TEXT (e.g. "November", "December").
+- Extract years or month numbers using strftime on invoice_date.
+
+Example: Student search
+
+SELECT invoice_number, student_name, total_cost
+FROM invoices
+WHERE invoices.district_key = :district_key
+  AND LOWER(student_name) LIKE '%' || LOWER(:student_query) || '%';
+
+Example: Vendor name search (without schema change)
+
+SELECT i.invoice_number, i.student_name, i.total_cost
+FROM invoices i
+JOIN vendors v ON v.id = i.vendor_id
+WHERE i.district_key = :district_key
+  AND LOWER(v.name) LIKE '%' || LOWER(:vendor_query) || '%';
+
+Example: Month/year query using invoice_date
+
+SELECT COUNT(*) AS invoice_count
+FROM invoices
+WHERE invoices.district_key = :district_key
+  AND strftime('%Y', invoice_date) = '2025'
+  AND LOWER(service_month) = LOWER('November');
 """
 
 
@@ -255,6 +285,14 @@ class Workflow:
                     except Exception as exc:  # pragma: no cover - defensive
                         LOGGER.warning("tool_execution_failed", tool=tool.name, error=str(exc))
                         context.last_error = str(exc)
+                        if tool.name == "run_sql":
+                            error_text = f"I was unable to complete that SQL query: {exc}"
+                            payload = {
+                                "text": error_text,
+                                "rows": None,
+                                "html": _safe_html(error_text),
+                            }
+                            return _finalise_response(payload, context)
                         tool_payload = {"tool": tool.name, "error": str(exc)}
                         tool_result = None
 
@@ -287,11 +325,26 @@ class Workflow:
                 payload = json.loads(raw_content)
             except json.JSONDecodeError:
                 LOGGER.warning("agent_invalid_json", iteration=iteration, content=raw_content)
-                text = raw_content.strip()
-                html = _safe_html(text)
-                return AgentResponse(text=text, html=html, rows=context.last_rows)
+                text = raw_content.strip() or "No response provided."
+                fallback_payload = {"text": text, "rows": context.last_rows, "html": None}
+                return _finalise_response(fallback_payload, context)
 
-            return _finalise_response(payload, context)
+            if isinstance(payload, Mapping):
+                return _finalise_response(payload, context)
+
+            if isinstance(payload, str):
+                fallback_payload = {"text": payload, "rows": context.last_rows, "html": None}
+                return _finalise_response(fallback_payload, context)
+
+            if isinstance(payload, list):
+                rows = _coerce_rows(payload)
+                if rows is not None:
+                    fallback_payload = {"text": "", "rows": rows, "html": None}
+                    return _finalise_response(fallback_payload, context)
+
+            text = str(payload).strip()
+            fallback_payload = {"text": text, "rows": context.last_rows, "html": None}
+            return _finalise_response(fallback_payload, context)
 
         raise RuntimeError("Agent workflow exceeded iteration limit.")
 
@@ -403,7 +456,9 @@ def _build_run_sql_tool(engine: Engine) -> Tool:
     description = (
         "Execute a read-only SQL query against the analytics database. "
         "Use invoices.total_cost for money amounts. "
-        "Use invoices.district_key = :district_key to restrict by district."
+        "Use invoices.district_key = :district_key to restrict by district. "
+        "Supports searching by student name (invoices.student_name) and vendor name (JOIN vendors on vendor_id). "
+        "Supports month/year filters using service_month TEXT and invoice_date."
     )
     schema = {
         "type": "object",
@@ -517,6 +572,12 @@ def _build_system_prompt() -> str:
         "- For invoice money totals, ALWAYS use invoices.total_cost.\n"
         "- For monthly buckets, use strftime('%Y-%m', invoice_date) OR service_month if appropriate.\n"
         "- Keep queries simple: avoid unnecessary joins unless the question truly needs them.\n\n"
+        "ADDITIONAL RULES:\n"
+        "- If user asks about a STUDENT, your SQL must use invoices.student_name with a case-insensitive LIKE match.\n"
+        "- If user asks about a VENDOR, JOIN vendors ON vendors.id = invoices.vendor_id and filter vendors.name with LIKE.\n"
+        "- If user references a month like 'November', search using LOWER(service_month).\n"
+        "- If user references a year, extract using strftime('%Y', invoice_date).\n"
+        "- Do NOT guess column names. Use only: student_name, vendor_id, vendors.name, service_month, invoice_date, total_cost.\n\n"
         "EXAMPLES (assume :district_key is provided when appropriate):\n"
         "1) Count vendors (global):\n"
         "   SELECT COUNT(*) AS vendor_count FROM vendors;\n\n"
