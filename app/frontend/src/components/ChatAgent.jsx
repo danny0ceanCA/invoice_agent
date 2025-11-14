@@ -71,6 +71,7 @@ function loadChatKitFromCdn() {
   }
 
   chatKitPromise = (async () => {
+    // Try module script first; if it fails, fall back to classic.
     try {
       const moduleCtor = await loadChatKitScript("module");
       if (moduleCtor) {
@@ -105,6 +106,8 @@ function FallbackChat({ tokenSupplier, notice, districtKey }) {
       role: "assistant",
       content:
         "Hello! I'm the built-in analytics assistant. Ask about invoices, vendors, students, or spending totals.",
+      html: null,
+      rows: null,
     },
   ]);
   const [inputValue, setInputValue] = useState("");
@@ -155,13 +158,31 @@ function FallbackChat({ tokenSupplier, notice, districtKey }) {
       }
 
       let assistantMessage = "";
+      let htmlSnippet = null;
+      let rows = null;
       const contentType = response.headers.get("content-type") ?? "";
       if (contentType.includes("application/json")) {
         const data = await response.json();
-        assistantMessage =
-          typeof data === "string"
-            ? data
-            : data?.answer ?? data?.message ?? data?.response ?? JSON.stringify(data, null, 2);
+        if (data && typeof data === "object" && !Array.isArray(data)) {
+          if (typeof data.html === "string") {
+            htmlSnippet = data.html;
+          }
+          if (Array.isArray(data.rows)) {
+            rows = data.rows;
+          }
+          const summary =
+            data?.answer ??
+            data?.message ??
+            data?.response ??
+            data?.summary ??
+            data?.text ??
+            "";
+          assistantMessage = typeof summary === "string" ? summary : "";
+        } else if (typeof data === "string") {
+          assistantMessage = data;
+        } else {
+          assistantMessage = JSON.stringify(data, null, 2);
+        }
       } else {
         assistantMessage = await response.text();
       }
@@ -170,7 +191,13 @@ function FallbackChat({ tokenSupplier, notice, districtKey }) {
         ...prev,
         {
           role: "assistant",
-          content: assistantMessage || "I sent a response, but it was empty.",
+          // Only store the summary text; HTML will be rendered separately
+          content:
+            typeof assistantMessage === "string" && assistantMessage.trim()
+              ? assistantMessage
+              : "I sent a response, but it was empty.",
+          html: htmlSnippet,
+          rows: Array.isArray(rows) ? rows : null,
         },
       ]);
     } catch (error) {
@@ -182,6 +209,8 @@ function FallbackChat({ tokenSupplier, notice, districtKey }) {
         {
           role: "assistant",
           content: `⚠️ ${friendlyMessage}`,
+          html: null,
+          rows: null,
         },
       ]);
     } finally {
@@ -199,7 +228,7 @@ function FallbackChat({ tokenSupplier, notice, districtKey }) {
 
       <div
         ref={scrollContainerRef}
-        className="flex-1 space-y-3 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 p-4"
+        className="flex-1 min-h-0 space-y-3 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 p-4"
       >
         {messages.map((message, index) => (
           <div
@@ -210,7 +239,13 @@ function FallbackChat({ tokenSupplier, notice, districtKey }) {
                 : "mr-auto bg-white text-slate-700 shadow"
             }`}
           >
-            {message.content}
+            <div className="whitespace-pre-wrap">{message.content}</div>
+            {message.html ? (
+              <div
+                className="mt-2 overflow-x-auto text-xs text-slate-700"
+                dangerouslySetInnerHTML={{ __html: message.html }}
+              />
+            ) : null}
           </div>
         ))}
       </div>
@@ -251,24 +286,22 @@ export default function ChatAgent({ districtKey }) {
 
   const tokenSupplier = useMemo(() => {
     return async () => {
-      return await getAccessTokenSilently();
+      try {
+        // If the SPA session hasn't finished loading, return empty string so ChatKit retries on interaction.
+        if (isLoading || !isAuthenticated) return "";
+        const token = await getAccessTokenSilently();
+        return token || "";
+      } catch (e) {
+        console.error("chatkit_token_failed", e);
+        return "";
+      }
     };
-  }, [getAccessTokenSilently]);
+  }, [getAccessTokenSilently, isAuthenticated, isLoading]);
 
   useEffect(() => {
     let isMounted = true;
-    const timer = window.setTimeout(() => {
-      if (isMounted && !window.ChatKit) {
-        setIsFallbackActive(true);
-        setFallbackNotice(
-          "Loading the fallback assistant because the hosted widget is taking longer than expected.",
-        );
-      }
-    }, 2000);
-
     loadChatKitFromCdn()
       .then((ctor) => {
-        window.clearTimeout(timer);
         if (!isMounted) {
           return;
         }
@@ -284,7 +317,6 @@ export default function ChatAgent({ districtKey }) {
         }
       })
       .catch((error) => {
-        window.clearTimeout(timer);
         console.error("chatkit_load_failed", error);
         if (!isMounted) {
           return;
@@ -302,7 +334,6 @@ export default function ChatAgent({ districtKey }) {
 
     return () => {
       isMounted = false;
-      window.clearTimeout(timer);
     };
   }, []);
 
@@ -321,7 +352,7 @@ export default function ChatAgent({ districtKey }) {
   const ChatComponent = agentInstance?.Chat ?? null;
 
   const containerClassName =
-    "flex h-[600px] flex-col rounded-2xl border border-slate-200 bg-white p-4 shadow-md";
+    "flex h-[600px] flex-col rounded-2xl border border-slate-200 bg-white shadow-md";
 
   if (!isAuthenticated) {
     return (
@@ -336,7 +367,14 @@ export default function ChatAgent({ districtKey }) {
   if (ChatComponent && !isFallbackActive) {
     return (
       <div className={containerClassName}>
-        <div className="flex-1 overflow-hidden">
+        <div className="border-b border-slate-200 px-4 py-2">
+          <h3 className="text-sm font-semibold text-slate-900">AI Analytics Assistant</h3>
+          <p className="text-xs text-slate-500">
+            Ask about invoices, vendors, students, service months, and spending.
+          </p>
+        </div>
+        <div className="flex-1 min-h-0 overflow-hidden">
+          {/* ChatKit manages its own scroll inside this area */}
           <ChatComponent />
         </div>
       </div>
@@ -355,11 +393,19 @@ export default function ChatAgent({ districtKey }) {
 
   return (
     <div className={containerClassName}>
-      <FallbackChat
-        tokenSupplier={tokenSupplier}
-        notice={fallbackNotice}
-        districtKey={districtKey}
-      />
+      <div className="border-b border-slate-200 px-4 py-2">
+        <h3 className="text-sm font-semibold text-slate-900">AI Analytics Assistant</h3>
+        <p className="text-xs text-slate-500">
+          Ask about invoices, vendors, students, service months, and spending.
+        </p>
+      </div>
+      <div className="flex-1 min-h-0 p-4">
+        <FallbackChat
+          tokenSupplier={tokenSupplier}
+          notice={fallbackNotice}
+          districtKey={districtKey}
+        />
+      </div>
     </div>
   );
 }
