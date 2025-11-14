@@ -23,56 +23,47 @@ DEFAULT_MODEL = "gpt-4.1-mini"
 MAX_ITERATIONS = 8
 
 DB_SCHEMA_HINT = """
-You are querying a SQLite database with these key tables:
+You are querying a SQLite database for a school district invoice system.
 
-1) invoices
-   - id INTEGER PRIMARY KEY
-   - vendor_id INTEGER NOT NULL  -- FK to vendors.id
-   - upload_id INTEGER NOT NULL  -- FK to uploads.id
-   - student_name VARCHAR(255) NOT NULL
-   - invoice_number VARCHAR(128) NOT NULL
-   - invoice_code VARCHAR(64) NOT NULL
-   - service_month VARCHAR(32) NOT NULL      -- e.g. '2025-11' or 'Nov 2025'
-   - invoice_date DATETIME NOT NULL
-   - total_hours FLOAT NOT NULL
-   - total_cost FLOAT NOT NULL               -- use this for money amounts / invoice totals
-   - status VARCHAR(50) NOT NULL
-   - pdf_s3_key VARCHAR(512) NOT NULL
-   - created_at DATETIME NOT NULL
+### invoices
+- id INTEGER PRIMARY KEY
+- vendor_id INTEGER NOT NULL
+- upload_id INTEGER
+- student_name VARCHAR(255)
+- invoice_number VARCHAR(128)
+- invoice_code VARCHAR(64)
+- service_month VARCHAR(32)
+- invoice_date DATETIME
+- total_hours FLOAT
+- total_cost FLOAT                      -- THIS is the invoice money amount
+- status VARCHAR(50)
+- pdf_s3_key VARCHAR(512)
+- district_key VARCHAR(64)              -- tenancy boundary: which district owns the invoice
+- created_at DATETIME
 
-2) invoice_line_items
-   - id INTEGER PRIMARY KEY
-   - invoice_id INTEGER NOT NULL             -- FK to invoices.id
-   - student VARCHAR(255) NOT NULL
-   - clinician VARCHAR(255) NOT NULL
-   - service_code VARCHAR(50) NOT NULL
-   - hours FLOAT NOT NULL
-   - rate FLOAT NOT NULL
-   - cost FLOAT NOT NULL                     -- line-item amount
-   - service_date VARCHAR(32) NOT NULL
+### vendors
+- id INTEGER PRIMARY KEY
+- name VARCHAR(255)
+- contact_email VARCHAR(255)
+- district_key VARCHAR(64)              -- used by vendors to register access to a district
 
-3) vendors
-   - id INTEGER PRIMARY KEY
-   - name VARCHAR(255) NOT NULL
-   - contact_email VARCHAR(255) NOT NULL
-   - district_id INTEGER NOT NULL            -- use this to scope invoices by district
-   - contact_name VARCHAR(255) NOT NULL
-   - phone_number VARCHAR(255) NOT NULL
-   - remit_to_address TEXT
-   - district_key VARCHAR(64)
-   - remit_to_street VARCHAR(255)
-   - remit_to_city VARCHAR(100)
-   - remit_to_state VARCHAR(32)
-   - remit_to_postal_code VARCHAR(20)
+### invoice_line_items
+- id INTEGER PRIMARY KEY
+- invoice_id INTEGER NOT NULL
+- student VARCHAR(255)
+- clinician VARCHAR(255)
+- service_code VARCHAR(50)
+- hours FLOAT
+- rate FLOAT
+- cost FLOAT                            -- line-item amount
+- service_date VARCHAR(32)
 
-Important patterns:
-- District scoping for invoices is done via vendors:
-  JOIN invoices i ON i.vendor_id = v.id
-  WHERE v.district_id = :district_id
-
-- There is NO column called amount_due, invoice_total, balance_due, due_amount, etc.
-  For invoice totals use invoices.total_cost.
-  For line item amounts use invoice_line_items.cost.
+Important invariants:
+- Every invoice row belongs to exactly one district via invoices.district_key.
+- Multiple vendors may share the same district_key to submit invoices to that district.
+- Vendors may hold multiple district_keys (serve multiple districts).
+- There is NO column called amount_due, invoice_total, balance_due, due_amount, invoice_amount, etc.
+- The ONLY correct invoice money field is invoices.total_cost.
 """
 
 
@@ -101,6 +92,16 @@ class AgentContext:
                 return None
             return int(value)
         except (TypeError, ValueError):  # pragma: no cover - defensive
+            return None
+
+    @property
+    def district_key(self) -> str | None:
+        value = self.user_context.get("district_key")
+        if not value:
+            return None
+        try:
+            return str(value)
+        except Exception:  # pragma: no cover - defensive
             return None
 
 
@@ -318,31 +319,42 @@ def _finalise_response(payload: Mapping[str, Any], context: AgentContext) -> Age
     return AgentResponse(text=text_value or "", html=html, rows=rows)
 
 
-def _apply_district_filter(query: str, district_id: int | None) -> tuple[str, dict[str, Any]]:
+def _apply_district_filter(
+    query: str, district_id: int | None, district_key: str | None
+) -> tuple[str, dict[str, Any]]:
     """
-    Return the query and parameter dict.
+    Normalize SQL and prepare parameters.
 
-    We DO NOT blindly inject 'district_id = :district_id' anymore, because only
-    some tables (e.g. vendors, users, districts, district_memberships) have
-    that column. For invoices, district scoping must be implemented as a JOIN
-    against vendors (vendors.district_id).
+    We DO NOT inject WHERE clauses automatically.
 
-    Behavior:
-    - If district_id is provided, we add it to the parameters dict so the
-      model can reference :district_id in its own SQL.
-    - We leave the query text unchanged.
+    Instead:
+    - We normalize whitespace and remove a trailing semicolon.
+    - If a district_key is provided, we expose it as :district_key.
+    - If a district_id is provided, we may expose it as :district_id for advanced joins,
+      but the preferred tenant boundary is invoices.district_key.
     """
-    parameters: dict[str, Any] = {}
-    if district_id is not None:
-        parameters["district_id"] = district_id
 
     normalized = query.strip()
-    normalized = normalized[:-1] if normalized.endswith(";") else normalized
-    return normalized, parameters
+    if normalized.endswith(";"):
+        normalized = normalized[:-1]
+
+    params: dict[str, Any] = {}
+
+    if district_key:
+        params["district_key"] = district_key
+
+    if district_id is not None:
+        params["district_id"] = district_id
+
+    return normalized, params
 
 
 def _build_run_sql_tool(engine: Engine) -> Tool:
-    description = "Execute a read-only SQL query against the analytics warehouse."
+    description = (
+        "Execute a read-only SQL query against the analytics database. "
+        "Use invoices.total_cost for money amounts. "
+        "Use invoices.district_key = :district_key to restrict by district."
+    )
     schema = {
         "type": "object",
         "properties": {
@@ -364,7 +376,9 @@ def _build_run_sql_tool(engine: Engine) -> Tool:
         if not (normalized.startswith("select") or normalized.startswith("with")):
             raise ValueError("Only SELECT and WITH statements are permitted.")
 
-        filtered_query, parameters = _apply_district_filter(query, context.district_id)
+        filtered_query, parameters = _apply_district_filter(
+            query, context.district_id, context.district_key
+        )
 
         rows: list[dict[str, Any]] = []
         with engine.connect() as connection:
@@ -436,37 +450,49 @@ def _build_list_s3_tool() -> Tool:
 
 def _build_system_prompt() -> str:
     return (
-        "You are a strict analytics agent for a school district finance system. "
-        "You answer questions about invoices, vendors, students, and spending. "
-        "All final answers MUST be returned as a JSON object with keys text, rows, and html.\n\n"
+        "You are an analytics agent for a school district invoice system. "
+        "You answer questions using SQLite via the run_sql tool and return structured JSON.\n\n"
         f"{DB_SCHEMA_HINT}\n\n"
-        "Tool usage rules:\n"
-        "- If the user asks about invoice files, PDFs, or S3 paths → use list_s3.\n"
-        "- If the user asks about amounts, spending, totals, dates, vendors, students, or summaries → use run_sql.\n"
-        "- When writing SQL, use SQLite syntax. Use strftime('%Y-%m', invoice_date) to bucket by year/month.\n"
-        "- For invoice-level queries, ALWAYS scope by district via the vendors table:\n"
-        "  JOIN invoices i ON i.vendor_id = v.id\n"
-        "  WHERE v.district_id = :district_id\n"
-        "- Never invent column names. Only use the columns listed in the schema hint.\n\n"
-        "Examples:\n"
-        "1) Highest invoice total for November 2025 for a district:\n"
-        "SELECT i.invoice_number, i.student_name, i.total_cost AS highest_amount_due\n"
-        "FROM invoices i\n"
-        "JOIN vendors v ON v.id = i.vendor_id\n"
-        "WHERE v.district_id = :district_id\n"
-        "  AND strftime('%Y-%m', i.invoice_date) = '2025-11'\n"
-        "ORDER BY i.total_cost DESC\n"
-        "LIMIT 1;\n\n"
-        "2) Total spend for November 2025 for a district:\n"
-        "SELECT SUM(i.total_cost) AS total_spend\n"
-        "FROM invoices i\n"
-        "JOIN vendors v ON v.id = i.vendor_id\n"
-        "WHERE v.district_id = :district_id\n"
-        "  AND strftime('%Y-%m', i.invoice_date) = '2025-11';\n\n"
-        "Behavioral rules:\n"
-        "- Do NOT output natural language outside of JSON.\n"
-        "- Use the tools via OpenAI function calling; do not fabricate tool results.\n"
-        "- ALWAYS finish with a single JSON object: {\"text\": str, \"rows\": list|None, \"html\": str}.\n"
+        "TOOL USAGE:\n"
+        "- Use list_s3 ONLY when the user asks about invoice files, PDFs, S3 keys, or prefixes.\n"
+        "- Use run_sql for counts, totals, vendors, students, spending, and summaries.\n\n"
+        "DISTRICT SCOPING:\n"
+        "- The tenancy boundary is invoices.district_key.\n"
+        "- When a district_key parameter is available, you MUST scope invoice-level queries as:\n"
+        "    WHERE invoices.district_key = :district_key\n"
+        "- Do NOT attempt to use invoices.district_id or vendors.district_id (they are not reliable).\n"
+        "- Multiple vendors may share the same district_key; invoices are already tagged with it.\n\n"
+        "SQL RULES:\n"
+        "- Only use columns that exist in the schema.\n"
+        "- For invoice money totals, ALWAYS use invoices.total_cost.\n"
+        "- For monthly buckets, use strftime('%Y-%m', invoice_date) OR service_month if appropriate.\n"
+        "- Keep queries simple: avoid unnecessary joins unless the question truly needs them.\n\n"
+        "EXAMPLES (assume :district_key is provided when appropriate):\n"
+        "1) Count vendors (global):\n"
+        "   SELECT COUNT(*) AS vendor_count FROM vendors;\n\n"
+        "2) Count invoices for November 2025 for a district:\n"
+        "   SELECT COUNT(*) AS invoice_count\n"
+        "   FROM invoices\n"
+        "   WHERE invoices.district_key = :district_key\n"
+        "     AND strftime('%Y-%m', invoice_date) = '2025-11';\n\n"
+        "3) Highest invoice total in November 2025 for a district:\n"
+        "   SELECT invoice_number, student_name, total_cost AS highest_amount\n"
+        "   FROM invoices\n"
+        "   WHERE invoices.district_key = :district_key\n"
+        "     AND strftime('%Y-%m', invoice_date) = '2025-11'\n"
+        "   ORDER BY total_cost DESC\n"
+        "   LIMIT 1;\n\n"
+        "4) Total spend in 2025 for a district:\n"
+        "   SELECT SUM(total_cost) AS total_spend\n"
+        "   FROM invoices\n"
+        "   WHERE invoices.district_key = :district_key\n"
+        "     AND strftime('%Y', invoice_date) = '2025';\n\n"
+        "FINAL OUTPUT FORMAT:\n"
+        "- You MUST respond with a single JSON object: {\"text\": str, \"rows\": list|None, \"html\": str}.\n"
+        "- text: a concise human-readable summary.\n"
+        "- rows: a list of result row dicts OR null.\n"
+        "- html: an HTML fragment (e.g. <table> with rows) derived from the rows or summary.\n"
+        "- Do NOT output plain text outside this JSON structure.\n"
     )
 
 
