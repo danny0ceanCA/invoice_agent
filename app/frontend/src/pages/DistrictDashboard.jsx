@@ -2288,7 +2288,7 @@ export default function DistrictDashboard({
                 Ask natural-language questions about invoices, vendors, students, monthly totals, or spending summaries.
               </p>
               <div className="mt-4">
-                <ChatAgent />
+                <ChatAgent districtKey={districtProfile?.district_key} />
               </div>
             </div>
           </div>
