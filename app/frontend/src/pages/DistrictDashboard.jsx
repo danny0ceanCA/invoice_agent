@@ -792,17 +792,16 @@ export default function DistrictDashboard({
   const [vendorProfiles, setVendorProfiles] = useState([]);
   const [vendorsLoading, setVendorsLoading] = useState(false);
   const [vendorsError, setVendorsError] = useState(null);
-  const [activeInvoiceDetails, setActiveInvoiceDetails] = useState(null);
   const [districtProfile, setDistrictProfile] = useState(null);
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileError, setProfileError] = useState(null);
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileFormError, setProfileFormError] = useState(null);
   const [showProfileForm, setShowProfileForm] = useState(false);
-  const [memberships, setMemberships] = useState(initialMemberships);
+  const [memberships, setMemberships] = useState(initialMemberships ?? []);
   const [membershipLoading, setMembershipLoading] = useState(false);
   const [membershipError, setMembershipError] = useState(null);
-  const [activeDistrictId, setActiveDistrictId] = useState(districtId);
+  const [activeDistrictId, setActiveDistrictId] = useState(districtId ?? null);
   const [newDistrictKey, setNewDistrictKey] = useState("");
   const [membershipActionError, setMembershipActionError] = useState(null);
   const [addingMembership, setAddingMembership] = useState(false);
@@ -818,14 +817,6 @@ export default function DistrictDashboard({
   const selectedVendor = vendorProfiles.find((vendor) => vendor.id === selectedVendorId) ?? null;
   const selectedVendorName = selectedVendor?.name ?? "";
   const vendorMetrics = useMemo(() => computeVendorMetrics(vendorProfiles), [vendorProfiles]);
-
-  useEffect(() => {
-    setMemberships(initialMemberships ?? []);
-  }, [initialMemberships]);
-
-  useEffect(() => {
-    setActiveDistrictId(districtId ?? null);
-  }, [districtId]);
 
   // Keep the active tab in sync with the URL for deep links
   useEffect(() => {
@@ -1226,7 +1217,7 @@ export default function DistrictDashboard({
       districtProfile?.mailing_address?.postal_code,
     ],
   );
-  const computedActiveInvoiceDetails = useMemo(() => {
+  const activeInvoiceDetails = useMemo(() => {
     if (!selectedVendor || !selectedInvoiceKey) {
       return null;
     }
@@ -1249,7 +1240,7 @@ export default function DistrictDashboard({
       year: selectedInvoiceKey.year,
       students: aggregatedStudents,
     };
-  }, [selectedInvoiceKey, selectedVendor]);
+  }, [selectedVendor, selectedInvoiceKey]);
 
   const selectedMonthNumber = useMemo(() => {
     if (!activeInvoiceDetails) {
@@ -1489,10 +1480,6 @@ export default function DistrictDashboard({
     selectedVendorId,
     selectedVendorName,
   ]);
-
-  useEffect(() => {
-    setActiveInvoiceDetails(computedActiveInvoiceDetails);
-  }, [computedActiveInvoiceDetails]);
 
   const studentInvoiceCount = activeInvoiceDetails?.students?.length ?? 0;
   const invoiceDocumentCount = invoiceDocuments.length;
