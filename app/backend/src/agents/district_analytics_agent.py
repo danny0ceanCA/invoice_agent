@@ -150,8 +150,58 @@ class Workflow:
             },
         ]
 
+        def _extract_student_name(user_query: str) -> str | None:
+            """Return a best-effort student name match from the query."""
+
+            import re
+
+            match = re.findall(r"[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+", user_query)
+            if match:
+                return match[0]
+            return None
+
         for iteration in range(self.max_iterations):
             LOGGER.debug("agent_iteration_start", iteration=iteration)
+
+            student_name = _extract_student_name(query)
+            if student_name and context.district_key:
+                safe_name = student_name.replace("'", "''")
+                sql = (
+                    "SELECT invoice_number, student_name, total_cost, "
+                    "service_month, status "
+                    "FROM invoices "
+                    "WHERE invoices.district_key = :district_key "
+                    "AND LOWER(invoices.student_name) LIKE LOWER('%{name}%') "
+                    "ORDER BY invoice_date DESC, total_cost DESC;"
+                ).format(name=safe_name)
+
+                try:
+                    run_sql_tool = agent.lookup_tool("run_sql")
+                except RuntimeError:
+                    LOGGER.warning("run_sql_tool_unavailable_for_student", query=query)
+                else:
+                    try:
+                        rows = run_sql_tool.invoke(context, {"query": sql})
+                    except Exception as exc:  # pragma: no cover - defensive
+                        context.last_error = str(exc)
+                        payload = {
+                            "text": f"Failed to fetch invoices for {student_name}: {exc}",
+                            "rows": None,
+                            "html": None,
+                        }
+                    else:
+                        context.last_rows = rows
+                        if rows:
+                            text = (
+                                f"Fetched {len(rows)} invoice"
+                                f"{'s' if len(rows) != 1 else ''} for {student_name}."
+                            )
+                        else:
+                            text = f"No invoices found for {student_name}."
+                        payload = {"text": text, "rows": rows}
+
+                    return _finalise_response(payload, context)
+
             completion = agent.client.chat.completions.create(
                 model=agent.model,
                 messages=messages,
@@ -487,6 +537,13 @@ def _build_system_prompt() -> str:
         "   FROM invoices\n"
         "   WHERE invoices.district_key = :district_key\n"
         "     AND strftime('%Y', invoice_date) = '2025';\n\n"
+        "STUDENT NAME LOGIC:\n"
+        "- When the user asks about a specific student (example: ‘Why is Yuritzi low?’, ‘Show invoices for Chase Porraz’, ‘Give student summary for Aidan Borrelli’), ALWAYS use run_sql.\n"
+        "- Perform a case-insensitive match on invoices.student_name:\n"
+        "      WHERE LOWER(invoices.student_name) LIKE LOWER('%{student_name}%')\n"
+        "- When a student may have multiple invoices, return all matching rows sorted by invoice_date DESC.\n"
+        "- When asking ‘why is amount low?’ or ‘what happened?’, extract that student’s invoice(s) and return invoice_number, student_name, total_cost, service_month, status.\n"
+        "- NEVER assume the student is a vendor — students and vendors are separate entities.\n\n"
         "FINAL OUTPUT FORMAT:\n"
         "- You MUST respond with a single JSON object: {\"text\": str, \"rows\": list|None, \"html\": str}.\n"
         "- text: a concise human-readable summary.\n"
