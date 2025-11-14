@@ -22,6 +22,59 @@ LOGGER = structlog.get_logger(__name__)
 DEFAULT_MODEL = "gpt-4.1-mini"
 MAX_ITERATIONS = 8
 
+DB_SCHEMA_HINT = """
+You are querying a SQLite database with these key tables:
+
+1) invoices
+   - id INTEGER PRIMARY KEY
+   - vendor_id INTEGER NOT NULL  -- FK to vendors.id
+   - upload_id INTEGER NOT NULL  -- FK to uploads.id
+   - student_name VARCHAR(255) NOT NULL
+   - invoice_number VARCHAR(128) NOT NULL
+   - invoice_code VARCHAR(64) NOT NULL
+   - service_month VARCHAR(32) NOT NULL      -- e.g. '2025-11' or 'Nov 2025'
+   - invoice_date DATETIME NOT NULL
+   - total_hours FLOAT NOT NULL
+   - total_cost FLOAT NOT NULL               -- use this for money amounts / invoice totals
+   - status VARCHAR(50) NOT NULL
+   - pdf_s3_key VARCHAR(512) NOT NULL
+   - created_at DATETIME NOT NULL
+
+2) invoice_line_items
+   - id INTEGER PRIMARY KEY
+   - invoice_id INTEGER NOT NULL             -- FK to invoices.id
+   - student VARCHAR(255) NOT NULL
+   - clinician VARCHAR(255) NOT NULL
+   - service_code VARCHAR(50) NOT NULL
+   - hours FLOAT NOT NULL
+   - rate FLOAT NOT NULL
+   - cost FLOAT NOT NULL                     -- line-item amount
+   - service_date VARCHAR(32) NOT NULL
+
+3) vendors
+   - id INTEGER PRIMARY KEY
+   - name VARCHAR(255) NOT NULL
+   - contact_email VARCHAR(255) NOT NULL
+   - district_id INTEGER NOT NULL            -- use this to scope invoices by district
+   - contact_name VARCHAR(255) NOT NULL
+   - phone_number VARCHAR(255) NOT NULL
+   - remit_to_address TEXT
+   - district_key VARCHAR(64)
+   - remit_to_street VARCHAR(255)
+   - remit_to_city VARCHAR(100)
+   - remit_to_state VARCHAR(32)
+   - remit_to_postal_code VARCHAR(20)
+
+Important patterns:
+- District scoping for invoices is done via vendors:
+  JOIN invoices i ON i.vendor_id = v.id
+  WHERE v.district_id = :district_id
+
+- There is NO column called amount_due, invoice_total, balance_due, due_amount, etc.
+  For invoice totals use invoices.total_cost.
+  For line item amounts use invoice_line_items.cost.
+"""
+
 
 class AgentResponse(BaseModel):
     """Standardised response payload returned to the caller."""
@@ -266,25 +319,26 @@ def _finalise_response(payload: Mapping[str, Any], context: AgentContext) -> Age
 
 
 def _apply_district_filter(query: str, district_id: int | None) -> tuple[str, dict[str, Any]]:
-    parameters: dict[str, Any] = {}
-    if district_id is None:
-        return query, parameters
+    """
+    Return the query and parameter dict.
 
-    parameters["district_id"] = district_id
+    We DO NOT blindly inject 'district_id = :district_id' anymore, because only
+    some tables (e.g. vendors, users, districts, district_memberships) have
+    that column. For invoices, district scoping must be implemented as a JOIN
+    against vendors (vendors.district_id).
+
+    Behavior:
+    - If district_id is provided, we add it to the parameters dict so the
+      model can reference :district_id in its own SQL.
+    - We leave the query text unchanged.
+    """
+    parameters: dict[str, Any] = {}
+    if district_id is not None:
+        parameters["district_id"] = district_id
 
     normalized = query.strip()
     normalized = normalized[:-1] if normalized.endswith(";") else normalized
-    lower = normalized.lower()
-
-    if "district_id" in lower:
-        return normalized, parameters
-
-    if " where " in lower:
-        filtered = f"{normalized}\n  AND district_id = :district_id"
-    else:
-        filtered = f"{normalized}\nWHERE district_id = :district_id"
-
-    return filtered, parameters
+    return normalized, parameters
 
 
 def _build_run_sql_tool(engine: Engine) -> Tool:
@@ -382,18 +436,37 @@ def _build_list_s3_tool() -> Tool:
 
 def _build_system_prompt() -> str:
     return (
-        "You are a strict analytics agent. "
-        "Your ONLY valid outputs are JSON objects with keys text, rows, and html. "
-        "You MUST NOT output natural language outside of JSON. "
-        "Call the provided tools using OpenAI function calling whenever you need external data.\n\n"
-        "RULES:\n"
-        "- If the user asks about invoice files, PDFs, or S3 keys → ALWAYS call list_s3.\n"
-        "- If the user asks about spending, totals, dates, vendors, or students → ALWAYS call run_sql.\n"
-        "- Use SQLite-compatible syntax for all SQL queries.\n"
-        "- ALWAYS filter results by the provided district_id.\n"
-        "- NEVER describe reasoning.\n"
-        "- ALWAYS choose a tool on the FIRST response unless the user explicitly requests a summary only.\n"
-        "- ALWAYS finish with a JSON object containing text, rows, and html.\n"
+        "You are a strict analytics agent for a school district finance system. "
+        "You answer questions about invoices, vendors, students, and spending. "
+        "All final answers MUST be returned as a JSON object with keys text, rows, and html.\n\n"
+        f"{DB_SCHEMA_HINT}\n\n"
+        "Tool usage rules:\n"
+        "- If the user asks about invoice files, PDFs, or S3 paths → use list_s3.\n"
+        "- If the user asks about amounts, spending, totals, dates, vendors, students, or summaries → use run_sql.\n"
+        "- When writing SQL, use SQLite syntax. Use strftime('%Y-%m', invoice_date) to bucket by year/month.\n"
+        "- For invoice-level queries, ALWAYS scope by district via the vendors table:\n"
+        "  JOIN invoices i ON i.vendor_id = v.id\n"
+        "  WHERE v.district_id = :district_id\n"
+        "- Never invent column names. Only use the columns listed in the schema hint.\n\n"
+        "Examples:\n"
+        "1) Highest invoice total for November 2025 for a district:\n"
+        "SELECT i.invoice_number, i.student_name, i.total_cost AS highest_amount_due\n"
+        "FROM invoices i\n"
+        "JOIN vendors v ON v.id = i.vendor_id\n"
+        "WHERE v.district_id = :district_id\n"
+        "  AND strftime('%Y-%m', i.invoice_date) = '2025-11'\n"
+        "ORDER BY i.total_cost DESC\n"
+        "LIMIT 1;\n\n"
+        "2) Total spend for November 2025 for a district:\n"
+        "SELECT SUM(i.total_cost) AS total_spend\n"
+        "FROM invoices i\n"
+        "JOIN vendors v ON v.id = i.vendor_id\n"
+        "WHERE v.district_id = :district_id\n"
+        "  AND strftime('%Y-%m', i.invoice_date) = '2025-11';\n\n"
+        "Behavioral rules:\n"
+        "- Do NOT output natural language outside of JSON.\n"
+        "- Use the tools via OpenAI function calling; do not fabricate tool results.\n"
+        "- ALWAYS finish with a single JSON object: {\"text\": str, \"rows\": list|None, \"html\": str}.\n"
     )
 
 
