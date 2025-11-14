@@ -1121,12 +1121,7 @@ export default function DistrictDashboard({
     } finally {
       setVendorsLoading(false);
     }
-  }, [
-    activeDistrictId,
-    getAccessTokenSilently,
-    isAuthenticated,
-    normalizeVendorOverview,
-  ]);
+  }, [getAccessTokenSilently, isAuthenticated, normalizeVendorOverview]);
 
   const loadDistrictProfile = useCallback(async () => {
     if (!isAuthenticated) {
@@ -1166,7 +1161,7 @@ export default function DistrictDashboard({
     } finally {
       setProfileLoading(false);
     }
-  }, [activeDistrictId, getAccessTokenSilently, isAuthenticated]);
+  }, [getAccessTokenSilently, isAuthenticated]);
 
   const handleProfileSubmit = useCallback(
     async (values) => {
