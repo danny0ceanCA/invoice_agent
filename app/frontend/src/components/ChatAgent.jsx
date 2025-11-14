@@ -99,7 +99,7 @@ function loadChatKitFromCdn() {
   });
 }
 
-function FallbackChat({ tokenSupplier, notice }) {
+function FallbackChat({ tokenSupplier, notice, districtKey }) {
   const [messages, setMessages] = useState([
     {
       role: "assistant",
@@ -141,7 +141,12 @@ function FallbackChat({ tokenSupplier, notice }) {
           Accept: "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ query }),
+        body: JSON.stringify({
+          query,
+          context: {
+            district_key: districtKey || null,
+          },
+        }),
       });
 
       if (!response.ok) {
@@ -237,7 +242,7 @@ function FallbackChat({ tokenSupplier, notice }) {
   );
 }
 
-export default function ChatAgent() {
+export default function ChatAgent({ districtKey }) {
   const { isAuthenticated, getAccessTokenSilently } = useAuth0();
   const [ChatKitCtor, setChatKitCtor] = useState(null);
   const [isFallbackActive, setIsFallbackActive] = useState(false);
@@ -350,7 +355,11 @@ export default function ChatAgent() {
 
   return (
     <div className={containerClassName}>
-      <FallbackChat tokenSupplier={tokenSupplier} notice={fallbackNotice} />
+      <FallbackChat
+        tokenSupplier={tokenSupplier}
+        notice={fallbackNotice}
+        districtKey={districtKey}
+      />
     </div>
   );
 }
