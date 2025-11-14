@@ -64,7 +64,7 @@ export default function ChatAgent({ districtKey }) {
         },
         body: JSON.stringify({
           query: text,
-          district_key: districtKey || null,
+          district_key: districtKey,
         }),
       });
 
