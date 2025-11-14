@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from html import escape
 from typing import Any, Mapping, Sequence
@@ -387,6 +388,10 @@ def _safe_html(text: str) -> str:
     return f"<p>{escape(text)}</p>"
 
 
+def _strip_html(s: str) -> str:
+    return re.sub(r"<[^>]*>", "", s or "").strip()
+
+
 def _render_html_table(rows: Sequence[Mapping[str, Any]]) -> str:
     headers = list(rows[0].keys())
     header_html = "".join(f"<th>{escape(str(header))}</th>" for header in headers)
@@ -406,6 +411,7 @@ def _coerce_rows(candidate: Any) -> list[dict[str, Any]] | None:
 
 def _finalise_response(payload: Mapping[str, Any], context: AgentContext) -> AgentResponse:
     text_value = str(payload.get("text") or "").strip()
+    text_value = _strip_html(text_value)
     rows_value = _coerce_rows(payload.get("rows"))
     html_value = payload.get("html") if isinstance(payload.get("html"), str) else None
 
@@ -611,6 +617,19 @@ def _build_system_prompt() -> str:
         "- rows: a list of result row dicts OR null.\n"
         "- html: an HTML fragment (e.g. <table> with rows) derived from the rows or summary.\n"
         "- Do NOT output plain text outside this JSON structure.\n"
+        "OUTPUT FORMAT DISCIPLINE RULES:\n"
+        "- The 'text' field MUST contain ONLY plain English. NO HTML. NO <tags>. NO table markup.\n"
+        "- The 'html' field MUST contain ALL formatted HTML (tables, td, tr, th, p, strong, etc.).\n"
+        "- NEVER duplicate information. Whatever appears in 'html' MUST NOT also appear in 'text'.\n"
+        "- The 'rows' field MUST contain ONLY raw structured data from SQL, not markup.\n"
+        "- The model MUST NOT include </td>, <tr>, <table>, <p>, or any HTML-like text in the 'text' field.\n"
+        "- 'text' should be a concise human-readable summary, e.g.:\n"
+        "    { \"text\": \"Here are the top 5 invoices by total cost.\" }\n"
+        "- 'html' should contain the visual result table ONLY, e.g.:\n"
+        "    { \"html\": \"<table>...</table>\" }\n"
+        "- NEVER put HTML in 'rows'.\n"
+        "- NEVER mix description and table markup in the same field.\n"
+        "- If generating a table, put it ONLY inside the 'html' field."
     )
 
 
