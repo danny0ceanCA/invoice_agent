@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useAuth0 } from "@auth0/auth0-react";
 
 export default function ChatAgent({ districtKey }) {
+  console.log("ChatAgent using districtKey:", districtKey);
   const { isAuthenticated, isLoading, getAccessTokenSilently } = useAuth0();
 
   const [messages, setMessages] = useState([
@@ -55,6 +56,11 @@ export default function ChatAgent({ districtKey }) {
       if (!token) {
         throw new Error("Authentication is initializing… please retry.");
       }
+
+      console.log("Sending analytics payload:", {
+        query: text,
+        district_key: districtKey,
+      });
 
       const res = await fetch("/api/agents/analytics", {
         method: "POST",
