@@ -1,37 +1,16 @@
 import { useEffect, useState } from "react";
 
-const CHATKIT_SCRIPT_URL = "https://cdn.openai.com/chatkit/v1/chatkit.js";
-
-function loadChatKitScript() {
-  return new Promise((resolve, reject) => {
-    // If ChatKit already loaded
-    if (window.ChatKit) {
-      resolve(window.ChatKit);
-      return;
-    }
-
-    // Check if script exists
-    const existing = document.querySelector("script[data-chatkit]");
-    if (existing) {
-      existing.addEventListener("load", () => resolve(window.ChatKit));
-      existing.addEventListener("error", () =>
-        reject(new Error("Failed to load ChatKit script."))
-      );
-      return;
-    }
-
-    const script = document.createElement("script");
-    script.src = CHATKIT_SCRIPT_URL;
-    script.type = "module";
-    script.async = true;
-    script.dataset.chatkit = "true";
-
-    script.onload = () => resolve(window.ChatKit);
-    script.onerror = () =>
-      reject(new Error("Failed to load ChatKit script."));
-
-    document.head.appendChild(script);
-  });
+async function loadChatKitModule() {
+  try {
+    const module = await import(
+      /* @vite-ignore */
+      "https://cdn.openai.com/chatkit/v1/chatkit.js"
+    );
+    return module.ChatKit;
+  } catch (error) {
+    console.error("Failed to load ChatKit module:", error);
+    return null;
+  }
 }
 
 export default function ChatAgent() {
@@ -44,13 +23,14 @@ export default function ChatAgent() {
 
   useEffect(() => {
     let active = true;
-    loadChatKitScript()
-      .then((ctor) => {
-        if (active) setChatKitCtor(() => ctor);
-      })
-      .catch((err) => console.error("ChatKit load error:", err));
-
-    return () => (active = false);
+    loadChatKitModule().then((ctor) => {
+      if (active) {
+        setChatKitCtor(() => ctor);
+      }
+    });
+    return () => {
+      active = false;
+    };
   }, []);
 
   if (!token || !ChatKitCtor) {
