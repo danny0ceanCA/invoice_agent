@@ -63,9 +63,11 @@ class Tool:
     def schema(self) -> dict[str, Any]:
         return {
             "type": "function",
-            "name": self.name,
-            "description": self.description,
-            "parameters": dict(self.input_schema),
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": dict(self.input_schema),
+            },
         }
 
     def invoke(self, context: AgentContext, arguments: Mapping[str, Any]) -> Any:
@@ -99,12 +101,83 @@ class Workflow:
             completion = agent.client.chat.completions.create(
                 model=agent.model,
                 messages=messages,
+                tools=[tool.schema() for tool in agent.tools],
+                tool_choice="auto",
                 temperature=0,
-                response_format={"type": "json_object"},
             )
             message = completion.choices[0].message
+            tool_calls = message.tool_calls or []
+            assistant_message: dict[str, Any] = {
+                "role": "assistant",
+                "content": message.content or "",
+            }
+
+            if tool_calls:
+                assistant_tool_calls: list[dict[str, Any]] = []
+                for tool_call in tool_calls:
+                    assistant_tool_calls.append(
+                        {
+                            "id": tool_call.id,
+                            "type": tool_call.type,
+                            "function": {
+                                "name": tool_call.function.name,
+                                "arguments": tool_call.function.arguments,
+                            },
+                        }
+                    )
+                assistant_message["tool_calls"] = assistant_tool_calls
+            messages.append(assistant_message)
+
+            if tool_calls:
+                for tool_call in tool_calls:
+                    tool_name = tool_call.function.name
+                    arguments_json = tool_call.function.arguments or "{}"
+                    try:
+                        arguments = json.loads(arguments_json)
+                    except json.JSONDecodeError as exc:  # pragma: no cover - defensive
+                        LOGGER.warning(
+                            "agent_tool_arguments_invalid_json",
+                            iteration=iteration,
+                            tool=tool_name,
+                            error=str(exc),
+                        )
+                        arguments = {}
+
+                    tool = agent.lookup_tool(tool_name)
+
+                    try:
+                        tool_result = tool.invoke(context, arguments)
+                        tool_payload = {"tool": tool.name, "result": tool_result}
+                    except Exception as exc:  # pragma: no cover - defensive
+                        LOGGER.warning("tool_execution_failed", tool=tool.name, error=str(exc))
+                        context.last_error = str(exc)
+                        tool_payload = {"tool": tool.name, "error": str(exc)}
+                        tool_result = None
+
+                    if isinstance(tool_result, list):
+                        if tool_result and all(isinstance(item, Mapping) for item in tool_result):
+                            context.last_rows = [
+                                dict(item) for item in tool_result
+                            ]  # type: ignore[arg-type]
+                        else:
+                            context.last_rows = []
+                    elif tool_result is None:
+                        # keep previous rows
+                        pass
+                    else:
+                        context.last_rows = None
+
+                    tool_message = json.dumps(tool_payload, default=_json_default)
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": tool_message,
+                        }
+                    )
+                continue
+
             raw_content = message.content or ""
-            messages.append({"role": "assistant", "content": raw_content})
 
             try:
                 payload = json.loads(raw_content)
@@ -114,46 +187,7 @@ class Workflow:
                 html = _safe_html(text)
                 return AgentResponse(text=text, html=html, rows=context.last_rows)
 
-            action = (payload.get("action") or "").lower()
-            if action == "call_tool":
-                tool_name = payload.get("tool")
-                if not tool_name:
-                    raise RuntimeError("Tool response missing name.")
-                tool = agent.lookup_tool(tool_name)
-                arguments = payload.get("arguments") or {}
-                if not isinstance(arguments, Mapping):
-                    raise RuntimeError("Tool arguments must be an object.")
-
-                try:
-                    tool_result = tool.invoke(context, arguments)
-                    tool_payload = {"tool": tool.name, "result": tool_result}
-                except Exception as exc:  # pragma: no cover - defensive
-                    LOGGER.warning("tool_execution_failed", tool=tool.name, error=str(exc))
-                    context.last_error = str(exc)
-                    tool_payload = {"tool": tool.name, "error": str(exc)}
-                    tool_result = None
-
-                if isinstance(tool_result, list):
-                    if tool_result and all(isinstance(item, Mapping) for item in tool_result):
-                        context.last_rows = [dict(item) for item in tool_result]  # type: ignore[arg-type]
-                    else:
-                        context.last_rows = []
-                elif tool_result is None:
-                    # keep previous rows
-                    pass
-                else:
-                    context.last_rows = None
-
-                tool_message = json.dumps(tool_payload, default=_json_default)
-                messages.append({"role": "tool", "name": tool.name, "content": tool_message})
-                continue
-
-            if action == "final":
-                return _finalise_response(payload, context)
-
-            LOGGER.warning("agent_unknown_action", action=action)
-            text = raw_content.strip()
-            return AgentResponse(text=text, html=_safe_html(text), rows=context.last_rows)
+            return _finalise_response(payload, context)
 
         raise RuntimeError("Agent workflow exceeded iteration limit.")
 
@@ -348,19 +382,18 @@ def _build_list_s3_tool() -> Tool:
 
 def _build_system_prompt() -> str:
     return (
-        "You are a strict JSON-only analytics agent. "
-        "Your ONLY valid outputs are JSON objects. "
+        "You are a strict analytics agent. "
+        "Your ONLY valid outputs are JSON objects with keys text, rows, and html. "
         "You MUST NOT output natural language outside of JSON. "
-        "Every response MUST be one of the following forms:\n\n"
-        "1. {\"action\": \"call_tool\", \"tool\": \"list_s3\", \"arguments\": {...}}\n"
-        "2. {\"action\": \"call_tool\", \"tool\": \"run_sql\", \"arguments\": {...}}\n"
-        "3. {\"action\": \"final\", \"text\": str, \"rows\": [...], \"html\": str}\n\n"
+        "Call the provided tools using OpenAI function calling whenever you need external data.\n\n"
         "RULES:\n"
         "- If the user asks about invoice files, PDFs, or S3 keys → ALWAYS call list_s3.\n"
         "- If the user asks about spending, totals, dates, vendors, or students → ALWAYS call run_sql.\n"
-        "- NEVER answer with plain text.\n"
+        "- Use SQLite-compatible syntax for all SQL queries.\n"
+        "- ALWAYS filter results by the provided district_id.\n"
         "- NEVER describe reasoning.\n"
-        "- ALWAYS choose a tool on the FIRST response unless user explicitly requests summary only.\n"
+        "- ALWAYS choose a tool on the FIRST response unless the user explicitly requests a summary only.\n"
+        "- ALWAYS finish with a JSON object containing text, rows, and html.\n"
     )
 
 
