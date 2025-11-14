@@ -11,7 +11,6 @@ import AdminDashboard from "./AdminDashboard.jsx";
 import AdminUserDashboard from "./AdminUserDashboard.jsx";
 import AdminCreateDistrict from "./AdminCreateDistrict.jsx";
 import VendorDistrictKeys from "./VendorDistrictKeys.jsx";
-import Analytics from "./Analytics.jsx";
 import {
   fetchCurrentUser,
   type ApiError,
@@ -107,7 +106,14 @@ export function App() {
           )
         }
       />
-      <Route path="/analytics" element={<Analytics />} />
+      {/*
+        Keep the District layout for /analytics so the left sidebar remains visible.
+        We pass an initialActiveKey prop so the tab highlights correctly when deep-linked.
+      */}
+      <Route
+        path="/analytics"
+        element={<DistrictDashboard initialActiveKey="analytics" />}
+      />
       <Route
         path="/admin/users"
         element={profile?.role === "admin" ? <AdminUserDashboard /> : <Navigate to="/" replace />}
