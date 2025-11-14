@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useAuth0 } from "@auth0/auth0-react";
 
-export default function ChatAgent() {
+export default function ChatAgent({ districtKey }) {
   const { isAuthenticated, isLoading, getAccessTokenSilently } = useAuth0();
 
   const [messages, setMessages] = useState([
@@ -62,7 +62,10 @@ export default function ChatAgent() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ query: text }),
+        body: JSON.stringify({
+          query: text,
+          district_key: districtKey || null,
+        }),
       });
 
       const data = await res.json().catch(() => null);

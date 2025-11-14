@@ -30,6 +30,10 @@ class AnalyticsAgentRequest(BaseModel):
     context: dict[str, Any] | None = Field(
         default=None, description="Optional execution context overrides"
     )
+    district_key: str | None = Field(
+        default=None,
+        description="Optional district tenancy key for analytics scoping",
+    )
 
 
 def run_analytics_agent(query: str, user_context: dict[str, Any]) -> dict[str, Any]:
@@ -54,6 +58,11 @@ def analytics_agent_endpoint(
         )
 
     context: dict[str, Any] = dict(payload.context or {})
+
+    key = (payload.district_key or "").strip() if payload.district_key else ""
+    if key:
+        context.setdefault("district_key", key)
+
     if user and getattr(user, "district_id", None) is not None:
         context.setdefault("district_id", user.district_id)
 
