@@ -2274,7 +2274,11 @@ export default function DistrictDashboard({
                 className="mt-4 overflow-hidden rounded-xl border border-slate-200 bg-white"
                 style={{ height: "620px" }}
               >
-                <ChatAgent districtKey={districtProfile?.district_key} />
+                {districtProfile?.district_key ? (
+                  <ChatAgent districtKey={districtProfile.district_key} />
+                ) : (
+                  <p className="text-sm text-slate-500">Loading district profile…</p>
+                )}
               </div>
             </div>
           </div>
