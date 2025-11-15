@@ -155,8 +155,7 @@ export default function ChatAgent({ districtKey }) {
             key={i}
             className={`
               block
-              align-top
-              max-w-full
+              w-full
               sm:max-w-[75%]
               md:max-w-[65%]
               lg:max-w-[55%]
@@ -164,6 +163,7 @@ export default function ChatAgent({ districtKey }) {
               px-4 py-3
               rounded-2xl
               text-sm
+              overflow-hidden
               break-words
               [overflow-wrap:anywhere]
               whitespace-normal
