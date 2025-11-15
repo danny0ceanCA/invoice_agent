@@ -135,7 +135,7 @@ export default function ChatAgent({ districtKey }) {
 
   return (
     <div
-      className="relative rounded-xl border border-slate-300 bg-white shadow flex flex-col overflow-hidden"
+      className="relative mx-auto w-full max-w-3xl rounded-xl border border-slate-300 bg-white shadow flex flex-col"
       style={{ height: "600px" }}
     >
       {/* Scrollable chat area */}
@@ -154,11 +154,13 @@ export default function ChatAgent({ districtKey }) {
           <div
             key={i}
             className={`
-              max-w-full
+              inline-block
+              max-w-[90%]
+              sm:max-w-[80%]
+              md:max-w-[70%]
               px-4 py-2
               rounded-xl
               break-words
-              overflow-hidden
               ${
                 m.role === "user"
                   ? "bg-amber-500 text-white ml-auto"
@@ -168,7 +170,7 @@ export default function ChatAgent({ districtKey }) {
           >
             {m.html ? (
               <div
-                className="overflow-x-auto max-w-full text-sm"
+                className="overflow-x-auto max-w-full w-full text-sm"
                 dangerouslySetInnerHTML={{ __html: m.content }}
               />
             ) : (
