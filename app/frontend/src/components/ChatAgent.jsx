@@ -137,7 +137,6 @@ function ChatAgent({ districtKey }) {
   return (
     <div
       className="relative mx-auto w-full max-w-3xl rounded-xl border border-slate-300 bg-white shadow flex flex-col overflow-hidden"
-      style={{ height: "600px" }}
     >
       {/* Scrollable chat area */}
       <div
