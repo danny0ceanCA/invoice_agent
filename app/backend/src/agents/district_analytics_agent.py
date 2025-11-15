@@ -425,6 +425,11 @@ def _finalise_response(payload: Mapping[str, Any], context: AgentContext) -> Age
     else:
         html = html_value or _safe_html(text_value)
 
+    # If HTML exists, suppress text to avoid rendering duplicate data
+    if html:
+        return AgentResponse(text="", html=html, rows=rows)
+
+    # Otherwise return text-only version
     return AgentResponse(text=text_value or "", html=html, rows=rows)
 
 
