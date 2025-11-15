@@ -1882,6 +1882,18 @@ export default function DistrictDashboard({
       </aside>
 
       <section className="flex-1 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        {/* Global persistent ChatAgent mount */}
+        <div
+          id="analytics-chat-container"
+          style={{ display: activeItem.key === "analytics" ? "block" : "none" }}
+          className="mt-4 overflow-hidden rounded-xl border border-slate-200 bg-white"
+        >
+          {districtProfile?.district_key ? (
+            <ChatAgent districtKey={districtProfile.district_key} />
+          ) : (
+            <p className="text-sm text-slate-500 p-4">Loading district profile…</p>
+          )}
+        </div>
         <header className="flex items-center justify-between gap-4">
           <div>
             <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">
@@ -2268,18 +2280,6 @@ export default function DistrictDashboard({
               <p className="mt-2 text-sm text-slate-600">
                 Ask natural-language questions about invoices, vendors, students, monthly totals, or spending.
               </p>
-
-              {/* FIX: Hard height boundary to prevent ChatAgent from stretching page */}
-              <div
-                style={{ display: activeItem.key === "analytics" ? "block" : "none" }}
-                className="mt-4 overflow-hidden rounded-xl border border-slate-200 bg-white"
-              >
-                {districtProfile?.district_key ? (
-                  <ChatAgent districtKey={districtProfile.district_key} />
-                ) : (
-                  <p className="text-sm text-slate-500 p-4">Loading district profile…</p>
-                )}
-              </div>
             </div>
           </div>
         ) : activeItem.key === "settings" ? (
