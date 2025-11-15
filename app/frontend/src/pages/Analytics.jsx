@@ -25,11 +25,8 @@ export default function Analytics() {
       </p>
 
       {/* Chat card */}
-      <div
-        className="rounded-2xl border border-slate-200 bg-white shadow-sm max-w-[960px] mx-auto flex flex-col"
-        style={{ height: "600px", overflow: "hidden" }}
-      >
-        <div className="border-b border-slate-100 px-4 py-3 shrink-0">
+      <div className="rounded-2xl border border-slate-200 bg-white shadow-sm max-w-[960px] mx-auto">
+        <div className="border-b border-slate-100 px-4 py-3">
           <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">
             AI Analytics Assistant
           </p>
@@ -37,7 +34,7 @@ export default function Analytics() {
             Ask natural-language questions about invoices, vendors, students, monthly totals, or spending.
           </p>
         </div>
-        <div className="px-4 py-4 flex-1 overflow-hidden">
+        <div className="px-4 py-4">
           <ChatAgent />
         </div>
       </div>

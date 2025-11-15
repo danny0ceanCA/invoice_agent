@@ -1,5 +1,6 @@
 import React from "react";
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { useAuth0 } from "@auth0/auth0-react";
 
 function ChatAgent({ districtKey }) {
@@ -135,14 +136,11 @@ function ChatAgent({ districtKey }) {
   }
 
   return (
-    <div
-      className="h-full w-full flex flex-col bg-white"
-    >
+    <div className="w-full flex flex-col bg-white">
       {/* Scrollable chat area */}
       <div
         ref={scrollRef}
-        className="flex-1 overflow-y-auto overflow-x-auto px-4 py-4 space-y-4 flex-shrink min-w-0 max-w-full"
-        style={{ minHeight: 0 }}
+        className="px-4 py-4 space-y-4"
         onScroll={(e) => {
           const target = e.target;
           const atBottom =
@@ -245,25 +243,33 @@ function ChatAgent({ districtKey }) {
         </button>
       )}
 
-      {/* Sticky bottom input bar */}
-      <div className="border-t border-slate-200 p-3 bg-white min-w-0 shrink-0">
-        <form onSubmit={handleSend} className="flex gap-3">
-          <input
-            type="text"
-            className="flex-1 min-w-0 border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-amber-400"
-            placeholder="Ask a question about invoices…"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            disabled={sending}
-          />
-          <button
-            type="submit"
-            disabled={sending}
-            className="bg-amber-500 text-white px-4 py-2 rounded-lg text-sm font-semibold shadow hover:bg-amber-600 disabled:opacity-50"
+      {/* Input bar with Home button */}
+      <div className="border-t border-slate-200 p-3 bg-white min-w-0">
+        <div className="flex gap-3 items-center">
+          <form onSubmit={handleSend} className="flex gap-3 flex-1">
+            <input
+              type="text"
+              className="flex-1 min-w-0 border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-amber-400"
+              placeholder="Ask a question about invoices…"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              disabled={sending}
+            />
+            <button
+              type="submit"
+              disabled={sending}
+              className="bg-amber-500 text-white px-4 py-2 rounded-lg text-sm font-semibold shadow hover:bg-amber-600 disabled:opacity-50"
+            >
+              {sending ? "…" : "Send"}
+            </button>
+          </form>
+          <Link
+            to="/"
+            className="inline-flex items-center rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
           >
-            {sending ? "…" : "Send"}
-          </button>
-        </form>
+            Home
+          </Link>
+        </div>
       </div>
     </div>
   );
