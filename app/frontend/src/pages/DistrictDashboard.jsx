@@ -1885,7 +1885,10 @@ export default function DistrictDashboard({
         {/* Global persistent ChatAgent mount */}
         <div
           id="analytics-chat-container"
-          style={{ display: activeItem.key === "analytics" ? "block" : "none" }}
+          style={{
+            display: activeItem.key === "analytics" ? "block" : "none",
+            height: "600px",
+          }}
           className="mt-4 overflow-hidden rounded-xl border border-slate-200 bg-white"
         >
           {districtProfile?.district_key ? (
