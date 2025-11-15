@@ -2271,13 +2271,13 @@ export default function DistrictDashboard({
 
               {/* FIX: Hard height boundary to prevent ChatAgent from stretching page */}
               <div
+                style={{ display: activeItem.key === "analytics" ? "block" : "none" }}
                 className="mt-4 overflow-hidden rounded-xl border border-slate-200 bg-white"
-                style={{ height: "620px" }}
               >
                 {districtProfile?.district_key ? (
                   <ChatAgent districtKey={districtProfile.district_key} />
                 ) : (
-                  <p className="text-sm text-slate-500">Loading district profile…</p>
+                  <p className="text-sm text-slate-500 p-4">Loading district profile…</p>
                 )}
               </div>
             </div>
