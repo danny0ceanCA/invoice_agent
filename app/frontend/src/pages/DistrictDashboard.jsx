@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import ChatAgent from "../components/ChatAgent.jsx";
 import { useAuth0 } from "@auth0/auth0-react";
 import toast from "react-hot-toast";
 import { CheckCircle2, Plus } from "lucide-react";
@@ -1856,7 +1855,7 @@ export default function DistrictDashboard({
                   return (
                     <button
                       key={item.key}
-                      onClick={() => setActiveKey("analytics")}
+                      onClick={() => navigate("/analytics")}
                       className={className}
                       type="button"
                     >
@@ -1882,21 +1881,6 @@ export default function DistrictDashboard({
       </aside>
 
       <section className="flex-1 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        {/* Global persistent ChatAgent mount */}
-        <div
-          id="analytics-chat-container"
-          style={{
-            display: activeItem.key === "analytics" ? "block" : "none",
-            height: "600px",
-          }}
-          className="mt-4 overflow-hidden rounded-xl border border-slate-200 bg-white"
-        >
-          {districtProfile?.district_key ? (
-            <ChatAgent districtKey={districtProfile.district_key} />
-          ) : (
-            <p className="text-sm text-slate-500 p-4">Loading district profile…</p>
-          )}
-        </div>
         <header className="flex items-center justify-between gap-4">
           <div>
             <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">
@@ -2278,10 +2262,17 @@ export default function DistrictDashboard({
         ) : activeItem.key === "analytics" ? (
           <div className="mt-8">
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">Analytics</p>
-              <h4 className="mt-1 text-2xl font-semibold text-slate-900">AI Analytics Assistant</h4>
+              <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">
+                Analytics
+              </p>
+              <h4 className="mt-1 text-2xl font-semibold text-slate-900">
+                AI Analytics Assistant
+              </h4>
               <p className="mt-2 text-sm text-slate-600">
                 Ask natural-language questions about invoices, vendors, students, monthly totals, or spending.
+              </p>
+              <p className="mt-2 text-xs text-slate-500">
+                To open the full analytics assistant, use the Analytics item in the sidebar.
               </p>
             </div>
           </div>
