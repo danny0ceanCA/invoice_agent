@@ -386,6 +386,138 @@ def test_invoice_agent_generates_invoices(tmp_path: Path, vendor_and_user: tuple
         assert invoices[0].status == "generated"
 
 
+def test_invoice_agent_populates_service_metadata(tmp_path: Path) -> None:
+    with session_scope() as session:
+        district = (
+            session.query(District).filter(District.company_name == "Test District").one()
+        )
+        vendor = (
+            session.query(Vendor)
+            .filter(Vendor.company_name == "Service Metadata Vendor")
+            .one_or_none()
+        )
+        if vendor is None:
+            vendor = Vendor(
+                company_name="Service Metadata Vendor",
+                contact_email="metadata-vendor@example.com",
+                contact_name="Metadata Owner",
+                phone_number="555-555-1111",
+                remit_to_street="400 Invoice Way",
+                remit_to_city="Sacramento",
+                remit_to_state="CA",
+                remit_to_postal_code="95816",
+                district_key=district.district_key,
+            )
+            session.add(vendor)
+            session.flush()
+        vendor_id = vendor.id
+
+    data = pd.DataFrame(
+        {
+            "Client": ["Student B"],
+            "Schedule Date": ["2025-11-10"],
+            "Hours": [4.0],
+            "Employee": ["Nurse 2"],
+            "Service Code": ["HHA-SCUSD"],
+        }
+    )
+    file_path = tmp_path / "timesheet_metadata.xlsx"
+    data.to_excel(file_path, index=False)
+
+    agent = InvoiceAgent(
+        vendor_id=vendor_id,
+        invoice_date=datetime(2025, 11, 30, 15, 30),
+        service_month="November 2025",
+        invoice_code="INV-META",
+    )
+
+    agent.run(file_path)
+
+    with session_scope() as session:
+        invoice = (
+            session.query(Invoice)
+            .filter(Invoice.vendor_id == vendor_id)
+            .order_by(Invoice.id.desc())
+            .first()
+        )
+        assert invoice is not None
+        assert invoice.service_month == "november"
+        assert invoice.service_year == 2025
+        assert invoice.service_month_num == 11
+        assert invoice.district_key == district.district_key
+        assert invoice.vendor_name_snapshot == vendor.company_name
+        if isinstance(invoice.invoice_date, datetime):
+            assert invoice.invoice_date.hour == 0
+            assert invoice.invoice_date.minute == 0
+            assert invoice.invoice_date.second == 0
+
+
+def test_invoice_agent_infers_year_from_invoice_date(tmp_path: Path) -> None:
+    with session_scope() as session:
+        district = (
+            session.query(District).filter(District.company_name == "Test District").one()
+        )
+        vendor = (
+            session.query(Vendor)
+            .filter(Vendor.company_name == "Year Inference Vendor")
+            .one_or_none()
+        )
+        if vendor is None:
+            vendor = Vendor(
+                company_name="Year Inference Vendor",
+                contact_email="year-inference@example.com",
+                contact_name="Year Owner",
+                phone_number="555-555-2222",
+                remit_to_street="500 Invoice Road",
+                remit_to_city="Sacramento",
+                remit_to_state="CA",
+                remit_to_postal_code="95817",
+                district_key=district.district_key,
+            )
+            session.add(vendor)
+            session.flush()
+        vendor_id = vendor.id
+
+    data = pd.DataFrame(
+        {
+            "Client": ["Student C"],
+            "Schedule Date": ["2025-02-01"],
+            "Hours": [2.0],
+            "Employee": ["Nurse 3"],
+            "Service Code": ["HHA-SCUSD"],
+        }
+    )
+    file_path = tmp_path / "timesheet_year.xlsx"
+    data.to_excel(file_path, index=False)
+
+    agent = InvoiceAgent(
+        vendor_id=vendor_id,
+        invoice_date=datetime(2025, 2, 15, 10, 0),
+        service_month="November",
+        invoice_code="INV-YEAR",
+    )
+
+    agent.run(file_path)
+
+    with session_scope() as session:
+        invoice = (
+            session.query(Invoice)
+            .filter(Invoice.vendor_id == vendor_id)
+            .order_by(Invoice.id.desc())
+            .first()
+        )
+        assert invoice is not None
+        assert invoice.service_month == "november"
+        assert invoice.service_year == 2025
+        assert invoice.service_month_num == 11
+        assert invoice.district_key == district.district_key
+        assert invoice.vendor_name_snapshot == vendor.company_name
+        if isinstance(invoice.invoice_date, datetime):
+            assert invoice.invoice_date.hour == 0
+            assert invoice.invoice_date.minute == 0
+            assert invoice.invoice_date.second == 0
+
+
 def test_vendor_profile_endpoints(
     client: TestClient, vendor_and_user: tuple[int, int]
 ) -> None:

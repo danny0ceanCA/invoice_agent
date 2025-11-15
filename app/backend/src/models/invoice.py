@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, func
+from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
@@ -24,11 +24,15 @@ class Invoice(Base):
     )
     invoice_code: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     service_month: Mapped[str] = mapped_column(String(32), nullable=False)
+    service_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    service_month_num: Mapped[int | None] = mapped_column(Integer, nullable=True)
     invoice_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     total_hours: Mapped[float] = mapped_column(Float, nullable=False, default=0)
     total_cost: Mapped[float] = mapped_column(Float, nullable=False, default=0)
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="generated")
     pdf_s3_key: Mapped[str] = mapped_column(String(512), nullable=False)
+    district_key: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    vendor_name_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
