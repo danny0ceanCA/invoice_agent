@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -26,7 +26,7 @@ LOGGER = structlog.get_logger(__name__)
 REQUIRED_COLUMNS = ["Client", "Schedule Date", "Hours", "Employee", "Service Code"]
 
 
-def generate_invoice_number(student_name: str, service_month: datetime) -> str:
+def generate_invoice_number(student_name: str, service_month: datetime | date) -> str:
     """Return a human-friendly invoice number for a student and month."""
 
     parts = re.split(r"\s+", student_name.strip())
@@ -42,18 +42,24 @@ class InvoiceAgent:
     def __init__(
         self,
         vendor_id: int,
-        invoice_date: datetime,
-        service_month: str | datetime,
+        invoice_date: datetime | date,
+        service_month: str | datetime | date,
         invoice_code: str | None = None,
         *,
         job_id: str | None = None,
         rates: dict[str, float] | None = None,
     ) -> None:
         self.vendor_id = vendor_id
-        self.invoice_date = invoice_date
-        self.service_month_display, self.service_month_date = self._normalize_service_month(
-            service_month, invoice_date
+        self.invoice_date = (
+            invoice_date.date() if isinstance(invoice_date, datetime) else invoice_date
         )
+        (
+            self.service_month_display,
+            self.service_month_date,
+            self.service_month_name,
+            self.service_year,
+            self.service_month_num,
+        ) = self._normalize_service_month(service_month, self.invoice_date)
         self.invoice_code = invoice_code or ""
         self.job_id = job_id
         self.rates = rates or {
@@ -61,6 +67,7 @@ class InvoiceAgent:
             "LVN-SCUSD": 70,
             "RN-SCUSD": 85,
         }
+        self.vendor: Vendor | None = None
         self.vendor_company_name: str | None = None
         self.logger = LOGGER.bind(
             vendor_id=vendor_id, service_month=self.service_month_display, job_id=job_id
@@ -88,7 +95,8 @@ class InvoiceAgent:
         self.logger.info("invoice_agent_start", upload=str(file_path))
         try:
             with session_scope() as session:
-                vendor_name = self._ensure_vendor_company_name(session)
+                vendor = self._get_vendor(session)
+                vendor_name = self._ensure_vendor_company_name(session, vendor)
                 for student, student_frame in dataframe.groupby("Client"):
                     invoice_number = generate_invoice_number(student, self.service_month_date)
                     if self._invoice_exists(session, invoice_number):
@@ -106,6 +114,7 @@ class InvoiceAgent:
                         student_frame,
                         invoice_number,
                         vendor_name,
+                        vendor,
                     )
                     invoices.append(invoice)
                     pdf_artifacts.append(pdf_artifact)
@@ -169,6 +178,7 @@ class InvoiceAgent:
         student_frame: pd.DataFrame,
         invoice_number: str,
         vendor_company_name: str,
+        vendor: Vendor,
     ) -> tuple[Invoice, InvoicePdf]:
         frame = student_frame.copy()
         frame["Rate"] = frame["Service Code"].map(self.rates).fillna(0)
@@ -195,8 +205,12 @@ class InvoiceAgent:
             total_hours=float(totals.get("Hours", 0)),
             total_cost=float(totals.get("Cost", 0)),
             invoice_date=self.invoice_date,
-            service_month=self.service_month_display,
+            service_month=self.service_month_name,
+            service_year=self.service_year,
+            service_month_num=self.service_month_num,
+            district_key=vendor.district_key,
             invoice_code=invoice_code,
+            vendor_name_snapshot=vendor.company_name,
             pdf_s3_key=pdf_artifact.key,
             status="generated",
         )
@@ -273,13 +287,25 @@ class InvoiceAgent:
         )
         return zip_key
 
-    def _ensure_vendor_company_name(self, session: Session) -> str:
+    def _get_vendor(self, session: Session) -> Vendor:
+        """Return the vendor instance, caching it for repeated access."""
+
+        if self.vendor is None:
+            vendor = session.get(Vendor, self.vendor_id)
+            if vendor is None:
+                raise ValueError(f"Vendor {self.vendor_id} not found")
+            self.vendor = vendor
+        return self.vendor
+
+    def _ensure_vendor_company_name(
+        self, session: Session, vendor: Vendor | None = None
+    ) -> str:
         """Resolve and cache the vendor company name for S3 key generation."""
 
         if self.vendor_company_name:
             return self.vendor_company_name
 
-        vendor: Vendor | None = session.get(Vendor, self.vendor_id)
+        vendor = vendor or self._get_vendor(session)
         if vendor and vendor.company_name:
             self.vendor_company_name = vendor.company_name
         else:
@@ -294,30 +320,69 @@ class InvoiceAgent:
 
     @staticmethod
     def _normalize_service_month(
-        service_month: str | datetime, invoice_date: datetime
-    ) -> tuple[str, datetime]:
-        """Return a presentation label and canonical datetime for the service month."""
+        service_month: str | datetime | date, invoice_date: date
+    ) -> tuple[str, date, str, int, int]:
+        """Return normalized fields for the service month."""
+
+        fallback_year = invoice_date.year
 
         if isinstance(service_month, datetime):
-            normalized = service_month.replace(day=1)
-            return normalized.strftime("%B %Y"), normalized
+            normalized_date = service_month.date().replace(day=1)
+            month_name = normalized_date.strftime("%B")
+            return (
+                normalized_date.strftime("%B %Y"),
+                normalized_date,
+                month_name.lower(),
+                normalized_date.year,
+                normalized_date.month,
+            )
+
+        if isinstance(service_month, date):
+            normalized_date = service_month.replace(day=1)
+            month_name = normalized_date.strftime("%B")
+            return (
+                normalized_date.strftime("%B %Y"),
+                normalized_date,
+                month_name.lower(),
+                normalized_date.year,
+                normalized_date.month,
+            )
 
         candidate = str(service_month or "").strip()
-        for fmt in ("%B %Y", "%b %Y"):
+
+        def _build_from_parts(month: int, year: int, label: str | None = None) -> tuple[str, date, str, int, int]:
+            normalized_date = date(year, month, 1)
+            month_name = normalized_date.strftime("%B")
+            label_value = label or f"{month_name} {year}"
+            return label_value, normalized_date, month_name.lower(), year, month
+
+        for fmt in ("%B %Y", "%b %Y", "%Y-%m-%d", "%Y-%m"):
             try:
                 parsed = datetime.strptime(candidate, fmt)
-                return parsed.strftime("%B %Y"), parsed.replace(day=1)
+                label = parsed.strftime("%B %Y")
+                return _build_from_parts(parsed.month, parsed.year, label)
             except ValueError:
                 continue
 
-        try:
-            parsed_iso = datetime.fromisoformat(candidate)
-            normalized = parsed_iso.replace(day=1)
-            return normalized.strftime("%B %Y"), normalized
-        except ValueError:
-            fallback = invoice_date.replace(day=1)
-            label = candidate or fallback.strftime("%B %Y")
-            return label, fallback
+        for fmt in ("%B", "%b"):
+            try:
+                parsed = datetime.strptime(candidate, fmt)
+                month = parsed.month
+                label = f"{parsed.strftime('%B')} {fallback_year}"
+                return _build_from_parts(month, fallback_year, label)
+            except ValueError:
+                continue
+
+        if candidate:
+            try:
+                parsed_iso = datetime.fromisoformat(candidate)
+                label = parsed_iso.strftime("%B %Y")
+                return _build_from_parts(parsed_iso.month, parsed_iso.year, label)
+            except ValueError:
+                pass
+
+        fallback = invoice_date.replace(day=1)
+        return _build_from_parts(fallback.month, fallback.year, candidate or None)
 
     def _compose_job_message(self, generated_count: int, duplicates: list[str]) -> str:
         """Build a concise message summarizing job outcomes for the dashboard."""
