@@ -135,13 +135,13 @@ export default function ChatAgent({ districtKey }) {
 
   return (
     <div
-      className="relative mx-auto w-full max-w-3xl rounded-xl border border-slate-300 bg-white shadow flex flex-col"
+      className="relative mx-auto w-full max-w-3xl rounded-xl border border-slate-300 bg-white shadow flex flex-col overflow-hidden"
       style={{ height: "600px" }}
     >
       {/* Scrollable chat area */}
       <div
         ref={scrollRef}
-        className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-4 flex-shrink"
+        className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-4 flex-shrink min-w-0"
         style={{ minHeight: 0 }}
         onScroll={(e) => {
           const target = e.target;
@@ -155,7 +155,8 @@ export default function ChatAgent({ districtKey }) {
             key={i}
             className={`
               inline-block
-              max-w-full
+              w-fit
+              max-w-[75%]
               sm:max-w-[75%]
               md:max-w-[65%]
               lg:max-w-[55%]
@@ -165,6 +166,7 @@ export default function ChatAgent({ districtKey }) {
               text-sm
               break-words
               [overflow-wrap:anywhere]
+              min-w-0
               overflow-hidden
               ${
                 m.role === "user"
@@ -180,18 +182,27 @@ export default function ChatAgent({ districtKey }) {
                   w-full
                   max-w-full
                   overflow-auto
-                  whitespace-pre-wrap
+                  break-words
                   [overflow-wrap:anywhere]
+                  whitespace-normal
+                  prose
+                  prose-sm
+                  prose-table:w-full
+                  prose-table:table-fixed
+                  prose-th:break-words
+                  prose-td:break-words
+                  prose-td:whitespace-normal
+                  prose-pre:whitespace-pre-wrap
+                  prose-pre:break-words
+                  prose-pre:overflow-auto
+                  prose-img:max-w-full
+                  prose-img:h-auto
                   [&_*]:max-w-full
-                  [&_table]:w-full
-                  [&_table]:table-fixed
                   [&_table]:border-collapse
                   [&_th]:text-left
                   [&_th]:align-top
                   [&_td]:align-top
-                  [&_td]:break-words
-                  [&_td]:whitespace-normal
-                  [&_th]:whitespace-normal
+                  max-w-full
                 "
                 dangerouslySetInnerHTML={{ __html: m.content }}
               />
@@ -217,11 +228,11 @@ export default function ChatAgent({ districtKey }) {
       )}
 
       {/* Sticky bottom input bar */}
-      <div className="border-t border-slate-200 p-3 bg-white">
+      <div className="border-t border-slate-200 p-3 bg-white min-w-0">
         <form onSubmit={handleSend} className="flex gap-3">
           <input
             type="text"
-            className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-amber-400"
+            className="flex-1 min-w-0 border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-amber-400"
             placeholder="Ask a question about invoices…"
             value={input}
             onChange={(e) => setInput(e.target.value)}
