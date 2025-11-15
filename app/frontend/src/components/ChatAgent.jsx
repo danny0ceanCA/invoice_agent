@@ -17,11 +17,15 @@ export default function ChatAgent({ districtKey }) {
   const [sending, setSending] = useState(false);
   const [token, setToken] = useState("");
   const scrollRef = useRef(null);
+  const [showScrollButton, setShowScrollButton] = useState(false);
 
   // Auto-scroll chat window
   useEffect(() => {
     const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (el) {
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+      setShowScrollButton(false);
+    }
   }, [messages]);
 
   // Acquire Auth0 token ONCE when authenticated
@@ -131,7 +135,7 @@ export default function ChatAgent({ districtKey }) {
 
   return (
     <div
-      className="rounded-xl border border-slate-300 bg-white shadow flex flex-col overflow-hidden"
+      className="relative rounded-xl border border-slate-300 bg-white shadow flex flex-col overflow-hidden"
       style={{ height: "600px" }}
     >
       {/* Scrollable chat area */}
@@ -139,6 +143,12 @@ export default function ChatAgent({ districtKey }) {
         ref={scrollRef}
         className="flex-1 overflow-y-auto px-4 py-4 space-y-4 flex-shrink"
         style={{ minHeight: 0 }}
+        onScroll={(e) => {
+          const target = e.target;
+          const atBottom =
+            target.scrollHeight - target.scrollTop <= target.clientHeight + 20;
+          setShowScrollButton(!atBottom);
+        }}
       >
         {messages.map((m, i) => (
           <div
@@ -157,6 +167,18 @@ export default function ChatAgent({ districtKey }) {
           </div>
         ))}
       </div>
+
+      {showScrollButton && (
+        <button
+          onClick={() => {
+            const el = scrollRef.current;
+            if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+          }}
+          className="absolute bottom-20 right-8 bg-amber-500 text-white px-3 py-2 text-xs rounded-full shadow-lg hover:bg-amber-600 transition"
+        >
+          ↓ Scroll to bottom
+        </button>
+      )}
 
       {/* Sticky bottom input bar */}
       <div className="border-t border-slate-200 p-3 bg-white">
