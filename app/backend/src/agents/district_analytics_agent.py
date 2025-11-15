@@ -496,6 +496,14 @@ def _build_run_sql_tool(engine: Engine) -> Tool:
             query, context.district_id, context.district_key
         )
 
+        LOGGER.info(
+            "analytics_run_sql",
+            query=filtered_query,
+            params=parameters,
+            district_key=context.district_key,
+            district_id=context.district_id,
+        )
+
         rows: list[dict[str, Any]] = []
         with engine.connect() as connection:
             result = connection.execute(sql_text(filtered_query), parameters)
@@ -583,6 +591,10 @@ def _build_system_prompt() -> str:
         "- For invoice money totals, ALWAYS use invoices.total_cost.\n"
         "- For monthly buckets, use strftime('%Y-%m', invoice_date) OR service_month if appropriate.\n"
         "- Keep queries simple: avoid unnecessary joins unless the question truly needs them.\n\n"
+        "FULL RESULTS vs. LIMITS:\n"
+        "- If the user asks for \"all invoices\", \"full table\", or similar wording, you MUST NOT add a LIMIT clause.\n"
+        "- You MAY use LIMIT or return only top N rows ONLY if the user explicitly asks for \"top\", \"highest\", \"sample\", or similar phrasing.\n"
+        "- When the user asks for all rows (e.g., \"all invoices with invoice information for November\"), you must return the full result set subject only to district_key and the user-specified filters.\n\n"
         "ADDITIONAL RULES:\n"
         "- If user asks about a STUDENT, your SQL must use invoices.student_name with a case-insensitive LIKE match.\n"
         "- If user asks about a VENDOR, JOIN vendors ON vendors.id = invoices.vendor_id and filter vendors.name with LIKE.\n"
@@ -609,6 +621,14 @@ def _build_system_prompt() -> str:
         "   FROM invoices\n"
         "   WHERE invoices.district_key = :district_key\n"
         "     AND strftime('%Y', invoice_date) = '2025';\n\n"
+        "5) Full invoice table for November (no LIMIT):\n"
+        "   User: \"Give me a table for all invoices with invoice information for November.\"\n"
+        "   SQL:\n"
+        "   SELECT invoice_number, student_name, total_cost, service_month, invoice_date, status\n"
+        "   FROM invoices\n"
+        "   WHERE invoices.district_key = :district_key\n"
+        "     AND LOWER(service_month) = LOWER('November')\n"
+        "   ORDER BY invoice_date, invoice_number;\n\n"
         "STUDENT NAME LOGIC:\n"
         "- When the user asks about a specific student (example: ‘Why is Yuritzi low?’, ‘Show invoices for Chase Porraz’, ‘Give student summary for Aidan Borrelli’), ALWAYS use run_sql.\n"
         "- Perform a case-insensitive match on invoices.student_name:\n"
