@@ -155,12 +155,16 @@ export default function ChatAgent({ districtKey }) {
             key={i}
             className={`
               inline-block
-              max-w-[90%]
-              sm:max-w-[80%]
-              md:max-w-[70%]
-              px-4 py-2
-              rounded-xl
+              max-w-full
+              sm:max-w-[75%]
+              md:max-w-[65%]
+              lg:max-w-[55%]
+              xl:max-w-[50%]
+              px-4 py-3
+              rounded-2xl
+              text-sm
               break-words
+              [overflow-wrap:anywhere]
               ${
                 m.role === "user"
                   ? "bg-amber-500 text-white ml-auto"
@@ -170,11 +174,11 @@ export default function ChatAgent({ districtKey }) {
           >
             {m.html ? (
               <div
-                className="overflow-x-auto max-w-full w-full text-sm"
+                className="max-h-60 overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere]"
                 dangerouslySetInnerHTML={{ __html: m.content }}
               />
             ) : (
-              <span className="break-words">{m.content}</span>
+              <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{m.content}</p>
             )}
           </div>
         ))}
