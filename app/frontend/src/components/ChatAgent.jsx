@@ -199,7 +199,7 @@ export default function ChatAgent({ districtKey }) {
                   [&_span]:[overflow-wrap:anywhere]
                   [&_a]:break-words
                   [&_a]:[overflow-wrap:anywhere]
-                  prose-table:w-full
+                  table-auto
                   prose-table:table-fixed
                   prose-th:break-words
                   prose-td:break-words
