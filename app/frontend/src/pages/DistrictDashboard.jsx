@@ -2268,7 +2268,12 @@ export default function DistrictDashboard({
               <p className="mt-2 text-sm text-slate-600">
                 Ask natural-language questions about invoices, vendors, students, monthly totals, or spending.
               </p>
-              <div className="mt-4">
+
+              {/* FIX: Hard height boundary to prevent ChatAgent from stretching page */}
+              <div
+                className="mt-4 overflow-hidden rounded-xl border border-slate-200 bg-white"
+                style={{ height: "620px" }}
+              >
                 <ChatAgent districtKey={districtProfile?.district_key} />
               </div>
             </div>
