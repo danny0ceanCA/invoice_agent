@@ -106,14 +106,6 @@ export function App() {
           )
         }
       />
-      {/*
-        Keep the District layout for /analytics so the left sidebar remains visible.
-        We pass an initialActiveKey prop so the tab highlights correctly when deep-linked.
-      */}
-      <Route
-        path="/analytics"
-        element={<DistrictDashboard initialActiveKey="analytics" />}
-      />
       <Route
         path="/admin/users"
         element={profile?.role === "admin" ? <AdminUserDashboard /> : <Navigate to="/" replace />}
