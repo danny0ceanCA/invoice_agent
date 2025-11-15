@@ -77,8 +77,8 @@ function ChatAgent({ districtKey }) {
           query: text,
           district_key: districtKey ?? null,
           context: {
-            district_key: districtKey ?? null
-          }
+            district_key: districtKey ?? null,
+          },
         }),
       });
 
@@ -120,7 +120,7 @@ function ChatAgent({ districtKey }) {
 
   if (isLoading) {
     return (
-      <div className="h-[600px] flex items-center justify-center text-slate-600">
+      <div className="h-full flex items-center justify-center text-slate-600">
         Loading assistant…
       </div>
     );
@@ -128,7 +128,7 @@ function ChatAgent({ districtKey }) {
 
   if (!isAuthenticated) {
     return (
-      <div className="h-[600px] flex items-center justify-center text-slate-600">
+      <div className="h-full flex items-center justify-center text-slate-600">
         Please sign in to use the Analytics Assistant.
       </div>
     );
