@@ -201,6 +201,9 @@ export default function ChatAgent({ districtKey }) {
                   [&_a]:[overflow-wrap:anywhere]
                   table-auto
                   prose-table:table-fixed
+                  [&_table]:block
+                  [&_table]:max-w-full
+                  [&_table]:overflow-y-auto
                   prose-th:break-words
                   prose-td:break-words
                   prose-td:whitespace-normal
