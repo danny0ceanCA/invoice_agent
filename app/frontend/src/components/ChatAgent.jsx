@@ -136,7 +136,7 @@ function ChatAgent({ districtKey }) {
 
   return (
     <div
-      className="h-full w-full flex flex-col overflow-hidden bg-white"
+      className="h-full w-full flex flex-col bg-white"
     >
       {/* Scrollable chat area */}
       <div
@@ -246,7 +246,7 @@ function ChatAgent({ districtKey }) {
       )}
 
       {/* Sticky bottom input bar */}
-      <div className="border-t border-slate-200 p-3 bg-white min-w-0">
+      <div className="border-t border-slate-200 p-3 bg-white min-w-0 shrink-0">
         <form onSubmit={handleSend} className="flex gap-3">
           <input
             type="text"
