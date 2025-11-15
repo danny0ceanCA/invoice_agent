@@ -1,7 +1,8 @@
+import React from "react";
 import { useEffect, useRef, useState } from "react";
 import { useAuth0 } from "@auth0/auth0-react";
 
-export default function ChatAgent({ districtKey }) {
+function ChatAgent({ districtKey }) {
   console.log("ChatAgent using districtKey:", districtKey);
   const { isAuthenticated, isLoading, getAccessTokenSilently } = useAuth0();
 
@@ -268,3 +269,5 @@ export default function ChatAgent({ districtKey }) {
     </div>
   );
 }
+
+export default React.memo(ChatAgent);
