@@ -141,7 +141,7 @@ export default function ChatAgent({ districtKey }) {
       {/* Scrollable chat area */}
       <div
         ref={scrollRef}
-        className="flex-1 overflow-y-auto px-4 py-4 space-y-4 flex-shrink"
+        className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-4 space-y-4 flex-shrink"
         style={{ minHeight: 0 }}
         onScroll={(e) => {
           const target = e.target;
@@ -165,6 +165,7 @@ export default function ChatAgent({ districtKey }) {
               text-sm
               break-words
               [overflow-wrap:anywhere]
+              overflow-hidden
               ${
                 m.role === "user"
                   ? "bg-amber-500 text-white ml-auto"
@@ -176,12 +177,15 @@ export default function ChatAgent({ districtKey }) {
               <div
                 className="
                   max-h-60
+                  w-full
+                  max-w-full
                   overflow-auto
                   whitespace-pre-wrap
                   [overflow-wrap:anywhere]
                   [&_*]:max-w-full
                   [&_table]:w-full
                   [&_table]:table-fixed
+                  [&_table]:border-collapse
                   [&_th]:text-left
                   [&_th]:align-top
                   [&_td]:align-top
