@@ -155,8 +155,9 @@ export default function ChatAgent({ districtKey }) {
             key={i}
             className={`
               inline-block
+              align-top
               w-fit
-              max-w-[75%]
+              max-w-full
               sm:max-w-[75%]
               md:max-w-[65%]
               lg:max-w-[55%]
@@ -166,11 +167,12 @@ export default function ChatAgent({ districtKey }) {
               text-sm
               break-words
               [overflow-wrap:anywhere]
+              whitespace-normal
               min-w-0
               ${
                 m.role === "user"
                   ? "bg-amber-500 text-white ml-auto overflow-hidden"
-                  : "bg-slate-100 text-slate-800 mr-auto shadow max-h-80 overflow-y-auto min-w-0 break-words [overflow-wrap:anywhere] whitespace-normal overflow-x-hidden"
+                  : "bg-slate-100 text-slate-800 mr-auto shadow max-h-80 overflow-y-auto overflow-x-hidden min-w-0 break-words [overflow-wrap:anywhere] whitespace-normal"
               }
             `}
           >
@@ -192,6 +194,12 @@ export default function ChatAgent({ districtKey }) {
                   [&_li]:break-words
                   [&_ul]:list-disc
                   [&_ol]:list-decimal
+                  [&_p]:break-words
+                  [&_p]:[overflow-wrap:anywhere]
+                  [&_span]:break-words
+                  [&_span]:[overflow-wrap:anywhere]
+                  [&_a]:break-words
+                  [&_a]:[overflow-wrap:anywhere]
                   prose-table:w-full
                   prose-table:table-fixed
                   prose-th:break-words
