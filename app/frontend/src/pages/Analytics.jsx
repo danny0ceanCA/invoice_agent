@@ -37,7 +37,7 @@ export default function Analytics() {
             Ask natural-language questions about invoices, vendors, students, monthly totals, or spending.
           </p>
         </div>
-        <div className="px-4 py-4" style={{ height: "600px" }}>
+        <div className="px-4 py-4 h-[600px] overflow-hidden">
           <ChatAgent />
         </div>
       </div>
