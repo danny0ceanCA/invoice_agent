@@ -7,12 +7,6 @@ import asyncio
 import json
 from typing import Any, Iterable, Mapping
 
-# HTTP fallback for tool-output submission when SDK method isn't present
-try:  # httpx is a transitive dep of openai>=1.x
-    import httpx  # type: ignore
-except Exception:  # pragma: no cover
-    httpx = None  # type: ignore
-
 import boto3
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -28,10 +22,8 @@ LOGGER = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
-
 DEFAULT_MODEL = "gpt-4.1-mini"
 DEFAULT_POLL_INTERVAL = 0.5
-
 
 _SQL_ENGINE: Engine | None = None
 _OPENAI_CLIENT: OpenAI | None = None
@@ -41,22 +33,18 @@ _S3_CLIENT: Any | None = None
 
 def _build_context(user: User | None, request_context: Any) -> dict[str, Any]:
     """Merge authenticated user details with any caller-provided context."""
-
     context: dict[str, Any] = {}
     if isinstance(request_context, Mapping):
         for key, value in request_context.items():
             if isinstance(key, str):
                 context[key] = value
-
     if user and getattr(user, "district_id", None) is not None:
         context.setdefault("district_id", user.district_id)
-
     return context
 
 
 def _get_sql_engine(settings) -> Engine:
     """Return a cached SQLAlchemy engine."""
-
     global _SQL_ENGINE
     if _SQL_ENGINE is None:
         _SQL_ENGINE = create_engine(settings.database_url)
@@ -65,12 +53,10 @@ def _get_sql_engine(settings) -> Engine:
 
 def _get_openai_client(settings) -> OpenAI:
     """Return a cached OpenAI client configured with the API key."""
-
     global _OPENAI_CLIENT, _OPENAI_API_KEY
     api_key = settings.openai_api_key
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY is not configured.")
-
     if _OPENAI_CLIENT is None or api_key != _OPENAI_API_KEY:
         _OPENAI_CLIENT = OpenAI(api_key=api_key)
         _OPENAI_API_KEY = api_key
@@ -79,7 +65,6 @@ def _get_openai_client(settings) -> OpenAI:
 
 def _get_s3_client(settings):
     """Return a cached boto3 S3 client configured from settings."""
-
     global _S3_CLIENT
     if _S3_CLIENT is None:
         session = boto3.session.Session(
@@ -93,7 +78,6 @@ def _get_s3_client(settings):
 
 def _json_default(value: Any) -> str:
     """Serialize otherwise non-JSON-serializable values."""
-
     if hasattr(value, "isoformat"):
         return value.isoformat()  # type: ignore[return-value]
     return str(value)
@@ -101,10 +85,8 @@ def _json_default(value: Any) -> str:
 
 def run_sql(query: str) -> list[dict[str, Any]]:
     """Execute a read-only SQL query using SQLAlchemy."""
-
     if not isinstance(query, str) or not query.strip():
         raise ValueError("SQL query must be a non-empty string.")
-
     normalized = query.strip().lower()
     if not (normalized.startswith("select") or normalized.startswith("with")):
         raise ValueError("Only SELECT queries are permitted.")
@@ -117,13 +99,11 @@ def run_sql(query: str) -> list[dict[str, Any]]:
         result = connection.execute(sql_text(query))
         for row in result:
             rows.append(dict(row._mapping))
-
     return rows
 
 
 def list_s3(prefix: str, max_items: int = 100) -> list[dict[str, Any]]:
     """List objects in the configured S3 bucket."""
-
     settings = get_settings()
     client = _get_s3_client(settings)
 
@@ -158,6 +138,7 @@ def list_s3(prefix: str, max_items: int = 100) -> list[dict[str, Any]]:
     return objects
 
 
+# Flat tool shape compatible with your current SDK usage
 TOOLS = [
     {
         "type": "function",
@@ -200,67 +181,11 @@ TOOLS = [
 ]
 
 
-def _submit_tool_outputs(client: OpenAI, settings, response_id: str, tool_outputs: list[dict[str, str]]) -> None:
-    """
-    Submit tool outputs to the Responses API, working across SDK versions.
-    1) Prefer the official SDK method if it exists.
-    2) Otherwise, POST directly to the REST endpoint.
-    """
-
-    # 1) Try SDK method (present on newer openai Python SDKs)
-    try:
-        submit = getattr(getattr(client, "responses", None), "submit_tool_outputs", None)
-        if callable(submit):
-            submit(response_id, tool_outputs=tool_outputs)
-            return
-    except Exception as e:
-        LOGGER.warning("analytics_agent_submit_tool_outputs_sdk_failed", error=str(e))
-
-    # 2) Raw HTTP fallback (handle both endpoint spellings for compatibility)
-    headers = {
-        "Authorization": f"Bearer {settings.openai_api_key}",
-        "Content-Type": "application/json",
-    }
-    payload = {"tool_outputs": tool_outputs}
-
-    endpoints = (
-        f"https://api.openai.com/v1/responses/{response_id}/submit_tool_outputs",
-        f"https://api.openai.com/v1/responses/{response_id}/tool_outputs",
-    )
-
-    last_err = None
-    for url in endpoints:
-        try:
-            if httpx is not None:
-                resp = httpx.post(url, headers=headers, json=payload, timeout=30.0)
-                if 200 <= resp.status_code < 300:
-                    LOGGER.info("analytics_agent_tool_submit_path", path=url)
-                    return
-                if resp.status_code != 404:
-                    resp.raise_for_status()
-            else:
-                import requests  # type: ignore
-
-                resp = requests.post(url, headers=headers, json=payload, timeout=30)
-                if 200 <= resp.status_code < 300:
-                    LOGGER.info("analytics_agent_tool_submit_path", path=url)
-                    return
-                if resp.status_code != 404:
-                    resp.raise_for_status()
-        except Exception as e:  # pragma: no cover - defensive
-            last_err = str(e)
-            LOGGER.warning("analytics_agent_tool_submit_fallback_failed", path=url, error=last_err)
-            continue
-
-    raise RuntimeError(
-        "Unable to submit tool outputs via SDK or HTTP fallback. Last error: {last_err}".format(
-            last_err=last_err
-        )
-    )
-
-
 def _extract_final_output(response: Any) -> Any:
     """Extract the final model output from the Responses API payload."""
+    # Allow synthetic final payloads to pass straight through.
+    if isinstance(response, Mapping) and any(k in response for k in ("text", "rows", "html")):
+        return response
 
     output_items = getattr(response, "output", None) or []
     text_segments: list[str] = []
@@ -269,9 +194,7 @@ def _extract_final_output(response: Any) -> Any:
         item_type = getattr(item, "type", None)
         if item_type is None and isinstance(item, Mapping):
             item_type = item.get("type")
-
         if item_type != "message":
-            # Ignore tool calls or other intermediate artifacts.
             continue
 
         contents = getattr(item, "content", None)
@@ -283,14 +206,12 @@ def _extract_final_output(response: Any) -> Any:
             content_type = getattr(content, "type", None)
             if content_type is None and isinstance(content, Mapping):
                 content_type = content.get("type")
-
             if content_type != "output_text":
                 continue
 
             text_value = getattr(content, "text", None)
             if text_value is None and isinstance(content, Mapping):
                 text_value = content.get("text")
-
             if not isinstance(text_value, str):
                 continue
 
@@ -299,24 +220,19 @@ def _extract_final_output(response: Any) -> Any:
                 try:
                     return json.loads(normalized)
                 except json.JSONDecodeError:
-                    # Fall back to treating it as plain text if parsing fails.
                     pass
-
             text_segments.append(text_value)
 
     if text_segments:
         return "".join(text_segments)
-
     return ""
 
 
 def _render_html_table(rows: Iterable[Mapping[str, Any]]) -> str:
     """Render a list of mapping rows as an HTML table."""
-
     rows = list(rows)
     if not rows:
         return "<table><thead><tr><th>No results</th></tr></thead><tbody></tbody></table>"
-
     headers = list(rows[0].keys())
     header_html = "".join(f"<th>{escape(str(header))}</th>" for header in headers)
 
@@ -334,14 +250,11 @@ def _render_html_table(rows: Iterable[Mapping[str, Any]]) -> str:
 
 def _try_parse_json(value: str) -> Any:
     """Parse JSON content when the payload appears to be structured data."""
-
     if not isinstance(value, str):
         return None
-
     normalized = value.strip()
     if not normalized or normalized[0] not in "[{":
         return None
-
     try:
         return json.loads(normalized)
     except json.JSONDecodeError:
@@ -350,12 +263,11 @@ def _try_parse_json(value: str) -> Any:
 
 def _format_final_output(final_output: Any) -> tuple[str, str]:
     """Convert the agent's final output into text and HTML payloads."""
-
     if isinstance(final_output, str):
         parsed_output = _try_parse_json(final_output)
         if parsed_output is not None:
             return _format_final_output(parsed_output)
-
+    # strings
         text = final_output
         html = f"<p>{escape(text)}</p>" if text else ""
         return text, html
@@ -394,22 +306,45 @@ def _format_final_output(final_output: Any) -> tuple[str, str]:
     return text, html
 
 
-async def _process_tool_calls(tool_calls: Any) -> dict[str, list[dict[str, str]]] | None:
-    """Execute model-requested tool calls and return a dict suitable for
-    Responses.submit_tool_outputs(tool_outputs=[...]).
-
-    Accepts either:
-      - an object with attribute `.tool_calls`, or
-      - a dict that contains {"tool_calls": [...]}.
+def _collect_tool_calls_container(response: Any) -> Any | None:
     """
+    Return an object that has `.tool_calls` (attr or dict), from either:
+      - response.required_action.submit_tool_outputs.tool_calls, or
+      - response.output items with type == "function_call".
+    """
+    # Typical path: requires_action
+    ra = getattr(response, "required_action", None)
+    if ra is not None:
+        st = getattr(ra, "submit_tool_outputs", None)
+        if st is not None:
+            if getattr(st, "tool_calls", None):
+                return st
+            if isinstance(st, Mapping) and st.get("tool_calls"):
+                return st
 
-    outputs: list[dict[str, str]] = []
+    # Fallback path: function calls in output even when status is 'completed'
+    output_items = getattr(response, "output", None) or []
+    pending = [it for it in output_items if getattr(it, "type", None) == "function_call"]
+    if pending:
+        return {"tool_calls": pending}
+    return None
 
-    # Accept both attr-style and dict-style containers
+
+async def _process_tool_calls_to_contents(tool_calls: Any) -> list[dict[str, str]]:
+    """
+    Execute the model-requested tool calls and return content items of type 'tool_result'
+    suitable for a Responses.create continuation (previous_response_id).
+
+    Each item shape:
+      {"type": "tool_result", "tool_call_id": "...", "output": "<string JSON result>"}
+    """
+    # Normalize container
     if isinstance(tool_calls, dict):
         calls = tool_calls.get("tool_calls", []) or []
     else:
         calls = getattr(tool_calls, "tool_calls", []) or []
+
+    contents: list[dict[str, str]] = []
 
     for call in calls:
         if isinstance(call, Mapping):
@@ -444,22 +379,20 @@ async def _process_tool_calls(tool_calls: Any) -> dict[str, list[dict[str, str]]
         except Exception as exc:
             result = {"error": str(exc)}
 
-        outputs.append(
+        contents.append(
             {
+                "type": "tool_result",
                 "tool_call_id": call_id,
+                # IMPORTANT: field must be 'output' and it must be a STRING
                 "output": json.dumps(result, default=_json_default),
             }
         )
 
-    if not outputs:
-        return None
-
-    return {"tool_outputs": outputs}
+    return contents
 
 
 async def _execute_responses_workflow(query: str, context: Mapping[str, Any]) -> Any:
     """Run the analytics workflow using the OpenAI Responses API."""
-
     settings = get_settings()
     client = _get_openai_client(settings)
 
@@ -475,19 +408,17 @@ async def _execute_responses_workflow(query: str, context: Mapping[str, Any]) ->
         "You are an analytics assistant. Use the available tools to answer questions. "
         "Return concise explanations and include JSON-formatted tabular data when appropriate. "
         "Database dialect = SQLite. When filtering dates use strftime('%Y', <date_col>) and "
-        "strftime('%m', <date_col>) (e.g., strftime('%Y','invoice_date')='2025' and strftime('%m','invoice_date')='11')."
+        "strftime('%m', <date_col>) (e.g., strftime('%Y','invoice_date')='2025' and strftime('%m','invoice_date')='11'). "
+        "When listing invoice files, use list_s3 with an appropriate 'prefix' like 'invoices/' and respect 'max_items' when given."
     )
 
     messages: list[dict[str, Any]] = [
         {"role": "system", "content": [{"type": "input_text", "text": system_prompt}]}
     ]
 
-    # (optional) lightweight visibility on the tools we are sending
+    # Optional visibility into the tools being sent
     try:
-        LOGGER.info(
-            "analytics_agent_tools_shape",
-            tools=TOOLS,
-        )
+        LOGGER.info("analytics_agent_tools_shape", tools=TOOLS)
     except Exception:
         pass
 
@@ -496,18 +427,11 @@ async def _execute_responses_workflow(query: str, context: Mapping[str, Any]) ->
         messages.append(
             {
                 "role": "system",
-                "content": [
-                    {
-                        "type": "input_text",
-                        "text": f"User context (JSON): {context_text}",
-                    }
-                ],
+                "content": [{"type": "input_text", "text": f"User context (JSON): {context_text}"}],
             }
         )
 
-    messages.append(
-        {"role": "user", "content": [{"type": "input_text", "text": query}]}
-    )
+    messages.append({"role": "user", "content": [{"type": "input_text", "text": query}]})
 
     def _create_response() -> Any:
         return client.responses.create(
@@ -520,57 +444,41 @@ async def _execute_responses_workflow(query: str, context: Mapping[str, Any]) ->
     response = await asyncio.to_thread(_create_response)
 
     while True:
-        status = getattr(response, "status", "completed")
-
-        if status == "requires_action":
-            required_action = getattr(response, "required_action", None)
-            if not required_action:
-                raise RuntimeError("Model requested action but no details were provided.")
-
-            tool_outputs = await _process_tool_calls(
-                getattr(required_action, "submit_tool_outputs", None)
-            )
-
-            if not tool_outputs:
+        # If the model asked for tools (either via required_action or directly in output), run them
+        container = _collect_tool_calls_container(response)
+        if container:
+            tool_result_contents = await _process_tool_calls_to_contents(container)
+            if not tool_result_contents:
                 raise RuntimeError("Model requested tools but none could be executed.")
 
-            await asyncio.to_thread(
-                _submit_tool_outputs,
-                client,
-                settings,
-                response.id,
-                tool_outputs["tool_outputs"],
+            # Continue the run by sending back tool_result content for each call
+            def _continue_with_tool_results() -> Any:
+                return client.responses.create(
+                    model=DEFAULT_MODEL,
+                    previous_response_id=response.id,
+                    input=[{"role": "developer", "content": tool_result_contents}],
+                    tools=TOOLS,
+                    tool_choice="auto",
+                )
+
+            LOGGER.info(
+                "analytics_agent_submitting_tool_results",
+                previous_response_id=response.id,
+                num_results=len(tool_result_contents),
+                tool_call_ids=[c.get("tool_call_id") for c in tool_result_contents],
             )
-            response = await asyncio.to_thread(client.responses.retrieve, response.id)
+
+            response = await asyncio.to_thread(_continue_with_tool_results)
+            # Loop again: model may chain more tools or produce a final message
             continue
 
-        if status == "completed":
-            # Fallback: some SDK/model builds surface function calls directly in `output`
-            # even though the status is 'completed'. If we see them, execute now and resubmit.
-            output_items = getattr(response, "output", None) or []
-            pending_calls = [
-                it for it in output_items
-                if getattr(it, "type", None) == "function_call"
-            ]
-            if pending_calls:
-                tool_outputs = await _process_tool_calls({"tool_calls": pending_calls})
-                if not tool_outputs:
-                    raise RuntimeError("Model requested tools but none could be executed.")
-                await asyncio.to_thread(
-                    _submit_tool_outputs,
-                    client,
-                    settings,
-                    response.id,
-                    tool_outputs["tool_outputs"],
-                )
-                response = await asyncio.to_thread(client.responses.retrieve, response.id)
-                continue
-
-            return response
-
+        status = getattr(response, "status", "completed")
         if status in {"failed", "cancelled"}:
             raise RuntimeError(f"Analytics run ended with status '{status}'.")
+        if status == "completed":
+            return response
 
+        # Otherwise, still in progress — poll
         await asyncio.sleep(poll_interval_seconds)
         response = await asyncio.to_thread(client.responses.retrieve, response.id)
 
@@ -616,13 +524,9 @@ async def run_agent(request: dict, user: User = Depends(get_current_user)) -> di
     rows_payload: list[Mapping[str, Any]] | None = None
     if isinstance(final_output, Mapping):
         rows_value = final_output.get("rows")
-        if isinstance(rows_value, list) and all(
-            isinstance(item, Mapping) for item in rows_value
-        ):
+        if isinstance(rows_value, list) and all(isinstance(item, Mapping) for item in rows_value):
             rows_payload = rows_value
-    elif isinstance(final_output, list) and all(
-        isinstance(item, Mapping) for item in final_output
-    ):
+    elif isinstance(final_output, list) and all(isinstance(item, Mapping) for item in final_output):
         rows_payload = final_output
 
     if rows_payload is not None:
