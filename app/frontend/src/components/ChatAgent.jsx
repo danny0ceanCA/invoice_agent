@@ -150,34 +150,36 @@ export default function ChatAgent({ districtKey }) {
           setShowScrollButton(!atBottom);
         }}
       >
-        {messages.map((m, i) => (
-          <div
-            key={i}
-            className={`
-              block
-              w-full
-              sm:max-w-[75%]
-              md:max-w-[65%]
-              lg:max-w-[55%]
-              xl:max-w-[50%]
-              px-4 py-3
-              rounded-2xl
-              text-sm
-              overflow-hidden
-              break-words
-              [overflow-wrap:anywhere]
-              whitespace-normal
-              min-w-0
-              ${
-                m.role === "user"
-                  ? "bg-amber-500 text-white ml-auto overflow-hidden"
-                  : "bg-slate-100 text-slate-800 mr-auto shadow"
-              }
-            `}
-          >
-            {m.html ? (
-              <div
-                className="
+        {messages.map((m, i) => {
+          console.log("MSG", m);
+          return (
+            <div
+              key={i}
+              className={`
+                block
+                w-full
+                sm:max-w-[75%]
+                md:max-w-[65%]
+                lg:max-w-[55%]
+                xl:max-w-[50%]
+                px-4 py-3
+                rounded-2xl
+                text-sm
+                overflow-hidden
+                break-words
+                [overflow-wrap:anywhere]
+                whitespace-normal
+                min-w-0
+                ${
+                  m.role === "user"
+                    ? "bg-amber-500 text-white ml-auto overflow-hidden"
+                    : "bg-slate-100 text-slate-800 mr-auto shadow"
+                }
+              `}
+            >
+              {m.html ? (
+                <div
+                  className="
                   max-h-80
                   w-full
                   max-w-full
@@ -220,14 +222,15 @@ export default function ChatAgent({ districtKey }) {
                   max-w-full
                 "
                 dangerouslySetInnerHTML={{ __html: m.content }}
-              />
-            ) : (
-              <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
-                {m.content}
-              </p>
-            )}
-          </div>
-        ))}
+                />
+              ) : (
+                <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+                  {m.content}
+                </p>
+              )}
+            </div>
+          );
+        })}
       </div>
 
       {showScrollButton && (
