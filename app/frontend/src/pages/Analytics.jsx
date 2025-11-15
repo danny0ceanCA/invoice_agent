@@ -1,5 +1,3 @@
-import ChatAgent from "../components/ChatAgent.jsx";
-
 export default function Analytics() {
   return (
     <div className="analytics-page" style={{ padding: "1rem 0" }}>
@@ -12,7 +10,6 @@ export default function Analytics() {
         Ask questions using the AI Analytics Assistant to generate reports instantly.
       </p>
 
-      <ChatAgent />
     </div>
   );
 }
