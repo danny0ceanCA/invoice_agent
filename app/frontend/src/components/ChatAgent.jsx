@@ -174,11 +174,27 @@ export default function ChatAgent({ districtKey }) {
           >
             {m.html ? (
               <div
-                className="max-h-60 overflow-auto whitespace-pre-wrap [overflow-wrap:anywhere]"
+                className="
+                  max-h-60
+                  overflow-auto
+                  whitespace-pre-wrap
+                  [overflow-wrap:anywhere]
+                  [&_*]:max-w-full
+                  [&_table]:w-full
+                  [&_table]:table-fixed
+                  [&_th]:text-left
+                  [&_th]:align-top
+                  [&_td]:align-top
+                  [&_td]:break-words
+                  [&_td]:whitespace-normal
+                  [&_th]:whitespace-normal
+                "
                 dangerouslySetInnerHTML={{ __html: m.content }}
               />
             ) : (
-              <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{m.content}</p>
+              <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+                {m.content}
+              </p>
             )}
           </div>
         ))}
