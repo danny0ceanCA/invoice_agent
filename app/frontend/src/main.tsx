@@ -15,19 +15,17 @@ const rootElement = document.getElementById("root") as HTMLElement;
 
 if (!domain || !clientId) {
   ReactDOM.createRoot(rootElement).render(
-    <React.StrictMode>
-      <div className="flex min-h-screen flex-col items-center justify-center bg-slate-50 px-6 text-center text-sm text-slate-600">
-        <div className="max-w-md space-y-3">
-          <h1 className="text-lg font-semibold text-slate-800">Configuration required</h1>
-          <p>
-            The application cannot start because the Auth0 configuration is missing. Please define the
-            <code className="mx-1 rounded bg-slate-200 px-1 py-0.5">VITE_AUTH0_DOMAIN</code> and
-            <code className="mx-1 rounded bg-slate-200 px-1 py-0.5">VITE_AUTH0_CLIENT_ID</code> environment
-            variables for the frontend build.
-          </p>
-        </div>
+    <div className="flex min-h-screen flex-col items-center justify-center bg-slate-50 px-6 text-center text-sm text-slate-600">
+      <div className="max-w-md space-y-3">
+        <h1 className="text-lg font-semibold text-slate-800">Configuration required</h1>
+        <p>
+          The application cannot start because the Auth0 configuration is missing. Please define the
+          <code className="mx-1 rounded bg-slate-200 px-1 py-0.5">VITE_AUTH0_DOMAIN</code> and
+          <code className="mx-1 rounded bg-slate-200 px-1 py-0.5">VITE_AUTH0_CLIENT_ID</code> environment
+          variables for the frontend build.
+        </p>
       </div>
-    </React.StrictMode>,
+    </div>,
   );
   console.error("Auth0 configuration missing. Set VITE_AUTH0_DOMAIN and VITE_AUTH0_CLIENT_ID.");
 } else {
@@ -39,20 +37,18 @@ if (!domain || !clientId) {
   const redirectUri = window.location.origin;
 
   ReactDOM.createRoot(rootElement).render(
-    <React.StrictMode>
-      <Auth0Provider
-        domain={domain}
-        clientId={clientId}
-        authorizationParams={authorizationParams}
-        cacheLocation="localstorage"
-        useRefreshTokens={true}
-        useRefreshTokensFallback={false}
-        redirectUri={redirectUri}
-      >
-        <BrowserRouter>
-          <App />
-        </BrowserRouter>
-      </Auth0Provider>
-    </React.StrictMode>,
+    <Auth0Provider
+      domain={domain}
+      clientId={clientId}
+      authorizationParams={authorizationParams}
+      cacheLocation="localstorage"
+      useRefreshTokens={true}
+      useRefreshTokensFallback={false}
+      redirectUri={redirectUri}
+    >
+      <BrowserRouter>
+        <App />
+      </BrowserRouter>
+    </Auth0Provider>,
   );
 }
