@@ -153,16 +153,26 @@ export default function ChatAgent({ districtKey }) {
         {messages.map((m, i) => (
           <div
             key={i}
-            className={`max-w-[80%] px-4 py-2 rounded-xl ${
-              m.role === "user"
-                ? "bg-amber-500 text-white ml-auto"
-                : "bg-slate-100 text-slate-800 mr-auto shadow"
-            }`}
+            className={`
+              max-w-full
+              px-4 py-2
+              rounded-xl
+              break-words
+              overflow-hidden
+              ${
+                m.role === "user"
+                  ? "bg-amber-500 text-white ml-auto"
+                  : "bg-slate-100 text-slate-800 mr-auto shadow"
+              }
+            `}
           >
             {m.html ? (
-              <div dangerouslySetInnerHTML={{ __html: m.content }} />
+              <div
+                className="overflow-x-auto max-w-full text-sm"
+                dangerouslySetInnerHTML={{ __html: m.content }}
+              />
             ) : (
-              <span>{m.content}</span>
+              <span className="break-words">{m.content}</span>
             )}
           </div>
         ))}
