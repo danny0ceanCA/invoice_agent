@@ -167,26 +167,31 @@ export default function ChatAgent({ districtKey }) {
               break-words
               [overflow-wrap:anywhere]
               min-w-0
-              overflow-hidden
               ${
                 m.role === "user"
-                  ? "bg-amber-500 text-white ml-auto"
-                  : "bg-slate-100 text-slate-800 mr-auto shadow"
+                  ? "bg-amber-500 text-white ml-auto overflow-hidden"
+                  : "bg-slate-100 text-slate-800 mr-auto shadow max-h-80 overflow-y-auto min-w-0 break-words [overflow-wrap:anywhere] whitespace-normal overflow-x-hidden"
               }
             `}
           >
             {m.html ? (
               <div
                 className="
-                  max-h-60
+                  max-h-80
                   w-full
                   max-w-full
-                  overflow-auto
+                  overflow-y-auto
+                  overflow-x-auto
                   break-words
                   [overflow-wrap:anywhere]
                   whitespace-normal
                   prose
                   prose-sm
+                  prose-ul:pl-5
+                  prose-li:break-words
+                  [&_li]:break-words
+                  [&_ul]:list-disc
+                  [&_ol]:list-decimal
                   prose-table:w-full
                   prose-table:table-fixed
                   prose-th:break-words
