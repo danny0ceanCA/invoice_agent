@@ -25,7 +25,10 @@ export default function Analytics() {
       </p>
 
       {/* Chat card */}
-      <div className="rounded-2xl border border-slate-200 bg-white shadow-sm max-w-[960px] mx-auto h-[600px] flex flex-col">
+      <div
+        className="rounded-2xl border border-slate-200 bg-white shadow-sm max-w-[960px] mx-auto flex flex-col"
+        style={{ height: "600px", overflow: "hidden" }}
+      >
         <div className="border-b border-slate-100 px-4 py-3 shrink-0">
           <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">
             AI Analytics Assistant
