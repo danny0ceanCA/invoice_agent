@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import ChatAgent from "../components/ChatAgent.jsx";
 import { useAuth0 } from "@auth0/auth0-react";
 import toast from "react-hot-toast";
@@ -1854,14 +1854,14 @@ export default function DistrictDashboard({
 
                 if (item.key === "analytics") {
                   return (
-                    <Link
+                    <button
                       key={item.key}
-                      to={item.route ?? "/analytics"}
                       onClick={() => setActiveKey("analytics")}
                       className={className}
+                      type="button"
                     >
                       <span>{item.label}</span>
-                    </Link>
+                    </button>
                   );
                 }
 
