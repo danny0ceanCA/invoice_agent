@@ -1381,50 +1381,77 @@ export default function DistrictDashboard({
         }
 
         const records = Array.isArray(response) ? response : [];
-        const normalized = records
-          .map((entry) => {
-            const invoiceId = entry?.invoice_id ?? null;
-            const amountValue =
-              typeof entry?.amount === "number"
-                ? entry.amount
-                : parseCurrencyValue(entry?.amount ?? 0);
-            const uploadedAt =
-              typeof entry?.uploaded_at === "string"
-                ? entry.uploaded_at.trim()
-                : null;
-            const uploadedAtTimestamp = uploadedAt
-              ? Date.parse(uploadedAt)
-              : Number.NaN;
-            const statusValue =
-              typeof entry?.status === "string"
-                ? entry.status.trim()
-                : "";
+        const aggregated = new Map();
 
-            const invoiceName =
-              (typeof entry?.invoice_name === "string" &&
-                entry.invoice_name.trim()) ||
-              `Invoice ${invoiceId ?? ""}`.trim() ||
-              "Invoice";
-            return {
+        records.forEach((entry, index) => {
+          const invoiceId = entry?.invoice_id ?? null;
+          const amountValue =
+            typeof entry?.amount === "number"
+              ? entry.amount
+              : parseCurrencyValue(entry?.amount ?? 0);
+          const uploadedAt =
+            typeof entry?.uploaded_at === "string"
+              ? entry.uploaded_at.trim()
+              : null;
+          const uploadedAtTimestamp = uploadedAt ? Date.parse(uploadedAt) : null;
+          const statusValue =
+            typeof entry?.status === "string" ? entry.status.trim() : "";
+
+          const invoiceName =
+            (typeof entry?.invoice_name === "string" && entry.invoice_name.trim()) ||
+            `Invoice ${invoiceId ?? ""}`.trim() ||
+            "Invoice";
+          const invoiceNameDisplay = formatInvoiceDisplayName(invoiceName);
+          const normalizedName = (invoiceNameDisplay || invoiceName || "")
+            .toLowerCase()
+            .trim();
+          const key = normalizedName || `record-${invoiceId ?? index}`;
+
+          if (!aggregated.has(key)) {
+            aggregated.set(key, {
               invoiceId,
               vendorId: entry?.vendor_id ?? vendorNumericId,
               company:
                 (typeof entry?.company === "string" && entry.company.trim()) ||
                 selectedVendorName,
               invoiceName,
-              invoiceNameDisplay: formatInvoiceDisplayName(invoiceName),
+              invoiceNameDisplay,
               s3Key:
                 typeof entry?.s3_key === "string" && entry.s3_key.trim().length
                   ? entry.s3_key.trim()
                   : null,
-              amountValue,
-              amountDisplay: currencyFormatter.format(amountValue ?? 0),
+              amountValue: 0,
               status: statusValue,
               uploadedAt,
-              uploadedAtDisplay: formatDisplayDateTime(uploadedAt),
               uploadedAtTimestamp,
-            };
-          })
+            });
+          }
+
+          const record = aggregated.get(key);
+          record.amountValue += Number.isFinite(amountValue) ? amountValue : 0;
+          if (
+            Number.isFinite(uploadedAtTimestamp) &&
+            (!Number.isFinite(record.uploadedAtTimestamp) ||
+              uploadedAtTimestamp > record.uploadedAtTimestamp)
+          ) {
+            record.uploadedAt = uploadedAt;
+            record.uploadedAtTimestamp = uploadedAtTimestamp;
+          }
+
+          if (!record.s3Key && typeof entry?.s3_key === "string") {
+            const trimmedKey = entry.s3_key.trim();
+            if (trimmedKey) {
+              record.s3Key = trimmedKey;
+            }
+          }
+        });
+
+        const normalized = Array.from(aggregated.values())
+          .map((record) => ({
+            ...record,
+            amountDisplay: currencyFormatter.format(record.amountValue ?? 0),
+            uploadedAtDisplay: formatDisplayDateTime(record.uploadedAt),
+          }))
           .sort((a, b) => {
             const aTimestamp = Number.isFinite(a.uploadedAtTimestamp)
               ? a.uploadedAtTimestamp
@@ -1482,56 +1509,32 @@ export default function DistrictDashboard({
 
   const invoiceDocumentCount = invoiceDocuments.length;
 
-  const fallbackInvoiceDocuments = useMemo(() => {
+  const aggregatedFallbackInvoiceDocuments = useMemo(() => {
     if (!activeInvoiceDetails?.students?.length) {
       return [];
     }
 
-    const totalAmount = activeInvoiceDetails.students.reduce((sum, entry) => {
-      const amountValue = parseCurrencyValue(entry?.amount ?? entry?.amountValue);
-      return sum + (Number.isFinite(amountValue) ? amountValue : 0);
-    }, 0);
+    return activeInvoiceDetails.students.map((student, index) => {
+      const amountValue = parseCurrencyValue(student?.amount ?? student?.amountValue);
+      const studentName =
+        typeof student?.name === "string" && student.name.trim().length
+          ? student.name.trim()
+          : "Unknown student";
 
-    const latestUpload = activeInvoiceDetails.students.reduce((latest, entry) => {
-      if (!entry?.uploadedAt) {
-        return latest;
-      }
-
-      const parsed = new Date(entry.uploadedAt);
-      if (Number.isNaN(parsed.getTime())) {
-        return latest;
-      }
-
-      if (!latest || parsed > latest) {
-        return parsed;
-      }
-
-      return latest;
-    }, null);
-
-    const invoiceNameBase = `${activeInvoiceDetails.month ?? "Invoice"} ${
-      activeInvoiceDetails.year ?? ""
-    }`.trim();
-    const invoiceName = invoiceNameBase || "Student entries summary";
-    const uploadedAtValue = latestUpload?.toISOString() ?? null;
-
-    return [
-      {
-        invoiceId: activeInvoiceDetails?.id ?? null,
+      return {
+        invoiceId: student?.originalLineItemId ?? student?.id ?? index,
         vendorId: selectedVendorId ?? null,
         company: selectedVendorName,
-        invoiceName,
-        invoiceNameDisplay: formatInvoiceDisplayName(invoiceName),
-        s3Key: activeInvoiceDetails?.pdfS3Key ?? null,
-        amountValue: totalAmount,
-        amountDisplay: currencyFormatter.format(totalAmount ?? 0),
+        invoiceName: studentName,
+        invoiceNameDisplay: studentName,
+        s3Key: student?.pdfS3Key ?? null,
+        amountValue,
+        amountDisplay: currencyFormatter.format(amountValue ?? 0),
         status: activeInvoiceDetails?.status ?? "",
-        uploadedAt: uploadedAtValue,
-        uploadedAtDisplay: uploadedAtValue
-          ? formatDisplayDateTime(uploadedAtValue) ?? ""
-          : "",
-      },
-    ];
+        uploadedAt: null,
+        uploadedAtDisplay: "",
+      };
+    });
   }, [
     activeInvoiceDetails?.id,
     activeInvoiceDetails?.month,
@@ -1548,49 +1551,11 @@ export default function DistrictDashboard({
       return invoiceDocuments;
     }
 
-    return fallbackInvoiceDocuments;
-  }, [fallbackInvoiceDocuments, invoiceDocuments]);
+    return aggregatedFallbackInvoiceDocuments;
+  }, [aggregatedFallbackInvoiceDocuments, invoiceDocuments]);
 
   const invoiceDisplayCount = displayedInvoiceDocuments.length;
   const zipInvoiceCount = invoiceDocumentCount || invoiceDisplayCount;
-
-  const fallbackInvoiceDocuments = useMemo(() => {
-    if (!activeInvoiceDetails?.students?.length) {
-      return [];
-    }
-
-    return activeInvoiceDetails.students.map((entry, index) => {
-      const invoiceName =
-        (typeof entry?.name === "string" && entry.name.trim()) ||
-        `Invoice ${entry?.id ?? index + 1}`;
-      const amountValue = parseCurrencyValue(entry?.amount ?? entry?.amountValue);
-      const uploadedAt = entry?.uploadedAt ?? null;
-
-      return {
-        invoiceId: entry?.id ?? null,
-        vendorId: entry?.vendorId ?? selectedVendorId ?? null,
-        company: selectedVendorName,
-        invoiceName,
-        invoiceNameDisplay: formatInvoiceDisplayName(invoiceName),
-        s3Key: entry?.pdfS3Key ?? entry?.pdf_s3_key ?? null,
-        amountValue,
-        amountDisplay: currencyFormatter.format(amountValue ?? 0),
-        status: entry?.status ?? "",
-        uploadedAt,
-        uploadedAtDisplay: formatDisplayDateTime(uploadedAt) ?? "",
-      };
-    });
-  }, [activeInvoiceDetails?.students, selectedVendorId, selectedVendorName]);
-
-  const displayedInvoiceDocuments = useMemo(() => {
-    if (invoiceDocuments.length) {
-      return invoiceDocuments;
-    }
-
-    return fallbackInvoiceDocuments;
-  }, [fallbackInvoiceDocuments, invoiceDocuments]);
-
-  const invoiceDisplayCount = displayedInvoiceDocuments.length;
 
   const openInvoiceUrl = useCallback((url, errorMessage) => {
     if (!url) {
