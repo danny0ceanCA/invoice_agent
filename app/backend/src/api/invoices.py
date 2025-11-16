@@ -24,7 +24,7 @@ from fastapi import (
     Query,
 )
 from fastapi.concurrency import run_in_threadpool
-from sqlalchemy import func
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from app.backend.src.core.security import (
@@ -735,6 +735,18 @@ def list_vendor_invoices(
     except ValueError as exc:  # pragma: no cover - defensive guard
         raise HTTPException(status_code=400, detail="Invalid invoice period") from exc
 
+    period_filter = or_(
+        and_(Invoice.service_year == year, Invoice.service_month_num == month),
+        and_(
+            or_(
+                Invoice.service_year.is_(None),
+                Invoice.service_month_num.is_(None),
+            ),
+            Invoice.invoice_date >= reference_start,
+            Invoice.invoice_date < reference_end,
+        ),
+    )
+
     aggregates = (
         session.query(
             Invoice.student_name.label("student_name"),
@@ -743,8 +755,7 @@ def list_vendor_invoices(
             func.max(Invoice.id).label("latest_invoice_id"),
         )
         .filter(Invoice.vendor_id == vendor_id)
-        .filter(Invoice.invoice_date >= reference_start)
-        .filter(Invoice.invoice_date < reference_end)
+        .filter(period_filter)
         .group_by(Invoice.student_name)
         .all()
     )
@@ -796,35 +807,6 @@ def list_vendor_invoices(
                 "status": status_value,
                 "uploaded_at": uploaded_at,
             }
-        else:
-            group = student_groups[group_key]
-            group["invoice_ids"].append(invoice.id)
-            group["amount"] += amount_value
-
-            if uploaded_at and (
-                not group.get("uploaded_at")
-                or uploaded_at > str(group.get("uploaded_at"))
-            ):
-                group["uploaded_at"] = uploaded_at
-                group["invoice_id"] = invoice.id
-                if status_value:
-                    group["status"] = status_value
-
-            if not group.get("s3_key"):
-                s3_key = getattr(invoice, "s3_key", None) or getattr(
-                    invoice, "pdf_s3_key", None
-                )
-                if s3_key:
-                    group["s3_key"] = s3_key
-
-            if status_value and not group.get("status"):
-                group["status"] = status_value
-
-    for entry in student_groups.values():
-        entry["amount"] = float(
-            Decimal(entry.get("amount") or 0).quantize(
-                Decimal("0.01"), rounding=ROUND_HALF_UP
-            )
         )
         results.append(entry)
 
