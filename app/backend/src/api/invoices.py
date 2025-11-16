@@ -713,9 +713,6 @@ def list_vendor_invoices(
         month_segment,
     ) = build_invoice_storage_components(vendor_company, reference_date)
 
-    legacy_month_token = f"{year_segment}-{month_segment}"
-    legacy_prefix = f"invoices/{company_segment}/{legacy_month_token}/"
-
     LOGGER.info(
         "district_invoice_listing_requested",
         vendor_id=vendor_id,
@@ -724,61 +721,6 @@ def list_vendor_invoices(
         month=month_segment,
         user=current_user.email,
     )
-
-    settings = get_settings()
-    bucket_name = settings.aws_s3_bucket or "invoice-agent-files"
-    if bucket_name.lower() == "local":
-        bucket_name = "invoice-agent-files"
-
-    client = get_s3_client()
-
-    def _collect_invoice_objects(target_prefix: str) -> list[dict[str, object]]:
-        paginator = client.get_paginator("list_objects_v2")
-        objects: list[dict[str, object]] = []
-        for page in paginator.paginate(Bucket=bucket_name, Prefix=target_prefix):
-            contents = page.get("Contents", []) or []
-            for entry in contents:
-                key = entry.get("Key")
-                if not key:
-                    continue
-                if str(key).endswith("/"):
-                    continue
-                objects.append(entry)
-        return objects
-
-    invoice_objects: list[dict[str, object]] = []
-    active_prefix = prefix
-
-    try:
-        invoice_objects = _collect_invoice_objects(prefix)
-    except (ClientError, BotoCoreError) as exc:
-        LOGGER.error(
-            "district_invoice_listing_s3_error",
-            vendor_id=vendor_id,
-            company=company_segment,
-            year=year_segment,
-            month=month_segment,
-            prefix=prefix,
-            error=str(exc),
-        )
-
-    if not invoice_objects:
-        try:
-            legacy_objects = _collect_invoice_objects(legacy_prefix)
-        except (ClientError, BotoCoreError) as exc:
-            LOGGER.error(
-                "district_invoice_listing_legacy_s3_error",
-                vendor_id=vendor_id,
-                company=company_segment,
-                year=year_segment,
-                month=month_segment,
-                prefix=legacy_prefix,
-                error=str(exc),
-            )
-        else:
-            if legacy_objects:
-                invoice_objects = legacy_objects
-                active_prefix = legacy_prefix
 
     invoices = (
         session.query(Invoice)
@@ -793,107 +735,70 @@ def list_vendor_invoices(
     target_month = month
     target_year = year
 
-    invoice_lookup: dict[str, Invoice] = {}
-    invoice_lookup_by_name: dict[str, Invoice] = {}
-
     filtered_invoices: list[Invoice] = []
     for invoice in invoices:
         period_year, period_month = _determine_invoice_period(invoice)
         if period_year != target_year or period_month != target_month:
             continue
         filtered_invoices.append(invoice)
-        for attr in ("s3_key", "pdf_s3_key"):
-            key_value = getattr(invoice, attr, None)
-            if key_value:
-                normalized_key = str(key_value).strip()
-                sanitized_key = sanitize_object_key(normalized_key)
-                invoice_lookup[normalized_key] = invoice
-                invoice_lookup[sanitized_key] = invoice
-                invoice_lookup_by_name[Path(normalized_key).name] = invoice
-                invoice_lookup_by_name[Path(sanitized_key).name] = invoice
-
-    matched_invoice_ids: set[int] = set()
-
-    seen_s3_keys: set[str] = set()
-    for entry in invoice_objects:
-        key = str(entry.get("Key", ""))
-        if not key or key in seen_s3_keys:
-            continue
-        if Path(key).suffix.lower() == ".zip":
-            continue
-        seen_s3_keys.add(key)
-
-        invoice = invoice_lookup.get(key) or invoice_lookup.get(sanitize_object_key(key))
-        if invoice is None:
-            invoice = invoice_lookup_by_name.get(Path(key).name)
-
-        if invoice:
-            matched_invoice_ids.add(invoice.id)
-            amount_decimal = Decimal(invoice.total_cost or 0).quantize(
-                Decimal("0.01"), rounding=ROUND_HALF_UP
-            )
-            uploaded_at = _format_uploaded_at(
-                invoice.invoice_date or getattr(invoice, "created_at", None)
-            )
-        else:
-            amount_decimal = Decimal(0).quantize(
-                Decimal("0.01"), rounding=ROUND_HALF_UP
-            )
-            uploaded_at = None
-
-        if not uploaded_at:
-            uploaded_at = _format_uploaded_at(entry.get("LastModified"))
-
-        results.append(
-            {
-                "invoice_id": invoice.id if invoice else None,
-                "vendor_id": vendor_id,
-                "company": vendor_company_display,
-                "invoice_name": Path(key).name,
-                "s3_key": key,
-                "amount": float(amount_decimal),
-                "status": (invoice.status if invoice else "") or "",
-                "uploaded_at": uploaded_at,
-            }
-        )
-
+    student_groups: dict[str, dict[str, object]] = {}
     for invoice in filtered_invoices:
-        if invoice.id in matched_invoice_ids:
-            continue
+        student_name = (invoice.student_name or "").strip()
+        group_key = student_name.lower() if student_name else f"invoice-{invoice.id}"
 
-        s3_key = getattr(invoice, "s3_key", None) or getattr(
-            invoice, "pdf_s3_key", None
-        )
-        if s3_key and Path(s3_key).suffix.lower() == ".zip":
-            continue
-
-        if s3_key:
-            invoice_name = Path(s3_key).name
-        else:
-            candidate_name = (invoice.invoice_number or invoice.student_name or "invoice").strip()
-            if not candidate_name.lower().endswith(".pdf"):
-                candidate_name = f"{candidate_name}.pdf"
-            invoice_name = candidate_name
-
-        amount = Decimal(invoice.total_cost or 0).quantize(
+        amount_value = Decimal(invoice.total_cost or 0).quantize(
             Decimal("0.01"), rounding=ROUND_HALF_UP
         )
         uploaded_at = _format_uploaded_at(
             invoice.invoice_date or getattr(invoice, "created_at", None)
         )
+        status_value = (invoice.status or "").strip()
 
-        results.append(
-            {
+        if group_key not in student_groups:
+            student_groups[group_key] = {
+                "invoice_ids": [invoice.id],
                 "invoice_id": invoice.id,
                 "vendor_id": invoice.vendor_id,
                 "company": vendor_company_display,
-                "invoice_name": invoice_name,
-                "s3_key": s3_key,
-                "amount": float(amount),
-                "status": invoice.status or "",
+                "invoice_name": student_name or f"Invoice {invoice.id}",
+                "student_name": student_name or None,
+                "s3_key": getattr(invoice, "s3_key", None)
+                or getattr(invoice, "pdf_s3_key", None),
+                "amount": amount_value,
+                "status": status_value,
                 "uploaded_at": uploaded_at,
             }
+        else:
+            group = student_groups[group_key]
+            group["invoice_ids"].append(invoice.id)
+            group["amount"] += amount_value
+
+            if uploaded_at and (
+                not group.get("uploaded_at")
+                or uploaded_at > str(group.get("uploaded_at"))
+            ):
+                group["uploaded_at"] = uploaded_at
+                group["invoice_id"] = invoice.id
+                if status_value:
+                    group["status"] = status_value
+
+            if not group.get("s3_key"):
+                s3_key = getattr(invoice, "s3_key", None) or getattr(
+                    invoice, "pdf_s3_key", None
+                )
+                if s3_key:
+                    group["s3_key"] = s3_key
+
+            if status_value and not group.get("status"):
+                group["status"] = status_value
+
+    for entry in student_groups.values():
+        entry["amount"] = float(
+            Decimal(entry.get("amount") or 0).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
         )
+        results.append(entry)
 
     results.sort(
         key=lambda entry: (
@@ -909,7 +814,7 @@ def list_vendor_invoices(
         company=company_segment,
         year=year_segment,
         month=month_segment,
-        prefix_used=active_prefix,
+        prefix_used=prefix,
         count=len(results),
     )
 
