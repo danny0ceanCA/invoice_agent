@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+import re
 from datetime import datetime
 from typing import Any
 
@@ -46,17 +47,25 @@ def _extract_service_month(
     """Return the month name and year parsed from a service month string/number."""
 
     month_name = None
+    year = None
     if service_month_num and 1 <= service_month_num <= 12:
         month_name = MONTH_ORDER[service_month_num - 1]
 
     if service_month:
-        parts = service_month.strip().title().split()
-        if parts and parts[0] in MONTH_INDEX:
-            month_name = month_name or parts[0]
-            if len(parts) >= 2 and parts[1].isdigit():
-                return month_name, int(parts[1])
+        normalized = re.sub(r"[_\-]+", " ", service_month).replace(",", " ").strip()
+        month_match = re.search(
+            r"(January|February|March|April|May|June|July|August|September|October|November|December)",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        if month_match:
+            month_name = month_name or month_match.group(1).title()
 
-    return month_name, None
+        year_match = re.search(r"(19|20)\d{2}", normalized)
+        if year_match:
+            year = int(year_match.group(0))
+
+    return month_name, year
 
 
 def _format_processed_on(invoice_date: datetime | None) -> str | None:
