@@ -407,29 +407,30 @@ export default function VendorDashboard({ vendorId }) {
                   Manage access
                 </span>
               </button>
-            </section>
-            <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-              <div className="flex flex-wrap items-start justify-between gap-4">
-              <div>
-                <h2 className="text-lg font-semibold text-slate-900">
-                  Upload timesheets
-                </h2>
-                <p className="mt-1 text-sm text-slate-600">
-                  Upload a raw Excel timesheet to kick off automated invoice generation.
-                  Status updates appear below within a few seconds of submission.
-                </p>
+
+              <div className="flex h-full flex-col justify-between rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                <div>
+                  <h2 className="text-sm font-semibold text-slate-900">Generate invoice</h2>
+                  <p className="mt-2 text-sm text-slate-600">
+                    Upload your latest timesheet and add invoice details from one dedicated workspace.
+                  </p>
+                </div>
+                <div className="mt-4 space-y-2">
+                  <button
+                    type="button"
+                    onClick={openUploadPrompt}
+                    disabled={isUploading}
+                    className="inline-flex items-center justify-center rounded-xl border border-dashed border-amber-400 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-700 shadow-sm transition hover:border-amber-500 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-70"
+                  >
+                    {isUploading ? "Uploading…" : "Start invoice"}
+                  </button>
+                  <p className="text-xs text-slate-500">
+                    We will prompt for service month and invoice date before processing your file.
+                  </p>
+                  {error && <p className="text-sm text-red-600">{error}</p>}
+                </div>
               </div>
-              <button
-                type="button"
-                onClick={openUploadPrompt}
-                disabled={isUploading}
-                className="inline-flex items-center justify-center rounded-xl border border-dashed border-amber-400 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-700 shadow-sm transition hover:border-amber-500 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-70"
-              >
-                {isUploading ? "Uploading…" : "Select file"}
-              </button>
-            </div>
-            {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
-          </section>
+            </section>
 
             <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
               <div className="flex flex-wrap items-center justify-between gap-4">
