@@ -796,7 +796,37 @@ def list_vendor_invoices(
                 "status": status_value,
                 "uploaded_at": uploaded_at,
             }
+        else:
+            group = student_groups[group_key]
+            group["invoice_ids"].append(invoice.id)
+            group["amount"] += amount_value
+
+            if uploaded_at and (
+                not group.get("uploaded_at")
+                or uploaded_at > str(group.get("uploaded_at"))
+            ):
+                group["uploaded_at"] = uploaded_at
+                group["invoice_id"] = invoice.id
+                if status_value:
+                    group["status"] = status_value
+
+            if not group.get("s3_key"):
+                s3_key = getattr(invoice, "s3_key", None) or getattr(
+                    invoice, "pdf_s3_key", None
+                )
+                if s3_key:
+                    group["s3_key"] = s3_key
+
+            if status_value and not group.get("status"):
+                group["status"] = status_value
+
+    for entry in student_groups.values():
+        entry["amount"] = float(
+            Decimal(entry.get("amount") or 0).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
         )
+        results.append(entry)
 
     results.sort(
         key=lambda entry: (
