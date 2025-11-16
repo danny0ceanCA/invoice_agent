@@ -1480,9 +1480,79 @@ export default function DistrictDashboard({
     selectedVendorName,
   ]);
 
-  const studentInvoiceCount = activeInvoiceDetails?.students?.length ?? 0;
   const invoiceDocumentCount = invoiceDocuments.length;
-  const zipInvoiceCount = invoiceDocumentCount || studentInvoiceCount;
+
+  const fallbackInvoiceDocuments = useMemo(() => {
+    if (!activeInvoiceDetails?.students?.length) {
+      return [];
+    }
+
+    const totalAmount = activeInvoiceDetails.students.reduce((sum, entry) => {
+      const amountValue = parseCurrencyValue(entry?.amount ?? entry?.amountValue);
+      return sum + (Number.isFinite(amountValue) ? amountValue : 0);
+    }, 0);
+
+    const latestUpload = activeInvoiceDetails.students.reduce((latest, entry) => {
+      if (!entry?.uploadedAt) {
+        return latest;
+      }
+
+      const parsed = new Date(entry.uploadedAt);
+      if (Number.isNaN(parsed.getTime())) {
+        return latest;
+      }
+
+      if (!latest || parsed > latest) {
+        return parsed;
+      }
+
+      return latest;
+    }, null);
+
+    const invoiceNameBase = `${activeInvoiceDetails.month ?? "Invoice"} ${
+      activeInvoiceDetails.year ?? ""
+    }`.trim();
+    const invoiceName = invoiceNameBase || "Student entries summary";
+    const uploadedAtValue = latestUpload?.toISOString() ?? null;
+
+    return [
+      {
+        invoiceId: activeInvoiceDetails?.id ?? null,
+        vendorId: selectedVendorId ?? null,
+        company: selectedVendorName,
+        invoiceName,
+        invoiceNameDisplay: formatInvoiceDisplayName(invoiceName),
+        s3Key: activeInvoiceDetails?.pdfS3Key ?? null,
+        amountValue: totalAmount,
+        amountDisplay: currencyFormatter.format(totalAmount ?? 0),
+        status: activeInvoiceDetails?.status ?? "",
+        uploadedAt: uploadedAtValue,
+        uploadedAtDisplay: uploadedAtValue
+          ? formatDisplayDateTime(uploadedAtValue) ?? ""
+          : "",
+      },
+    ];
+  }, [
+    activeInvoiceDetails?.id,
+    activeInvoiceDetails?.month,
+    activeInvoiceDetails?.pdfS3Key,
+    activeInvoiceDetails?.status,
+    activeInvoiceDetails?.students,
+    activeInvoiceDetails?.year,
+    selectedVendorId,
+    selectedVendorName,
+  ]);
+
+  const displayedInvoiceDocuments = useMemo(() => {
+    if (invoiceDocuments.length) {
+      return invoiceDocuments;
+    }
+
+    return fallbackInvoiceDocuments;
+  }, [fallbackInvoiceDocuments, invoiceDocuments]);
+
+  const invoiceDisplayCount = displayedInvoiceDocuments.length;
+  const zipInvoiceCount = invoiceDocumentCount || invoiceDisplayCount;
 
   const fallbackInvoiceDocuments = useMemo(() => {
     if (!activeInvoiceDetails?.students?.length) {
