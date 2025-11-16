@@ -809,6 +809,7 @@ export default function DistrictDashboard({
   const [invoiceDocuments, setInvoiceDocuments] = useState([]);
   const [invoiceDocumentsLoading, setInvoiceDocumentsLoading] = useState(false);
   const [invoiceDocumentsError, setInvoiceDocumentsError] = useState(null);
+  const [invoiceDocumentCount, setInvoiceDocumentCount] = useState(0);
   const invoiceDocumentsCacheRef = useRef({});
   const [exportingInvoiceCsv, setExportingInvoiceCsv] = useState(false);
 
@@ -1329,6 +1330,7 @@ export default function DistrictDashboard({
     const vendorNumericId = Number(selectedVendorId);
     if (!Number.isFinite(vendorNumericId) || vendorNumericId <= 0) {
       setInvoiceDocuments([]);
+      setInvoiceDocumentCount(0);
       setInvoiceDocumentsError(
         "We couldn't determine the vendor for these invoices.",
       );
@@ -1340,6 +1342,7 @@ export default function DistrictDashboard({
 
     if (!selectedMonthNumber || typeof activeInvoiceDetails.year !== "number") {
       setInvoiceDocuments([]);
+      setInvoiceDocumentCount(0);
       setInvoiceDocumentsError(
         "We couldn't determine which month to load invoices for.",
       );
@@ -1355,6 +1358,7 @@ export default function DistrictDashboard({
     const cached = invoiceDocumentsCacheRef.current[cacheKey];
     if (cached) {
       setInvoiceDocuments(cached.records ?? []);
+      setInvoiceDocumentCount(cached.count ?? cached.records?.length ?? 0);
       setInvoiceDocumentsError(null);
       setInvoiceDocumentsLoading(false);
       return () => {
@@ -1363,6 +1367,7 @@ export default function DistrictDashboard({
     }
 
     setInvoiceDocuments([]);
+    setInvoiceDocumentCount(0);
     setInvoiceDocumentsLoading(true);
     setInvoiceDocumentsError(null);
 
@@ -1397,12 +1402,16 @@ export default function DistrictDashboard({
           const statusValue =
             typeof entry?.status === "string" ? entry.status.trim() : "";
 
+          const studentName =
+            typeof entry?.student_name === "string" && entry.student_name.trim().length
+              ? entry.student_name.trim()
+              : null;
           const invoiceName =
             (typeof entry?.invoice_name === "string" && entry.invoice_name.trim()) ||
             `Invoice ${invoiceId ?? ""}`.trim() ||
             "Invoice";
-          const invoiceNameDisplay = formatInvoiceDisplayName(invoiceName);
-          const normalizedName = (invoiceNameDisplay || invoiceName || "")
+          const invoiceNameDisplay = studentName || formatInvoiceDisplayName(invoiceName);
+          const normalizedName = (studentName || invoiceNameDisplay || invoiceName || "")
             .toLowerCase()
             .trim();
           const key = normalizedName || `record-${invoiceId ?? index}`;
@@ -1414,8 +1423,9 @@ export default function DistrictDashboard({
               company:
                 (typeof entry?.company === "string" && entry.company.trim()) ||
                 selectedVendorName,
-              invoiceName,
+              invoiceName: studentName || invoiceName,
               invoiceNameDisplay,
+              studentName,
               s3Key:
                 typeof entry?.s3_key === "string" && entry.s3_key.trim().length
                   ? entry.s3_key.trim()
@@ -1451,6 +1461,7 @@ export default function DistrictDashboard({
             ...record,
             amountDisplay: currencyFormatter.format(record.amountValue ?? 0),
             uploadedAtDisplay: formatDisplayDateTime(record.uploadedAt),
+            studentName: record.studentName ?? record.invoiceNameDisplay,
           }))
           .sort((a, b) => {
             const aTimestamp = Number.isFinite(a.uploadedAtTimestamp)
@@ -1469,9 +1480,11 @@ export default function DistrictDashboard({
 
         invoiceDocumentsCacheRef.current[cacheKey] = {
           records: normalized,
+          count: records.length,
         };
 
         setInvoiceDocuments(normalized);
+        setInvoiceDocumentCount(records.length);
         setInvoiceDocumentsError(null);
       } catch (error) {
         if (ignore) {
@@ -1485,6 +1498,7 @@ export default function DistrictDashboard({
           month: selectedMonthNumber,
         });
         setInvoiceDocuments([]);
+        setInvoiceDocumentCount(0);
         setInvoiceDocumentsError(
           "We couldn't load the invoices for this month. Try again in a moment.",
         );
@@ -1507,7 +1521,7 @@ export default function DistrictDashboard({
     selectedVendorName,
   ]);
 
-  const invoiceDocumentCount = invoiceDocuments.length;
+  const invoiceDocumentDisplayCount = invoiceDocuments.length;
 
   const aggregatedFallbackInvoiceDocuments = useMemo(() => {
     if (!activeInvoiceDetails?.students?.length) {
@@ -1555,7 +1569,8 @@ export default function DistrictDashboard({
   }, [aggregatedFallbackInvoiceDocuments, invoiceDocuments]);
 
   const invoiceDisplayCount = displayedInvoiceDocuments.length;
-  const zipInvoiceCount = invoiceDocumentCount || invoiceDisplayCount;
+  const zipInvoiceCount =
+    invoiceDocumentCount || invoiceDocumentDisplayCount || invoiceDisplayCount;
 
   const openInvoiceUrl = useCallback((url, errorMessage) => {
     if (!url) {
