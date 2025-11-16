@@ -808,6 +808,7 @@ def list_vendor_invoices(
                 "uploaded_at": uploaded_at,
             }
         )
+        results.append(entry)
 
     results.sort(
         key=lambda entry: (
