@@ -1381,31 +1381,31 @@ export default function DistrictDashboard({
         }
 
         const records = Array.isArray(response) ? response : [];
-        const normalized = records
-          .map((entry) => {
-            const invoiceId = entry?.invoice_id ?? null;
-            const amountValue =
-              typeof entry?.amount === "number"
-                ? entry.amount
-                : parseCurrencyValue(entry?.amount ?? 0);
-            const uploadedAt =
-              typeof entry?.uploaded_at === "string"
-                ? entry.uploaded_at.trim()
-                : null;
-            const uploadedAtTimestamp = uploadedAt
-              ? Date.parse(uploadedAt)
-              : Number.NaN;
-            const statusValue =
-              typeof entry?.status === "string"
-                ? entry.status.trim()
-                : "";
+        const aggregated = new Map();
 
-            const invoiceName =
-              (typeof entry?.invoice_name === "string" &&
-                entry.invoice_name.trim()) ||
-              `Invoice ${invoiceId ?? ""}`.trim() ||
-              "Invoice";
-            return {
+        records.forEach((entry, index) => {
+          const invoiceId = entry?.invoice_id ?? null;
+          const amountValue =
+            typeof entry?.amount === "number"
+              ? entry.amount
+              : parseCurrencyValue(entry?.amount ?? 0);
+          const uploadedAt =
+            typeof entry?.uploaded_at === "string"
+              ? entry.uploaded_at.trim()
+              : null;
+          const uploadedAtTimestamp = uploadedAt ? Date.parse(uploadedAt) : null;
+          const statusValue =
+            typeof entry?.status === "string" ? entry.status.trim() : "";
+
+          const invoiceName =
+            (typeof entry?.invoice_name === "string" && entry.invoice_name.trim()) ||
+            `Invoice ${invoiceId ?? ""}`.trim() ||
+            "Invoice";
+          const normalizedName = invoiceName.toLowerCase();
+          const key = normalizedName || `record-${invoiceId ?? index}`;
+
+          if (!aggregated.has(key)) {
+            aggregated.set(key, {
               invoiceId,
               vendorId: entry?.vendor_id ?? vendorNumericId,
               company:
@@ -1417,14 +1417,38 @@ export default function DistrictDashboard({
                 typeof entry?.s3_key === "string" && entry.s3_key.trim().length
                   ? entry.s3_key.trim()
                   : null,
-              amountValue,
-              amountDisplay: currencyFormatter.format(amountValue ?? 0),
+              amountValue: 0,
               status: statusValue,
               uploadedAt,
-              uploadedAtDisplay: formatDisplayDateTime(uploadedAt),
               uploadedAtTimestamp,
-            };
-          })
+            });
+          }
+
+          const record = aggregated.get(key);
+          record.amountValue += Number.isFinite(amountValue) ? amountValue : 0;
+          if (
+            Number.isFinite(uploadedAtTimestamp) &&
+            (!Number.isFinite(record.uploadedAtTimestamp) ||
+              uploadedAtTimestamp > record.uploadedAtTimestamp)
+          ) {
+            record.uploadedAt = uploadedAt;
+            record.uploadedAtTimestamp = uploadedAtTimestamp;
+          }
+
+          if (!record.s3Key && typeof entry?.s3_key === "string") {
+            const trimmedKey = entry.s3_key.trim();
+            if (trimmedKey) {
+              record.s3Key = trimmedKey;
+            }
+          }
+        });
+
+        const normalized = Array.from(aggregated.values())
+          .map((record) => ({
+            ...record,
+            amountDisplay: currencyFormatter.format(record.amountValue ?? 0),
+            uploadedAtDisplay: formatDisplayDateTime(record.uploadedAt),
+          }))
           .sort((a, b) => {
             const aTimestamp = Number.isFinite(a.uploadedAtTimestamp)
               ? a.uploadedAtTimestamp
@@ -1480,9 +1504,55 @@ export default function DistrictDashboard({
     selectedVendorName,
   ]);
 
-  const studentInvoiceCount = activeInvoiceDetails?.students?.length ?? 0;
   const invoiceDocumentCount = invoiceDocuments.length;
-  const zipInvoiceCount = invoiceDocumentCount || studentInvoiceCount;
+
+  const aggregatedFallbackInvoiceDocuments = useMemo(() => {
+    if (!activeInvoiceDetails?.students?.length) {
+      return [];
+    }
+
+    return activeInvoiceDetails.students.map((student, index) => {
+      const amountValue = parseCurrencyValue(student?.amount ?? student?.amountValue);
+      const studentName =
+        typeof student?.name === "string" && student.name.trim().length
+          ? student.name.trim()
+          : "Unknown student";
+
+      return {
+        invoiceId: student?.originalLineItemId ?? student?.id ?? index,
+        vendorId: selectedVendorId ?? null,
+        company: selectedVendorName,
+        invoiceName: studentName,
+        invoiceNameDisplay: studentName,
+        s3Key: student?.pdfS3Key ?? null,
+        amountValue,
+        amountDisplay: currencyFormatter.format(amountValue ?? 0),
+        status: activeInvoiceDetails?.status ?? "",
+        uploadedAt: null,
+        uploadedAtDisplay: "",
+      };
+    });
+  }, [
+    activeInvoiceDetails?.id,
+    activeInvoiceDetails?.month,
+    activeInvoiceDetails?.pdfS3Key,
+    activeInvoiceDetails?.status,
+    activeInvoiceDetails?.students,
+    activeInvoiceDetails?.year,
+    selectedVendorId,
+    selectedVendorName,
+  ]);
+
+  const displayedInvoiceDocuments = useMemo(() => {
+    if (invoiceDocuments.length) {
+      return invoiceDocuments;
+    }
+
+    return aggregatedFallbackInvoiceDocuments;
+  }, [aggregatedFallbackInvoiceDocuments, invoiceDocuments]);
+
+  const invoiceDisplayCount = displayedInvoiceDocuments.length;
+  const zipInvoiceCount = invoiceDocumentCount || invoiceDisplayCount;
 
   const openInvoiceUrl = useCallback((url, errorMessage) => {
     if (!url) {
@@ -1667,7 +1737,7 @@ export default function DistrictDashboard({
   );
 
   const handleExportInvoicesCsv = useCallback(() => {
-    if (!invoiceDocuments.length) {
+    if (!invoiceDisplayCount) {
       toast.error("No invoices are available to export for this month.");
       return;
     }
@@ -1681,7 +1751,7 @@ export default function DistrictDashboard({
 
     try {
       const header = ["Vendor", "Invoice Name", "Amount", "Uploaded At"];
-      const rows = invoiceDocuments.map((record) => [
+      const rows = displayedInvoiceDocuments.map((record) => [
         record.company ?? selectedVendorName,
         record.invoiceName ?? "",
         Number.isFinite(record.amountValue)
@@ -1741,7 +1811,8 @@ export default function DistrictDashboard({
     }
   }, [
     activeInvoiceDetails,
-    invoiceDocuments,
+    displayedInvoiceDocuments,
+    invoiceDisplayCount,
     selectedMonthNumber,
     selectedVendorId,
     selectedVendorName,
@@ -2148,9 +2219,9 @@ export default function DistrictDashboard({
                       <button
                         type="button"
                         onClick={handleExportInvoicesCsv}
-                        disabled={exportingInvoiceCsv || !invoiceDocuments.length}
+                        disabled={exportingInvoiceCsv || !invoiceDisplayCount}
                         className={`inline-flex items-center rounded-full px-4 py-2 text-sm font-semibold shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60 ${
-                          exportingInvoiceCsv || !invoiceDocuments.length
+                          exportingInvoiceCsv || !invoiceDisplayCount
                             ? "cursor-not-allowed bg-slate-200 text-slate-500"
                             : "bg-amber-500 text-white hover:bg-amber-600"
                         }`}
@@ -2166,12 +2237,12 @@ export default function DistrictDashboard({
                     {invoiceDocumentsLoading ? (
                       <p className="mt-4 text-sm text-slate-600">Loading invoices…</p>
                     ) : null}
-                    {!invoiceDocumentsLoading && !invoiceDocumentsError && !invoiceDocuments.length ? (
+                    {!invoiceDocumentsLoading && !invoiceDocumentsError && !invoiceDisplayCount ? (
                       <p className="mt-4 text-sm text-slate-500">
                         No invoices were uploaded for this month yet.
                       </p>
                     ) : null}
-                    {invoiceDocuments.length ? (
+                    {invoiceDisplayCount ? (
                       <div className="mt-4 overflow-x-auto">
                         <table className="min-w-full divide-y divide-slate-200 text-sm">
                           <thead>
@@ -2188,7 +2259,7 @@ export default function DistrictDashboard({
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-200">
-                            {invoiceDocuments.map((document, index) => (
+                            {displayedInvoiceDocuments.map((document, index) => (
                               <tr
                                 key={`${document.invoiceId ?? document.invoiceName ?? "invoice"}-${document.s3Key ?? index}`}
                               >
