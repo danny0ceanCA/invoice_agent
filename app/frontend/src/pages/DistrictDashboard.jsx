@@ -1598,7 +1598,18 @@ export default function DistrictDashboard({
             record.invoiceName ||
             "Unknown student",
           amountValue: record.amountValue,
-          studentId: record.studentId ?? null,
+          studentId:
+            record.studentId ||
+            record.studentName ||
+            record.invoiceNameDisplay ||
+            record.invoiceName ||
+            null,
+          studentKey:
+            record.studentKey ||
+            record.studentName ||
+            record.invoiceNameDisplay ||
+            record.invoiceName ||
+            null,
           originalStudentId: record.originalStudentId ?? null,
           originalLineItemId: record.invoiceId ?? record.originalLineItemId ?? null,
           pdfUrl: record.pdfUrl ?? null,
@@ -1617,6 +1628,8 @@ export default function DistrictDashboard({
         amountDisplay:
           record.amount ?? currencyFormatter.format(record.amountValue ?? 0),
         s3Key: record.pdfS3Key ?? null,
+        studentId: record.studentId ?? record.name ?? null,
+        studentKey: record.studentKey ?? record.name ?? null,
         uploadedAtDisplay:
           record.uploadedAtDisplay ?? formatDisplayDateTime(record.uploadedAt),
       }));
