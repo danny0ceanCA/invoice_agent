@@ -1484,6 +1484,44 @@ export default function DistrictDashboard({
   const invoiceDocumentCount = invoiceDocuments.length;
   const zipInvoiceCount = invoiceDocumentCount || studentInvoiceCount;
 
+  const fallbackInvoiceDocuments = useMemo(() => {
+    if (!activeInvoiceDetails?.students?.length) {
+      return [];
+    }
+
+    return activeInvoiceDetails.students.map((entry, index) => {
+      const invoiceName =
+        (typeof entry?.name === "string" && entry.name.trim()) ||
+        `Invoice ${entry?.id ?? index + 1}`;
+      const amountValue = parseCurrencyValue(entry?.amount ?? entry?.amountValue);
+      const uploadedAt = entry?.uploadedAt ?? null;
+
+      return {
+        invoiceId: entry?.id ?? null,
+        vendorId: entry?.vendorId ?? selectedVendorId ?? null,
+        company: selectedVendorName,
+        invoiceName,
+        invoiceNameDisplay: formatInvoiceDisplayName(invoiceName),
+        s3Key: entry?.pdfS3Key ?? entry?.pdf_s3_key ?? null,
+        amountValue,
+        amountDisplay: currencyFormatter.format(amountValue ?? 0),
+        status: entry?.status ?? "",
+        uploadedAt,
+        uploadedAtDisplay: formatDisplayDateTime(uploadedAt) ?? "",
+      };
+    });
+  }, [activeInvoiceDetails?.students, selectedVendorId, selectedVendorName]);
+
+  const displayedInvoiceDocuments = useMemo(() => {
+    if (invoiceDocuments.length) {
+      return invoiceDocuments;
+    }
+
+    return fallbackInvoiceDocuments;
+  }, [fallbackInvoiceDocuments, invoiceDocuments]);
+
+  const invoiceDisplayCount = displayedInvoiceDocuments.length;
+
   const openInvoiceUrl = useCallback((url, errorMessage) => {
     if (!url) {
       if (errorMessage) {
@@ -1667,7 +1705,7 @@ export default function DistrictDashboard({
   );
 
   const handleExportInvoicesCsv = useCallback(() => {
-    if (!invoiceDocuments.length) {
+    if (!invoiceDisplayCount) {
       toast.error("No invoices are available to export for this month.");
       return;
     }
@@ -1681,7 +1719,7 @@ export default function DistrictDashboard({
 
     try {
       const header = ["Vendor", "Invoice Name", "Amount", "Uploaded At"];
-      const rows = invoiceDocuments.map((record) => [
+      const rows = displayedInvoiceDocuments.map((record) => [
         record.company ?? selectedVendorName,
         record.invoiceName ?? "",
         Number.isFinite(record.amountValue)
@@ -1741,7 +1779,8 @@ export default function DistrictDashboard({
     }
   }, [
     activeInvoiceDetails,
-    invoiceDocuments,
+    displayedInvoiceDocuments,
+    invoiceDisplayCount,
     selectedMonthNumber,
     selectedVendorId,
     selectedVendorName,
@@ -2148,9 +2187,9 @@ export default function DistrictDashboard({
                       <button
                         type="button"
                         onClick={handleExportInvoicesCsv}
-                        disabled={exportingInvoiceCsv || !invoiceDocuments.length}
+                        disabled={exportingInvoiceCsv || !invoiceDisplayCount}
                         className={`inline-flex items-center rounded-full px-4 py-2 text-sm font-semibold shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60 ${
-                          exportingInvoiceCsv || !invoiceDocuments.length
+                          exportingInvoiceCsv || !invoiceDisplayCount
                             ? "cursor-not-allowed bg-slate-200 text-slate-500"
                             : "bg-amber-500 text-white hover:bg-amber-600"
                         }`}
@@ -2166,12 +2205,12 @@ export default function DistrictDashboard({
                     {invoiceDocumentsLoading ? (
                       <p className="mt-4 text-sm text-slate-600">Loading invoices…</p>
                     ) : null}
-                    {!invoiceDocumentsLoading && !invoiceDocumentsError && !invoiceDocuments.length ? (
+                    {!invoiceDocumentsLoading && !invoiceDocumentsError && !invoiceDisplayCount ? (
                       <p className="mt-4 text-sm text-slate-500">
                         No invoices were uploaded for this month yet.
                       </p>
                     ) : null}
-                    {invoiceDocuments.length ? (
+                    {invoiceDisplayCount ? (
                       <div className="mt-4 overflow-x-auto">
                         <table className="min-w-full divide-y divide-slate-200 text-sm">
                           <thead>
@@ -2188,7 +2227,7 @@ export default function DistrictDashboard({
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-200">
-                            {invoiceDocuments.map((document, index) => (
+                            {displayedInvoiceDocuments.map((document, index) => (
                               <tr
                                 key={`${document.invoiceId ?? document.invoiceName ?? "invoice"}-${document.s3Key ?? index}`}
                               >
