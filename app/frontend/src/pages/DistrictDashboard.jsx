@@ -230,6 +230,15 @@ const aggregateStudentEntries = (entries) => {
         ? entry.name.trim()
         : "Unknown student";
 
+    const uploadedAtTimestamp = Number.isFinite(entry.uploadedAtTimestamp)
+      ? entry.uploadedAtTimestamp
+      : (() => {
+          if (!entry.uploadedAt) return null;
+          const parsed = new Date(entry.uploadedAt);
+          return Number.isNaN(parsed.getTime()) ? null : parsed.getTime();
+        })();
+    const uploadedAtDisplay = entry.uploadedAtDisplay ?? null;
+
     if (!groups.has(key)) {
       groups.set(key, {
         id: normalizedId ?? fallbackEntryId ?? key,
@@ -242,6 +251,9 @@ const aggregateStudentEntries = (entries) => {
         timesheetUrls: new Set(),
         originalLineItemIds: new Set(),
         entryCount: 0,
+        uploadedAtTimestamp,
+        uploadedAt: entry.uploadedAt ?? null,
+        uploadedAtDisplay,
       });
     }
 
@@ -265,6 +277,16 @@ const aggregateStudentEntries = (entries) => {
     if (entry.timesheetUrl) group.timesheetUrls.add(entry.timesheetUrl);
     if (entry.originalLineItemId != null) {
       group.originalLineItemIds.add(entry.originalLineItemId);
+    }
+
+    if (
+      Number.isFinite(uploadedAtTimestamp) &&
+      (!Number.isFinite(group.uploadedAtTimestamp) ||
+        uploadedAtTimestamp > group.uploadedAtTimestamp)
+    ) {
+      group.uploadedAtTimestamp = uploadedAtTimestamp;
+      group.uploadedAt = entry.uploadedAt ?? null;
+      group.uploadedAtDisplay = uploadedAtDisplay ?? null;
     }
   });
 
@@ -302,6 +324,12 @@ const aggregateStudentEntries = (entries) => {
         timesheetUrl: timesheetUrls[0] ?? null,
         originalLineItemId: originalLineItemIds[0] ?? null,
         entryCount: group.entryCount,
+        uploadedAt: group.uploadedAt ?? null,
+        uploadedAtDisplay:
+          group.uploadedAtDisplay ??
+          (Number.isFinite(group.uploadedAtTimestamp)
+            ? new Date(group.uploadedAtTimestamp).toISOString()
+            : null),
       };
     })
     .sort((a, b) => {
@@ -809,6 +837,7 @@ export default function DistrictDashboard({
   const [invoiceDocuments, setInvoiceDocuments] = useState([]);
   const [invoiceDocumentsLoading, setInvoiceDocumentsLoading] = useState(false);
   const [invoiceDocumentsError, setInvoiceDocumentsError] = useState(null);
+  const [invoiceDocumentCount, setInvoiceDocumentCount] = useState(0);
   const invoiceDocumentsCacheRef = useRef({});
   const [exportingInvoiceCsv, setExportingInvoiceCsv] = useState(false);
 
@@ -1329,6 +1358,7 @@ export default function DistrictDashboard({
     const vendorNumericId = Number(selectedVendorId);
     if (!Number.isFinite(vendorNumericId) || vendorNumericId <= 0) {
       setInvoiceDocuments([]);
+      setInvoiceDocumentCount(0);
       setInvoiceDocumentsError(
         "We couldn't determine the vendor for these invoices.",
       );
@@ -1340,6 +1370,7 @@ export default function DistrictDashboard({
 
     if (!selectedMonthNumber || typeof activeInvoiceDetails.year !== "number") {
       setInvoiceDocuments([]);
+      setInvoiceDocumentCount(0);
       setInvoiceDocumentsError(
         "We couldn't determine which month to load invoices for.",
       );
@@ -1355,6 +1386,7 @@ export default function DistrictDashboard({
     const cached = invoiceDocumentsCacheRef.current[cacheKey];
     if (cached) {
       setInvoiceDocuments(cached.records ?? []);
+      setInvoiceDocumentCount(cached.count ?? cached.records?.length ?? 0);
       setInvoiceDocumentsError(null);
       setInvoiceDocumentsLoading(false);
       return () => {
@@ -1363,6 +1395,7 @@ export default function DistrictDashboard({
     }
 
     setInvoiceDocuments([]);
+    setInvoiceDocumentCount(0);
     setInvoiceDocumentsLoading(true);
     setInvoiceDocumentsError(null);
 
@@ -1397,12 +1430,16 @@ export default function DistrictDashboard({
           const statusValue =
             typeof entry?.status === "string" ? entry.status.trim() : "";
 
+          const studentName =
+            typeof entry?.student_name === "string" && entry.student_name.trim().length
+              ? entry.student_name.trim()
+              : null;
           const invoiceName =
             (typeof entry?.invoice_name === "string" && entry.invoice_name.trim()) ||
             `Invoice ${invoiceId ?? ""}`.trim() ||
             "Invoice";
-          const invoiceNameDisplay = formatInvoiceDisplayName(invoiceName);
-          const normalizedName = (invoiceNameDisplay || invoiceName || "")
+          const invoiceNameDisplay = studentName || formatInvoiceDisplayName(invoiceName);
+          const normalizedName = (studentName || invoiceNameDisplay || invoiceName || "")
             .toLowerCase()
             .trim();
           const key = normalizedName || `record-${invoiceId ?? index}`;
@@ -1414,8 +1451,9 @@ export default function DistrictDashboard({
               company:
                 (typeof entry?.company === "string" && entry.company.trim()) ||
                 selectedVendorName,
-              invoiceName,
+              invoiceName: studentName || invoiceName,
               invoiceNameDisplay,
+              studentName,
               s3Key:
                 typeof entry?.s3_key === "string" && entry.s3_key.trim().length
                   ? entry.s3_key.trim()
@@ -1451,6 +1489,7 @@ export default function DistrictDashboard({
             ...record,
             amountDisplay: currencyFormatter.format(record.amountValue ?? 0),
             uploadedAtDisplay: formatDisplayDateTime(record.uploadedAt),
+            studentName: record.studentName ?? record.invoiceNameDisplay,
           }))
           .sort((a, b) => {
             const aTimestamp = Number.isFinite(a.uploadedAtTimestamp)
@@ -1469,9 +1508,11 @@ export default function DistrictDashboard({
 
         invoiceDocumentsCacheRef.current[cacheKey] = {
           records: normalized,
+          count: records.length,
         };
 
         setInvoiceDocuments(normalized);
+        setInvoiceDocumentCount(records.length);
         setInvoiceDocumentsError(null);
       } catch (error) {
         if (ignore) {
@@ -1485,6 +1526,7 @@ export default function DistrictDashboard({
           month: selectedMonthNumber,
         });
         setInvoiceDocuments([]);
+        setInvoiceDocumentCount(0);
         setInvoiceDocumentsError(
           "We couldn't load the invoices for this month. Try again in a moment.",
         );
@@ -1507,7 +1549,7 @@ export default function DistrictDashboard({
     selectedVendorName,
   ]);
 
-  const invoiceDocumentCount = invoiceDocuments.length;
+  const invoiceDocumentDisplayCount = invoiceDocuments.length;
 
   const aggregatedFallbackInvoiceDocuments = useMemo(() => {
     if (!activeInvoiceDetails?.students?.length) {
@@ -1548,14 +1590,57 @@ export default function DistrictDashboard({
 
   const displayedInvoiceDocuments = useMemo(() => {
     if (invoiceDocuments.length) {
-      return invoiceDocuments;
+      const grouped = aggregateStudentEntries(
+        invoiceDocuments.map((record) => ({
+          name:
+            record.studentName ||
+            record.invoiceNameDisplay ||
+            record.invoiceName ||
+            "Unknown student",
+          amountValue: record.amountValue,
+          studentId:
+            record.studentId ||
+            record.studentName ||
+            record.invoiceNameDisplay ||
+            record.invoiceName ||
+            null,
+          studentKey:
+            record.studentKey ||
+            record.studentName ||
+            record.invoiceNameDisplay ||
+            record.invoiceName ||
+            null,
+          originalStudentId: record.originalStudentId ?? null,
+          originalLineItemId: record.invoiceId ?? record.originalLineItemId ?? null,
+          pdfUrl: record.pdfUrl ?? null,
+          pdfS3Key: record.s3Key ?? record.pdfS3Key ?? null,
+          timesheetUrl: record.timesheetUrl ?? null,
+          uploadedAt: record.uploadedAt ?? null,
+          uploadedAtTimestamp: record.uploadedAtTimestamp ?? null,
+          uploadedAtDisplay: record.uploadedAtDisplay ?? null,
+        })),
+      );
+
+      return grouped.map((record) => ({
+        ...record,
+        invoiceName: record.name,
+        invoiceNameDisplay: record.name,
+        amountDisplay:
+          record.amount ?? currencyFormatter.format(record.amountValue ?? 0),
+        s3Key: record.pdfS3Key ?? null,
+        studentId: record.studentId ?? record.name ?? null,
+        studentKey: record.studentKey ?? record.name ?? null,
+        uploadedAtDisplay:
+          record.uploadedAtDisplay ?? formatDisplayDateTime(record.uploadedAt),
+      }));
     }
 
     return aggregatedFallbackInvoiceDocuments;
   }, [aggregatedFallbackInvoiceDocuments, invoiceDocuments]);
 
   const invoiceDisplayCount = displayedInvoiceDocuments.length;
-  const zipInvoiceCount = invoiceDocumentCount || invoiceDisplayCount;
+  const zipInvoiceCount =
+    invoiceDocumentCount || invoiceDocumentDisplayCount || invoiceDisplayCount;
 
   const openInvoiceUrl = useCallback((url, errorMessage) => {
     if (!url) {
