@@ -11,6 +11,7 @@ import AdminDashboard from "./AdminDashboard.jsx";
 import AdminUserDashboard from "./AdminUserDashboard.jsx";
 import AdminCreateDistrict from "./AdminCreateDistrict.jsx";
 import VendorDistrictKeys from "./VendorDistrictKeys.jsx";
+import VendorInvoiceForm from "./VendorInvoiceForm.jsx";
 import Analytics from "./Analytics.jsx";
 import {
   fetchCurrentUser,
@@ -120,6 +121,16 @@ export function App() {
         path="/vendor/district-keys"
         element={
           profile?.role === "vendor" ? <VendorDistrictKeys /> : <Navigate to="/" replace />
+        }
+      />
+      <Route
+        path="/vendor/generate-invoice"
+        element={
+          profile?.role === "vendor" ? (
+            <VendorInvoiceForm vendorId={profile.vendor_id ?? null} />
+          ) : (
+            <Navigate to="/" replace />
+          )
         }
       />
       <Route path="*" element={<Navigate to="/" replace />} />

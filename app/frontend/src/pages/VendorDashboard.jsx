@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth0 } from "@auth0/auth0-react";
 import toast from "react-hot-toast";
 import { useNavigate } from "react-router-dom";
 
-import { uploadInvoice } from "../api/invoices";
 import { listJobs } from "../api/jobs";
 import {
   fetchVendorProfile,
@@ -32,23 +31,15 @@ function formatPhoneNumberForDisplay(value = "") {
 
 export default function VendorDashboard({ vendorId }) {
   const [jobs, setJobs] = useState([]);
-  const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState(null);
   const [vendorProfile, setVendorProfile] = useState(null);
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileError, setProfileError] = useState(null);
   const [showProfileForm, setShowProfileForm] = useState(false);
   const [isWizardManuallyOpened, setIsWizardManuallyOpened] = useState(false);
-  const [pendingFile, setPendingFile] = useState(null);
-  const [showUploadPrompt, setShowUploadPrompt] = useState(false);
-  const [serviceMonth, setServiceMonth] = useState("");
-  const [invoiceDate, setInvoiceDate] = useState(
-    new Date().toISOString().split("T")[0],
-  );
 
   const { isAuthenticated, getAccessTokenSilently, loginWithRedirect } = useAuth0();
   const navigate = useNavigate();
-  const fileInputRef = useRef(null);
 
   const activeJobs = useMemo(
     () =>
@@ -57,33 +48,6 @@ export default function VendorDashboard({ vendorId }) {
       ).length,
     [jobs],
   );
-
-  const serviceMonthOptions = useMemo(() => {
-    const now = new Date();
-
-    return Array.from({ length: 12 }, (_, index) => {
-      const date = new Date(now.getFullYear(), now.getMonth() - index, 1);
-      const value = date.toLocaleString("default", {
-        month: "long",
-        year: "numeric",
-      });
-
-      return { value, label: value };
-    });
-  }, []);
-
-  useEffect(() => {
-    if (serviceMonthOptions.length > 0 && !serviceMonth) {
-      setServiceMonth(serviceMonthOptions[0].value);
-    }
-  }, [serviceMonthOptions, serviceMonth]);
-
-  const resetUploadPrompt = useCallback(() => {
-    setPendingFile(null);
-    setShowUploadPrompt(false);
-    setServiceMonth(serviceMonthOptions[0]?.value ?? "");
-    setInvoiceDate(new Date().toISOString().split("T")[0]);
-  }, [serviceMonthOptions]);
 
   const fetchJobs = useCallback(async () => {
     if (!isAuthenticated) return;
@@ -176,83 +140,40 @@ export default function VendorDashboard({ vendorId }) {
     }
   }
 
-  const openUploadPrompt = () => {
+  const handleStartInvoice = () => {
+    setError(null);
+
     if (vendorId == null) {
       setError(
         "Your account is not linked to a vendor profile yet. Please contact an administrator.",
       );
-      return false;
+      return;
+    }
+
+    if (profileLoading) {
+      setError("Loading your vendor profile. Please wait.");
+      return;
+    }
+
+    if (profileError) {
+      setError(profileError);
+      return;
+    }
+
+    if (!vendorProfile) {
+      setError("We couldn't load your vendor profile. Please try again.");
+      return;
     }
 
     if (!vendorProfile?.is_district_linked) {
       setError(
         "Connect to your district using the district access key before submitting invoices.",
       );
-      return false;
+      return;
     }
 
-    setPendingFile(null);
-    setServiceMonth(serviceMonthOptions[0]?.value ?? "");
-    setInvoiceDate(new Date().toISOString().split("T")[0]);
-    setShowUploadPrompt(true);
-    setError(null);
-    return true;
+    navigate("/vendor/generate-invoice");
   };
-
-  const handleFileSelection = (event) => {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file) return;
-
-    setPendingFile(file);
-    setError(null);
-  };
-
-  async function submitUpload(event) {
-    event.preventDefault();
-    if (!pendingFile) {
-      setError("Please select a timesheet file to upload.");
-      return;
-    }
-
-    if (!invoiceDate) {
-      setError("Please choose an invoice date.");
-      return;
-    }
-
-    if (new Date(invoiceDate) > new Date()) {
-      setError("Invoice date cannot be in the future.");
-      return;
-    }
-
-    setIsUploading(true);
-    setError(null);
-
-    try {
-      if (!isAuthenticated) {
-        setError("Please log in to upload invoices.");
-        await loginWithRedirect();
-        return;
-      }
-
-      const token = await getAccessTokenSilently();
-      const payload = {
-        vendor_id: vendorId,
-        invoice_date: invoiceDate,
-        service_month: serviceMonth,
-        invoice_code: `INV-${Date.now()}`,
-      };
-      await uploadInvoice(pendingFile, payload, token);
-      await fetchJobs();
-      toast.success("Upload received. We'll start processing right away.");
-      resetUploadPrompt();
-    } catch (err) {
-      console.error("invoice_upload_failed", err);
-      setError("Upload failed. Please try again.");
-    } finally {
-      setIsUploading(false);
-    }
-  }
 
   if (!isAuthenticated) {
     return (
@@ -418,11 +339,10 @@ export default function VendorDashboard({ vendorId }) {
                 <div className="mt-4 space-y-2">
                   <button
                     type="button"
-                    onClick={openUploadPrompt}
-                    disabled={isUploading}
-                    className="inline-flex items-center justify-center rounded-xl border border-dashed border-amber-400 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-700 shadow-sm transition hover:border-amber-500 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-70"
+                    onClick={handleStartInvoice}
+                    className="inline-flex items-center justify-center rounded-xl border border-dashed border-amber-400 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-700 shadow-sm transition hover:border-amber-500 hover:bg-amber-100"
                   >
-                    {isUploading ? "Uploading…" : "Start invoice"}
+                    Start invoice
                   </button>
                   <p className="text-xs text-slate-500">
                     We will prompt for service month and invoice date before processing your file.
@@ -463,119 +383,6 @@ export default function VendorDashboard({ vendorId }) {
             setIsWizardManuallyOpened(false);
           }}
         />
-      ) : null}
-
-      {showUploadPrompt ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4">
-          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h3 className="text-lg font-semibold text-slate-900">
-                  Add invoice details
-                </h3>
-                <p className="mt-1 text-sm text-slate-600">
-                  Choose the service month and invoice date before uploading your timesheet.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={resetUploadPrompt}
-                className="text-slate-500 transition hover:text-slate-700"
-                aria-label="Close"
-              >
-                ✕
-              </button>
-            </div>
-
-            <form className="mt-4 space-y-4" onSubmit={submitUpload}>
-              <div>
-                <label className="text-sm font-medium text-slate-900">
-                  Service month
-                </label>
-                <p className="text-xs text-slate-500">
-                  Select the month the services were delivered.
-                </p>
-                <select
-                  className="mt-2 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
-                  value={serviceMonth}
-                  onChange={(event) => setServiceMonth(event.target.value)}
-                  required
-                >
-                  {serviceMonthOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="text-sm font-medium text-slate-900">
-                  Invoice date
-                </label>
-                <p className="text-xs text-slate-500">
-                  Must be today or earlier.
-                </p>
-                <input
-                  type="date"
-                  max={new Date().toISOString().split("T")[0]}
-                  value={invoiceDate}
-                  onChange={(event) => setInvoiceDate(event.target.value)}
-                  className="mt-2 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="text-sm font-medium text-slate-900">
-                  Timesheet file
-                </label>
-                <p className="text-xs text-slate-500">
-                  Select a .xlsx or .xls file to upload.
-                </p>
-                <div className="mt-2 flex items-center gap-3">
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept=".xlsx,.xls"
-                    onChange={handleFileSelection}
-                    className="sr-only"
-                    aria-label="Select timesheet file"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-100"
-                    disabled={isUploading}
-                  >
-                    Choose file
-                  </button>
-                  <span className="text-sm text-slate-600">
-                    {pendingFile ? pendingFile.name : "No file chosen"}
-                  </span>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-end gap-3">
-                <button
-                  type="button"
-                  onClick={resetUploadPrompt}
-                  className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
-                  disabled={isUploading}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-70"
-                  disabled={isUploading}
-                >
-                  {isUploading ? "Uploading…" : "Upload timesheet"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
       ) : null}
     </div>
   );
