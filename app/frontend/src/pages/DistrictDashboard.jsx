@@ -1401,7 +1401,10 @@ export default function DistrictDashboard({
             (typeof entry?.invoice_name === "string" && entry.invoice_name.trim()) ||
             `Invoice ${invoiceId ?? ""}`.trim() ||
             "Invoice";
-          const normalizedName = invoiceName.toLowerCase();
+          const invoiceNameDisplay = formatInvoiceDisplayName(invoiceName);
+          const normalizedName = (invoiceNameDisplay || invoiceName || "")
+            .toLowerCase()
+            .trim();
           const key = normalizedName || `record-${invoiceId ?? index}`;
 
           if (!aggregated.has(key)) {
@@ -1412,7 +1415,7 @@ export default function DistrictDashboard({
                 (typeof entry?.company === "string" && entry.company.trim()) ||
                 selectedVendorName,
               invoiceName,
-              invoiceNameDisplay: formatInvoiceDisplayName(invoiceName),
+              invoiceNameDisplay,
               s3Key:
                 typeof entry?.s3_key === "string" && entry.s3_key.trim().length
                   ? entry.s3_key.trim()
