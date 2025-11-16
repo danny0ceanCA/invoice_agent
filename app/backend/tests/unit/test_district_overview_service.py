@@ -143,3 +143,64 @@ def test_fetch_overview_includes_invoice_pdf_url(monkeypatch: pytest.MonkeyPatch
     assert first_invoice.pdf_url == first_invoice.download_url
     assert first_invoice.pdf_s3_key == "invoices/INV-001.pdf"
     assert first_invoice.students[0].pdf_s3_key == "invoices/INV-001.pdf"
+
+
+def test_fetch_overview_uses_service_month_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
+    generated_urls: list[str] = []
+
+    def fake_generate_presigned_url(
+        key: str,
+        *,
+        expires_in: int = 3600,
+        download_name: str | None = None,
+        response_content_type: str | None = None,
+    ) -> str:
+        assert response_content_type == "application/pdf"
+        url = f"https://example.com/{key}?expires={expires_in}"
+        if download_name:
+            url += f"&filename={download_name}"
+        generated_urls.append(url)
+        return url
+
+    monkeypatch.setattr(
+        "app.backend.src.services.district_overview.generate_presigned_url",
+        fake_generate_presigned_url,
+    )
+
+    with session_scope() as session:
+        district = District(company_name="Central District", district_key="ABC123")
+        vendor = Vendor(
+            company_name="Therapy Group",
+            contact_email="contact@therapy.com",
+            district_key="ABC123",
+        )
+        session.add_all([district, vendor])
+        session.flush()
+
+        invoice = Invoice(
+            vendor_id=vendor.id,
+            upload_id=None,
+            student_name="Student Two",
+            invoice_number="INV-002",
+            invoice_code="CODE-002",
+            service_month="October_2025",
+            service_month_num=None,
+            invoice_date=datetime(2025, 11, 15, tzinfo=timezone.utc),
+            total_hours=1.0,
+            total_cost=200.0,
+            status="approved",
+            pdf_s3_key="invoices/INV-002.pdf",
+        )
+        session.add(invoice)
+        session.flush()
+
+    with session_scope() as session:
+        overview = fetch_district_vendor_overview(session, district.id)
+
+    vendor_profile = overview.vendors[0]
+    first_year = next(iter(vendor_profile.invoices))
+    first_invoice = vendor_profile.invoices[first_year][0]
+
+    assert first_invoice.month == "October"
+    assert first_invoice.year == 2025
+    assert first_invoice.download_url.endswith("&filename=INV-002.pdf")
