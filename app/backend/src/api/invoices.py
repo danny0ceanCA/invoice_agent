@@ -24,6 +24,7 @@ from fastapi import (
     Query,
 )
 from fastapi.concurrency import run_in_threadpool
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.backend.src.core.security import (
@@ -722,49 +723,76 @@ def list_vendor_invoices(
         user=current_user.email,
     )
 
-    invoices = (
-        session.query(Invoice)
+    vendor_company_display = vendor.company_name or company_segment
+
+    try:
+        reference_start = datetime(year, month, 1, tzinfo=timezone.utc)
+        reference_end = (
+            datetime(year + 1, 1, 1, tzinfo=timezone.utc)
+            if month == 12
+            else datetime(year, month + 1, 1, tzinfo=timezone.utc)
+        )
+    except ValueError as exc:  # pragma: no cover - defensive guard
+        raise HTTPException(status_code=400, detail="Invalid invoice period") from exc
+
+    aggregates = (
+        session.query(
+            Invoice.student_name.label("student_name"),
+            func.sum(Invoice.total_cost).label("total_amount"),
+            func.max(Invoice.invoice_date).label("latest_invoice_date"),
+            func.max(Invoice.id).label("latest_invoice_id"),
+        )
         .filter(Invoice.vendor_id == vendor_id)
-        .order_by(Invoice.invoice_date.desc(), Invoice.created_at.desc())
+        .filter(Invoice.invoice_date >= reference_start)
+        .filter(Invoice.invoice_date < reference_end)
+        .group_by(Invoice.student_name)
         .all()
     )
 
-    vendor_company_display = vendor.company_name or company_segment
+    latest_invoice_ids = [entry.latest_invoice_id for entry in aggregates if entry.latest_invoice_id]
+    invoice_lookup: dict[int, Invoice] = {}
+    if latest_invoice_ids:
+        invoice_lookup = {
+            invoice.id: invoice
+            for invoice in session.query(Invoice)
+            .filter(Invoice.id.in_(latest_invoice_ids))
+            .all()
+        }
 
     results: list[dict[str, object]] = []
-    target_month = month
-    target_year = year
-
-    filtered_invoices: list[Invoice] = []
-    for invoice in invoices:
-        period_year, period_month = _determine_invoice_period(invoice)
-        if period_year != target_year or period_month != target_month:
-            continue
-        filtered_invoices.append(invoice)
-    student_groups: dict[str, dict[str, object]] = {}
-    for invoice in filtered_invoices:
-        student_name = (invoice.student_name or "").strip()
-        group_key = student_name.lower() if student_name else f"invoice-{invoice.id}"
-
-        amount_value = Decimal(invoice.total_cost or 0).quantize(
+    for entry in aggregates:
+        invoice = invoice_lookup.get(entry.latest_invoice_id)
+        student_name = (entry.student_name or "").strip()
+        amount_value = Decimal(entry.total_amount or 0).quantize(
             Decimal("0.01"), rounding=ROUND_HALF_UP
         )
-        uploaded_at = _format_uploaded_at(
-            invoice.invoice_date or getattr(invoice, "created_at", None)
-        )
-        status_value = (invoice.status or "").strip()
 
-        if group_key not in student_groups:
-            student_groups[group_key] = {
-                "invoice_ids": [invoice.id],
-                "invoice_id": invoice.id,
-                "vendor_id": invoice.vendor_id,
+        uploaded_at = _format_uploaded_at(
+            getattr(invoice, "invoice_date", None)
+            or getattr(invoice, "created_at", None)
+            or entry.latest_invoice_date
+        )
+        status_value = (
+            getattr(invoice, "status", "") if invoice is not None else ""
+        ).strip()
+        s3_key = None
+        if invoice is not None:
+            s3_key = getattr(invoice, "s3_key", None) or getattr(
+                invoice, "pdf_s3_key", None
+            )
+
+        invoice_id = getattr(invoice, "id", None) or entry.latest_invoice_id
+
+        results.append(
+            {
+                "invoice_ids": [invoice_id] if invoice_id else [],
+                "invoice_id": invoice_id,
+                "vendor_id": getattr(invoice, "vendor_id", vendor_id),
                 "company": vendor_company_display,
-                "invoice_name": student_name or f"Invoice {invoice.id}",
+                "invoice_name": student_name or f"Invoice {invoice_id}",
                 "student_name": student_name or None,
-                "s3_key": getattr(invoice, "s3_key", None)
-                or getattr(invoice, "pdf_s3_key", None),
-                "amount": amount_value,
+                "s3_key": s3_key,
+                "amount": float(amount_value),
                 "status": status_value,
                 "uploaded_at": uploaded_at,
             }
