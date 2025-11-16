@@ -230,6 +230,15 @@ const aggregateStudentEntries = (entries) => {
         ? entry.name.trim()
         : "Unknown student";
 
+    const uploadedAtTimestamp = Number.isFinite(entry.uploadedAtTimestamp)
+      ? entry.uploadedAtTimestamp
+      : (() => {
+          if (!entry.uploadedAt) return null;
+          const parsed = new Date(entry.uploadedAt);
+          return Number.isNaN(parsed.getTime()) ? null : parsed.getTime();
+        })();
+    const uploadedAtDisplay = entry.uploadedAtDisplay ?? null;
+
     if (!groups.has(key)) {
       groups.set(key, {
         id: normalizedId ?? fallbackEntryId ?? key,
@@ -242,6 +251,9 @@ const aggregateStudentEntries = (entries) => {
         timesheetUrls: new Set(),
         originalLineItemIds: new Set(),
         entryCount: 0,
+        uploadedAtTimestamp,
+        uploadedAt: entry.uploadedAt ?? null,
+        uploadedAtDisplay,
       });
     }
 
@@ -265,6 +277,16 @@ const aggregateStudentEntries = (entries) => {
     if (entry.timesheetUrl) group.timesheetUrls.add(entry.timesheetUrl);
     if (entry.originalLineItemId != null) {
       group.originalLineItemIds.add(entry.originalLineItemId);
+    }
+
+    if (
+      Number.isFinite(uploadedAtTimestamp) &&
+      (!Number.isFinite(group.uploadedAtTimestamp) ||
+        uploadedAtTimestamp > group.uploadedAtTimestamp)
+    ) {
+      group.uploadedAtTimestamp = uploadedAtTimestamp;
+      group.uploadedAt = entry.uploadedAt ?? null;
+      group.uploadedAtDisplay = uploadedAtDisplay ?? null;
     }
   });
 
@@ -302,6 +324,12 @@ const aggregateStudentEntries = (entries) => {
         timesheetUrl: timesheetUrls[0] ?? null,
         originalLineItemId: originalLineItemIds[0] ?? null,
         entryCount: group.entryCount,
+        uploadedAt: group.uploadedAt ?? null,
+        uploadedAtDisplay:
+          group.uploadedAtDisplay ??
+          (Number.isFinite(group.uploadedAtTimestamp)
+            ? new Date(group.uploadedAtTimestamp).toISOString()
+            : null),
       };
     })
     .sort((a, b) => {
@@ -1562,7 +1590,36 @@ export default function DistrictDashboard({
 
   const displayedInvoiceDocuments = useMemo(() => {
     if (invoiceDocuments.length) {
-      return invoiceDocuments;
+      const grouped = aggregateStudentEntries(
+        invoiceDocuments.map((record) => ({
+          name:
+            record.studentName ||
+            record.invoiceNameDisplay ||
+            record.invoiceName ||
+            "Unknown student",
+          amountValue: record.amountValue,
+          studentId: record.studentId ?? null,
+          originalStudentId: record.originalStudentId ?? null,
+          originalLineItemId: record.invoiceId ?? record.originalLineItemId ?? null,
+          pdfUrl: record.pdfUrl ?? null,
+          pdfS3Key: record.s3Key ?? record.pdfS3Key ?? null,
+          timesheetUrl: record.timesheetUrl ?? null,
+          uploadedAt: record.uploadedAt ?? null,
+          uploadedAtTimestamp: record.uploadedAtTimestamp ?? null,
+          uploadedAtDisplay: record.uploadedAtDisplay ?? null,
+        })),
+      );
+
+      return grouped.map((record) => ({
+        ...record,
+        invoiceName: record.name,
+        invoiceNameDisplay: record.name,
+        amountDisplay:
+          record.amount ?? currencyFormatter.format(record.amountValue ?? 0),
+        s3Key: record.pdfS3Key ?? null,
+        uploadedAtDisplay:
+          record.uploadedAtDisplay ?? formatDisplayDateTime(record.uploadedAt),
+      }));
     }
 
     return aggregatedFallbackInvoiceDocuments;
