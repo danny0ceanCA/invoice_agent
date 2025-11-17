@@ -394,6 +394,9 @@ async def download_invoices_zip(
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid month value") from None
 
+    target_year = reference_date.year
+    target_month = reference_date.month
+
     (
         prefix,
         company_segment,
@@ -653,9 +656,6 @@ async def download_invoices_zip(
     vendor_display_name = (
         (vendor_record.company_name or "").strip() if vendor_record else ""
     ) or vendor_company
-
-    target_year = reference_date.year
-    target_month = reference_date.month
 
     invoice_lookup: dict[str, Invoice] = {}
     invoice_lookup_by_name: dict[str, Invoice] = {}
