@@ -15,8 +15,8 @@ import {
 import { formatPostalAddress } from "../api/common";
 import {
   fetchInvoicePresignedUrl,
-  fetchVendorInvoiceArchive,
   fetchVendorInvoicesForMonth,
+  requestInvoicesZip,
 } from "../api/invoices";
 
 const menuItems = [
@@ -1759,29 +1759,15 @@ export default function DistrictDashboard({
     setDownloadingInvoices(true);
 
     try {
-      const accessToken = await getAccessTokenSilently();
-      const response = await fetchVendorInvoiceArchive(
-        vendorId,
-        normalizedMonth,
-        accessToken,
-      );
-
-      const downloadUrl =
-        typeof response?.download_url === "string"
-          ? response.download_url.trim()
-          : "";
-
-      if (!downloadUrl) {
-        throw new Error("Missing download URL in archive response");
-      }
+      const archiveUrl = await requestInvoicesZip(vendorId, normalizedMonth);
 
       openInvoiceUrl(
-        downloadUrl,
-        "We couldn't open the invoice archive. Please try again.",
+        archiveUrl,
+        "We couldn't open this invoice archive. Please try again.",
       );
       toast.success("Your ZIP archive is ready with a CSV summary.");
     } catch (error) {
-      console.error("Failed to prepare invoice archive", {
+      console.error("district_invoice_zip_download_failed", {
         error,
         vendorId,
         normalizedMonth,
@@ -1792,8 +1778,8 @@ export default function DistrictDashboard({
     }
   }, [
     activeInvoiceDetails,
-    getAccessTokenSilently,
     openInvoiceUrl,
+    requestInvoicesZip,
     selectedVendor?.id,
     zipInvoiceCount,
   ]);

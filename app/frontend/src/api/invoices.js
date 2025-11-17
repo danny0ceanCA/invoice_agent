@@ -92,6 +92,34 @@ export async function fetchVendorInvoiceArchive(vendorId, month, accessToken) {
   return response.json();
 }
 
+export async function requestInvoicesZip(vendorId, monthKey) {
+  const response = await fetch(`/api/invoices/download-zip/${vendorId}/${monthKey}`, {
+    method: "GET",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to prepare invoice archive: ${response.status}`);
+  }
+
+  const data = await response.json();
+
+  const url =
+    (typeof data?.url === "string" && data.url.trim()) ||
+    (typeof data?.download_url === "string" && data.download_url.trim()) ||
+    (typeof data?.downloadUrl === "string" && data.downloadUrl.trim()) ||
+    "";
+
+  if (!url) {
+    throw new Error("Missing download URL in archive response");
+  }
+
+  return url;
+}
+
 export async function fetchVendorInvoicesForMonth(
   vendorId,
   year,
