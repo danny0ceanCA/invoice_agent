@@ -13,10 +13,7 @@ import structlog
 from sqlalchemy.orm import Session
 
 from ..db import session_scope
-from ..models.invoice import Invoice
-from ..models.job import Job
-from ..models.line_item import InvoiceLineItem
-from ..models.vendor import Vendor
+from ..models import Clinician, Invoice, InvoiceLineItem, Job, Student, Vendor
 from ..services.metrics import invoice_jobs_total
 from ..services.pdf_generation import InvoicePdf, generate_invoice_pdf
 from ..services.s3 import sanitize_company_name, upload_bytes
@@ -24,6 +21,149 @@ from ..services.s3 import sanitize_company_name, upload_bytes
 LOGGER = structlog.get_logger(__name__)
 
 REQUIRED_COLUMNS = ["Client", "Schedule Date", "Hours", "Employee", "Service Code"]
+
+
+def _split_name(full_name: str) -> tuple[str, str]:
+    """
+    Naive name splitter: last token becomes last_name, everything before is first_name.
+    Safe enough for now and can be refined later.
+    """
+
+    parts = (full_name or "").strip().split()
+    if not parts:
+        return "", ""
+    if len(parts) == 1:
+        return parts[0], ""
+    return " ".join(parts[:-1]), parts[-1]
+
+
+def _generate_student_key(session: Session, district_key: str) -> str:
+    """
+    Generate a new student_key like SK-00000001, scoped per district_key.
+    Uses the highest existing ID for that district as a simple sequence base.
+    """
+
+    last_student = (
+        session.query(Student)
+        .filter(Student.district_key == district_key)
+        .order_by(Student.id.desc())
+        .first()
+    )
+    seq = (last_student.id if last_student else 0) + 1
+    return f"SK-{seq:08d}"
+
+
+def _get_or_create_student(
+    session: Session,
+    district_key: str,
+    raw_name: str,
+) -> int | None:
+    """
+    Ensure a Student row exists for the given district_key + full_name, and return its ID.
+    Does not backfill or alter existing invoices; used only for new invoice processing.
+    """
+
+    raw_name = (raw_name or "").strip()
+    if not raw_name:
+        return None
+
+    student = (
+        session.query(Student)
+        .filter_by(district_key=district_key, full_name=raw_name)
+        .one_or_none()
+    )
+    if student is not None:
+        return student.id
+
+    first_name, last_name = _split_name(raw_name)
+    student_key = _generate_student_key(session, district_key)
+
+    student = Student(
+        district_key=district_key,
+        student_key=student_key,
+        first_name=first_name,
+        last_name=last_name,
+        full_name=raw_name,
+    )
+    session.add(student)
+    session.flush()  # assigns student.id
+
+    return student.id
+
+
+def _extract_license_from_service_code(
+    service_code: str | None,
+) -> tuple[str | None, str | None]:
+    """
+    Given service_code like 'HHA-SCUSD' or 'LVN-SCUSD', return (license_code, license_title).
+    """
+
+    if not service_code:
+        return None, None
+
+    head = service_code.split("-", 1)[0].strip().upper()
+    if not head:
+        return None, None
+
+    if head == "HHA":
+        return "HHA", "Health Aide"
+    if head == "LVN":
+        return "LVN", "Licensed Vocational Nurse"
+
+    # Unknown or other codes: keep the code, no title
+    return head, None
+
+
+def _get_or_create_clinician(
+    session: Session,
+    district_key: str,
+    raw_name: str,
+    service_code: str | None = None,
+) -> int | None:
+    """
+    Ensure a Clinician row exists for the given district_key + full_name, and return its ID.
+    Uses service_code to populate license_code/license_title when available.
+    """
+
+    raw_name = (raw_name or "").strip()
+    if not raw_name:
+        return None
+
+    clinician = (
+        session.query(Clinician)
+        .filter_by(district_key=district_key, full_name=raw_name)
+        .one_or_none()
+    )
+
+    license_code = license_title = None
+    if service_code:
+        license_code, license_title = _extract_license_from_service_code(service_code)
+
+    if clinician is None:
+        first_name, last_name = _split_name(raw_name)
+        clinician = Clinician(
+            district_key=district_key,
+            first_name=first_name,
+            last_name=last_name,
+            full_name=raw_name,
+            license_code=license_code,
+            license_title=license_title,
+        )
+        session.add(clinician)
+        session.flush()
+        return clinician.id
+
+    updated = False
+    if license_code and not clinician.license_code:
+        clinician.license_code = license_code
+        updated = True
+    if license_title and not clinician.license_title:
+        clinician.license_title = license_title
+        updated = True
+    if updated:
+        session.add(clinician)
+
+    return clinician.id
 
 
 def generate_invoice_number(student_name: str, service_month: datetime | date) -> str:
@@ -217,6 +357,12 @@ class InvoiceAgent:
         session.add(invoice)
         session.flush()
 
+        _get_or_create_student(
+            session=session,
+            district_key=invoice.district_key,
+            raw_name=invoice.student_name,
+        )
+
         if pdf_artifact.key:
             invoice.s3_key = pdf_artifact.key
             self.logger.info(
@@ -232,6 +378,12 @@ class InvoiceAgent:
             )
 
         for _, row in frame.iterrows():
+            _get_or_create_clinician(
+                session=session,
+                district_key=invoice.district_key,
+                raw_name=str(row["Employee"]),
+                service_code=str(row["Service Code"]),
+            )
             line_item = InvoiceLineItem(
                 invoice_id=invoice.id,
                 student=student,
