@@ -1831,6 +1831,31 @@ export default function DistrictDashboard({
     [openInvoiceUrl, requestInvoiceUrl],
   );
 
+  const handleDownload = useCallback(async (invoiceId) => {
+    if (invoiceId == null) {
+      toast.error("We couldn't find that invoice.");
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/invoices/download/${invoiceId}`);
+      const data = await response.json();
+
+      const url = typeof data?.url === "string" ? data.url.trim() : "";
+      if (!url) {
+        throw new Error("Missing download URL");
+      }
+
+      window.open(url, "_blank");
+    } catch (error) {
+      console.error("district_invoice_direct_download_failed", {
+        error,
+        invoiceId,
+      });
+      toast.error("We couldn't download this invoice. Please try again.");
+    }
+  }, []);
+
   const handleExportInvoicesCsv = useCallback(() => {
     if (!invoiceDisplayCount) {
       toast.error("No invoices are available to export for this month.");
@@ -2351,6 +2376,9 @@ export default function DistrictDashboard({
                               <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-widest text-slate-500 first:pl-0 last:pr-0">
                                 Uploaded
                               </th>
+                              <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-widest text-slate-500 first:pl-0 last:pr-0">
+                                Download
+                              </th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-200">
@@ -2366,6 +2394,15 @@ export default function DistrictDashboard({
                                 </td>
                                 <td className="whitespace-nowrap px-4 py-3 text-slate-600 first:pl-0 last:pr-0">
                                   {document.uploadedAtDisplay ?? "—"}
+                                </td>
+                                <td className="whitespace-nowrap px-4 py-3 first:pl-0 last:pr-0">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDownload(document.invoiceId)}
+                                    className="inline-flex items-center rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 ring-1 ring-inset ring-amber-200 transition hover:bg-amber-100"
+                                  >
+                                    Download
+                                  </button>
                                 </td>
                               </tr>
                             ))}
