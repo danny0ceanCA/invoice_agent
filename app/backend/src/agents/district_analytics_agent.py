@@ -496,19 +496,33 @@ def _build_run_sql_tool(engine: Engine) -> Tool:
             query, context.district_id, context.district_key
         )
 
+        sql_text_query = filtered_query.strip()
+        log_params = dict(parameters or {})
+
         LOGGER.info(
-            "analytics_run_sql",
-            query=filtered_query,
-            params=parameters,
-            district_key=context.district_key,
-            district_id=context.district_id,
+            "analytics_run_sql_request",
+            sql=sql_text_query,
+            params=log_params,
         )
 
-        rows: list[dict[str, Any]] = []
         with engine.connect() as connection:
-            result = connection.execute(sql_text(filtered_query), parameters)
-            for row in result:
-                rows.append(dict(row._mapping))
+            try:
+                result = connection.execute(sql_text(sql_text_query), parameters)
+                rows = [dict(row._mapping) for row in result]
+            except Exception as exc:
+                LOGGER.error(
+                    "analytics_run_sql_error",
+                    sql=sql_text_query,
+                    params=log_params,
+                    error=str(exc),
+                )
+                raise
+
+        LOGGER.info(
+            "analytics_run_sql_result",
+            sql=sql_text_query,
+            row_count=len(rows),
+        )
 
         return rows
 
