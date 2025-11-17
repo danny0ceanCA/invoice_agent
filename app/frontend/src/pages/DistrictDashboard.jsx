@@ -1418,10 +1418,17 @@ export default function DistrictDashboard({
 
         records.forEach((entry, index) => {
           const invoiceId = entry?.invoice_id ?? null;
-          const amountValue =
-            typeof entry?.amount === "number"
-              ? entry.amount
-              : parseCurrencyValue(entry?.amount ?? 0);
+          const amountValue = (() => {
+            if (typeof entry?.total_cost === "number") {
+              return entry.total_cost;
+            }
+
+            if (typeof entry?.amount === "number") {
+              return entry.amount;
+            }
+
+            return parseCurrencyValue(entry?.total_cost ?? entry?.amount ?? 0);
+          })();
           const uploadedAt =
             typeof entry?.uploaded_at === "string"
               ? entry.uploaded_at.trim()
