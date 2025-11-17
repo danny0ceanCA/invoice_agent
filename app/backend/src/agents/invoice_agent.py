@@ -195,7 +195,7 @@ class InvoiceAgent:
             invoice_code,
             invoice_number,
             company_name=vendor_company_name,
-            reference_date=self.invoice_date,
+            reference_date=self.service_month_date,
         )
 
         invoice = Invoice(
@@ -273,7 +273,7 @@ class InvoiceAgent:
                 bundle.writestr(artifact.filename, artifact.content)
 
         zip_buffer.seek(0)
-        reference_date = self.invoice_date
+        reference_date = self.service_month_date
         safe_company = sanitize_company_name(self.vendor_company_name)
         bundle_name = (
             f"{safe_company}_{reference_date.year:04d}_{reference_date.month:02d}_invoices.zip"
