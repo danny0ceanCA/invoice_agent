@@ -300,6 +300,69 @@ def presign_invoice_file(
 
 
 # --------------------------------------------------------------------------
+# GET /invoices/download/{invoice_id}
+# --------------------------------------------------------------------------
+@router.get("/download/{invoice_id}")
+def download_invoice(
+    invoice_id: int,
+    current_user: User = Depends(require_district_user),
+    session: Session = Depends(get_session_dependency),
+) -> dict[str, str]:
+    """Return a presigned URL for a specific invoice PDF."""
+
+    if invoice_id <= 0:
+        raise HTTPException(status_code=400, detail="Invalid invoice identifier")
+
+    invoice = session.get(Invoice, invoice_id)
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+
+    pdf_s3_key = getattr(invoice, "pdf_s3_key", None)
+    if not pdf_s3_key:
+        raise HTTPException(status_code=404, detail="Invoice PDF not available")
+
+    sanitized_key = sanitize_object_key(str(pdf_s3_key))
+
+    settings = get_settings()
+    bucket_name = settings.aws_s3_bucket or "invoice-agent-files"
+    if bucket_name.lower() == "local":
+        bucket_name = "invoice-agent-files"
+
+    client = get_s3_client()
+
+    LOGGER.info(
+        "invoice_download_request_received",
+        invoice_id=invoice_id,
+        user=current_user.email,
+        bucket=bucket_name,
+        key_preview=sanitized_key[:80],
+    )
+
+    try:
+        url = client.generate_presigned_url(
+            "get_object",
+            Params={
+                "Bucket": bucket_name,
+                "Key": sanitized_key,
+                "ResponseContentDisposition": f'inline; filename="{Path(sanitized_key).name}"',
+                "ResponseContentType": "application/pdf",
+            },
+            ExpiresIn=3600,
+        )
+    except (ClientError, BotoCoreError) as exc:
+        LOGGER.error(
+            "invoice_download_presign_failed",
+            invoice_id=invoice_id,
+            error=str(exc),
+        )
+        raise HTTPException(status_code=502, detail="Unable to generate download link") from exc
+
+    LOGGER.info("invoice_download_presign_success", invoice_id=invoice_id)
+
+    return {"url": url}
+
+
+# --------------------------------------------------------------------------
 # GET /invoices/download-zip/{vendor_id}/{month}
 # --------------------------------------------------------------------------
 @router.get("/download-zip/{vendor_id}/{month}")
