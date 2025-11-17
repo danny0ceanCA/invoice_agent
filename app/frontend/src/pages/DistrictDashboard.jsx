@@ -2493,7 +2493,7 @@ export default function DistrictDashboard({
                                   year: Number(year),
                                 })
                               }
-                              className="flex h-full flex-col justify-center rounded-2xl border border-slate-200 bg-white p-5 text-left transition hover:border-slate-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/70"
+                              className="flex h-full flex-col justify-center rounded-2xl bg-slate-50 p-5 text-left shadow-sm transition hover:bg-slate-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/70"
                               type="button"
                             >
                               <p className="text-lg font-semibold text-slate-900">
