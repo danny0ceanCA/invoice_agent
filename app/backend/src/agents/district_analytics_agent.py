@@ -194,6 +194,40 @@ class Workflow:
         for iteration in range(self.max_iterations):
             LOGGER.debug("agent_iteration_start", iteration=iteration)
 
+            normalized_query = query.lower()
+
+            if "student list" in normalized_query and "ytd" in normalized_query:
+                sql = """
+                SELECT DISTINCT student_name
+                FROM invoices
+                WHERE strftime('%Y', invoice_date) = strftime('%Y', 'now')
+                ORDER BY student_name
+                """
+
+                try:
+                    run_sql_tool = agent.lookup_tool("run_sql")
+                except RuntimeError:
+                    LOGGER.warning("run_sql_tool_unavailable_for_student_list", query=query)
+                else:
+                    try:
+                        rows = run_sql_tool.invoke(context, {"query": sql})
+                    except Exception as exc:  # pragma: no cover - defensive
+                        context.last_error = str(exc)
+                        payload = {
+                            "text": f"Failed to fetch YTD student list: {exc}",
+                            "rows": None,
+                            "html": None,
+                        }
+                    else:
+                        context.last_rows = rows
+                        if rows:
+                            text = f"Found {len(rows)} student{'' if len(rows) == 1 else 's'} for the current year."
+                        else:
+                            text = "No students found for the current year."
+                        payload = {"text": text, "rows": rows}
+
+                    return _finalise_response(payload, context)
+
             student_name = _extract_student_name(query)
             if student_name and context.district_key:
                 safe_name = student_name.replace("'", "''")
