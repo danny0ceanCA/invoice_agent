@@ -1831,6 +1831,86 @@ export default function DistrictDashboard({
     [openInvoiceUrl, requestInvoiceUrl],
   );
 
+  const handleDownload = useCallback(
+    async (record) => {
+      if (!record) {
+        toast.error("We couldn't find that invoice.");
+        return;
+      }
+
+      const invoiceId = record.invoiceId ?? null;
+      const s3Key = record.s3Key ?? record.pdfS3Key ?? null;
+
+      const openPresignedUrl = async () => {
+        if (!s3Key) {
+          throw new Error("Missing S3 key for invoice download");
+        }
+
+        const presignedUrl = await requestInvoiceUrl(s3Key, invoiceId);
+        openInvoiceUrl(
+          presignedUrl,
+          "We couldn't open this invoice. Please try again.",
+        );
+      };
+
+      if (invoiceId == null) {
+        try {
+          await openPresignedUrl();
+        } catch (error) {
+          console.error("district_invoice_direct_download_failed", {
+            error,
+            invoiceId,
+            s3Key,
+          });
+          toast.error("We couldn't download this invoice. Please try again.");
+        }
+        return;
+      }
+
+      try {
+        const accessToken = await getAccessTokenSilently();
+        const authorizedResponse = await fetch(`/api/invoices/download/${invoiceId}`, {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        });
+
+        if (!authorizedResponse.ok) {
+          throw new Error(`Download request failed: ${authorizedResponse.status}`);
+        }
+
+        const data = await authorizedResponse.json();
+
+        const url = typeof data?.url === "string" ? data.url.trim() : "";
+        if (!url) {
+          throw new Error("Missing download URL");
+        }
+
+        window.open(url, "_blank", "noopener,noreferrer");
+      } catch (error) {
+        console.error("district_invoice_direct_download_failed", {
+          error,
+          invoiceId,
+          s3Key,
+        });
+        if (s3Key) {
+          try {
+            await openPresignedUrl();
+            return;
+          } catch (fallbackError) {
+            console.error("district_invoice_direct_download_fallback_failed", {
+              fallbackError,
+              invoiceId,
+              s3Key,
+            });
+          }
+        }
+        toast.error("We couldn't download this invoice. Please try again.");
+      }
+    },
+    [getAccessTokenSilently, openInvoiceUrl, requestInvoiceUrl],
+  );
+
   const handleExportInvoicesCsv = useCallback(() => {
     if (!invoiceDisplayCount) {
       toast.error("No invoices are available to export for this month.");
@@ -2351,6 +2431,9 @@ export default function DistrictDashboard({
                               <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-widest text-slate-500 first:pl-0 last:pr-0">
                                 Uploaded
                               </th>
+                              <th className="px-4 py-2 text-left text-xs font-semibold uppercase tracking-widest text-slate-500 first:pl-0 last:pr-0">
+                                Download
+                              </th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-200">
@@ -2366,6 +2449,15 @@ export default function DistrictDashboard({
                                 </td>
                                 <td className="whitespace-nowrap px-4 py-3 text-slate-600 first:pl-0 last:pr-0">
                                   {document.uploadedAtDisplay ?? "—"}
+                                </td>
+                                <td className="whitespace-nowrap px-4 py-3 first:pl-0 last:pr-0">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDownload(document)}
+                                    className="inline-flex items-center rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 ring-1 ring-inset ring-amber-200 transition hover:bg-amber-100"
+                                  >
+                                    Download
+                                  </button>
                                 </td>
                               </tr>
                             ))}
