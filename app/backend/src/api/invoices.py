@@ -418,6 +418,13 @@ async def download_invoices_zip(
         user=current_user.email,
     )
 
+    invoices = (
+        session.query(Invoice)
+        .filter(Invoice.vendor_id == vendor_id)
+        .order_by(Invoice.invoice_date.desc(), Invoice.created_at.desc())
+        .all()
+    )
+
     def _build_presigned_url(target_key: str) -> str:
         download_name = re.sub(r"[^A-Za-z0-9._-]+", "_", Path(target_key).name)
         params = {
@@ -641,13 +648,6 @@ async def download_invoices_zip(
             prefix=selected_prefix,
         )
         raise HTTPException(status_code=404, detail="No invoices available for this month")
-
-    invoices = (
-        session.query(Invoice)
-        .filter(Invoice.vendor_id == vendor_id)
-        .order_by(Invoice.invoice_date.desc(), Invoice.created_at.desc())
-        .all()
-    )
 
     vendor_record = session.get(Vendor, vendor_id)
     vendor_display_name = (
