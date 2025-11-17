@@ -503,23 +503,23 @@ def _build_run_sql_tool(engine: Engine) -> Tool:
         # This fixes queries like "i.district_key = '1'" that incorrectly
         # filter out all rows. Since the current deployment is effectively
         # single-tenant, dropping this predicate is safe.
-        #
-        # We handle patterns that appear in WHERE clauses, e.g.:
-        #   WHERE i.district_key = '1'
-        #   WHERE i.district_key = '1' AND ...
-        #   ... AND i.district_key = '1'
-        #
-        # by replacing them with a neutral "1=1" or removing the clause.
         sql_no_dk = sql_statement
 
-        # Case 1: "WHERE i.district_key = '...'" possibly followed by "AND"
+        # Case 1: "WHERE i.district_key = '... ' AND ..." -> drop the predicate, keep the rest.
         sql_no_dk = re.sub(
-            r"(?i)\bWHERE\s+(?:i|invoices)\.district_key\s*=\s*'[^']*'\s*(AND\s*)?",
-            lambda m: "WHERE " + (m.group(1) or "1=1 "),
+            r"(?i)\bWHERE\s+(?:i|invoices)\.district_key\s*=\s*'[^']*'\s+AND\s+",
+            "WHERE ",
             sql_no_dk,
         )
 
-        # Case 2: "AND i.district_key = '...'"
+        # Case 2: "WHERE i.district_key = '...'" with no trailing AND -> replace with neutral WHERE 1=1.
+        sql_no_dk = re.sub(
+            r"(?i)\bWHERE\s+(?:i|invoices)\.district_key\s*=\s*'[^']*'\s*(?=$|\s*(ORDER|GROUP|LIMIT|;))",
+            "WHERE 1=1 ",
+            sql_no_dk,
+        )
+
+        # Case 3: "AND i.district_key = '...'" in the middle of other conditions -> remove that AND clause.
         sql_no_dk = re.sub(
             r"(?i)\bAND\s+(?:i|invoices)\.district_key\s*=\s*'[^']*'\s*",
             " ",
@@ -527,18 +527,6 @@ def _build_run_sql_tool(engine: Engine) -> Tool:
         )
 
         sql_statement = sql_no_dk
-
-        # Ensure the real district_key from context is available as a parameter.
-        if context.district_key is not None:
-            params.setdefault("district_key", context.district_key)
-
-            # Rewrite any hard-coded district_key string literals into a parameterized filter.
-            # This fixes queries like "i.district_key = '1'" and ensures they use :district_key instead.
-            sql_statement = re.sub(
-                r"(?i)\b(i|invoices)\.district_key\s*=\s*'[^']*'",
-                r"\1.district_key = :district_key",
-                sql_statement,
-            )
 
         lowered = sql_statement.lower()
         if " from invoices" in lowered and "district_key" not in lowered and "sub.district_key" not in lowered:
