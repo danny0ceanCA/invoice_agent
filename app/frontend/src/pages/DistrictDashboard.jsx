@@ -1831,30 +1831,85 @@ export default function DistrictDashboard({
     [openInvoiceUrl, requestInvoiceUrl],
   );
 
-  const handleDownload = useCallback(async (invoiceId) => {
-    if (invoiceId == null) {
-      toast.error("We couldn't find that invoice.");
-      return;
-    }
-
-    try {
-      const response = await fetch(`/api/invoices/download/${invoiceId}`);
-      const data = await response.json();
-
-      const url = typeof data?.url === "string" ? data.url.trim() : "";
-      if (!url) {
-        throw new Error("Missing download URL");
+  const handleDownload = useCallback(
+    async (record) => {
+      if (!record) {
+        toast.error("We couldn't find that invoice.");
+        return;
       }
 
-      window.open(url, "_blank");
-    } catch (error) {
-      console.error("district_invoice_direct_download_failed", {
-        error,
-        invoiceId,
-      });
-      toast.error("We couldn't download this invoice. Please try again.");
-    }
-  }, []);
+      const invoiceId = record.invoiceId ?? null;
+      const s3Key = record.s3Key ?? record.pdfS3Key ?? null;
+
+      const openPresignedUrl = async () => {
+        if (!s3Key) {
+          throw new Error("Missing S3 key for invoice download");
+        }
+
+        const presignedUrl = await requestInvoiceUrl(s3Key, invoiceId);
+        openInvoiceUrl(
+          presignedUrl,
+          "We couldn't open this invoice. Please try again.",
+        );
+      };
+
+      if (invoiceId == null) {
+        try {
+          await openPresignedUrl();
+        } catch (error) {
+          console.error("district_invoice_direct_download_failed", {
+            error,
+            invoiceId,
+            s3Key,
+          });
+          toast.error("We couldn't download this invoice. Please try again.");
+        }
+        return;
+      }
+
+      try {
+        const accessToken = await getAccessTokenSilently();
+        const authorizedResponse = await fetch(`/api/invoices/download/${invoiceId}`, {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        });
+
+        if (!authorizedResponse.ok) {
+          throw new Error(`Download request failed: ${authorizedResponse.status}`);
+        }
+
+        const data = await authorizedResponse.json();
+
+        const url = typeof data?.url === "string" ? data.url.trim() : "";
+        if (!url) {
+          throw new Error("Missing download URL");
+        }
+
+        window.open(url, "_blank", "noopener,noreferrer");
+      } catch (error) {
+        console.error("district_invoice_direct_download_failed", {
+          error,
+          invoiceId,
+          s3Key,
+        });
+        if (s3Key) {
+          try {
+            await openPresignedUrl();
+            return;
+          } catch (fallbackError) {
+            console.error("district_invoice_direct_download_fallback_failed", {
+              fallbackError,
+              invoiceId,
+              s3Key,
+            });
+          }
+        }
+        toast.error("We couldn't download this invoice. Please try again.");
+      }
+    },
+    [getAccessTokenSilently, openInvoiceUrl, requestInvoiceUrl],
+  );
 
   const handleExportInvoicesCsv = useCallback(() => {
     if (!invoiceDisplayCount) {
@@ -2398,7 +2453,7 @@ export default function DistrictDashboard({
                                 <td className="whitespace-nowrap px-4 py-3 first:pl-0 last:pr-0">
                                   <button
                                     type="button"
-                                    onClick={() => handleDownload(document.invoiceId)}
+                                    onClick={() => handleDownload(document)}
                                     className="inline-flex items-center rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 ring-1 ring-inset ring-amber-200 transition hover:bg-amber-100"
                                   >
                                     Download

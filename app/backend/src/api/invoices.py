@@ -570,6 +570,69 @@ async def download_invoices_zip(
             raise HTTPException(status_code=502, detail="Unable to enumerate invoices")
 
     if not invoice_objects:
+        # Fall back to the invoice records if the storage layout has changed or
+        # objects are stored under legacy keys that are not discoverable via the
+        # expected prefix.
+        candidate_keys: list[str] = []
+
+        for invoice in invoices:
+            period_year, period_month = _determine_invoice_period(invoice)
+            if period_year != target_year or period_month != target_month:
+                continue
+
+            for attr in ("pdf_s3_key", "s3_key"):
+                value = getattr(invoice, attr, None)
+                if not value:
+                    continue
+                normalized = sanitize_object_key(str(value).strip())
+                if normalized:
+                    candidate_keys.append(normalized)
+
+        unique_keys = []
+        seen = set()
+        for key in candidate_keys:
+            if key not in seen:
+                seen.add(key)
+                unique_keys.append(key)
+
+        if unique_keys:
+            invoice_objects = []
+            for key in unique_keys:
+                try:
+                    await run_in_threadpool(
+                        client.head_object, Bucket=bucket_name, Key=key
+                    )
+                except ClientError as exc:
+                    error_code = exc.response.get("Error", {}).get("Code", "")
+                    if error_code in {"404", "NoSuchKey", "NotFound"}:
+                        continue
+                    LOGGER.error(
+                        "invoice_zip_head_failed",
+                        vendor_id=vendor_id,
+                        company=company_segment,
+                        month=normalized_month,
+                        key=key,
+                        error=str(exc),
+                    )
+                    raise HTTPException(
+                        status_code=502, detail="Unable to access invoice archive"
+                    )
+                except BotoCoreError as exc:
+                    LOGGER.error(
+                        "invoice_zip_head_error",
+                        vendor_id=vendor_id,
+                        company=company_segment,
+                        month=normalized_month,
+                        key=key,
+                        error=str(exc),
+                    )
+                    raise HTTPException(
+                        status_code=502, detail="Unable to access invoice archive"
+                    )
+
+                invoice_objects.append({"Key": key, "LastModified": None})
+
+    if not invoice_objects:
         LOGGER.warning(
             "invoice_zip_no_pdfs",
             vendor_id=vendor_id,
