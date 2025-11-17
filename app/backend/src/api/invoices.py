@@ -300,6 +300,69 @@ def presign_invoice_file(
 
 
 # --------------------------------------------------------------------------
+# GET /invoices/download/{invoice_id}
+# --------------------------------------------------------------------------
+@router.get("/download/{invoice_id}")
+def download_invoice(
+    invoice_id: int,
+    current_user: User = Depends(require_district_user),
+    session: Session = Depends(get_session_dependency),
+) -> dict[str, str]:
+    """Return a presigned URL for a specific invoice PDF."""
+
+    if invoice_id <= 0:
+        raise HTTPException(status_code=400, detail="Invalid invoice identifier")
+
+    invoice = session.get(Invoice, invoice_id)
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+
+    pdf_s3_key = getattr(invoice, "pdf_s3_key", None)
+    if not pdf_s3_key:
+        raise HTTPException(status_code=404, detail="Invoice PDF not available")
+
+    sanitized_key = sanitize_object_key(str(pdf_s3_key))
+
+    settings = get_settings()
+    bucket_name = settings.aws_s3_bucket or "invoice-agent-files"
+    if bucket_name.lower() == "local":
+        bucket_name = "invoice-agent-files"
+
+    client = get_s3_client()
+
+    LOGGER.info(
+        "invoice_download_request_received",
+        invoice_id=invoice_id,
+        user=current_user.email,
+        bucket=bucket_name,
+        key_preview=sanitized_key[:80],
+    )
+
+    try:
+        url = client.generate_presigned_url(
+            "get_object",
+            Params={
+                "Bucket": bucket_name,
+                "Key": sanitized_key,
+                "ResponseContentDisposition": f'inline; filename="{Path(sanitized_key).name}"',
+                "ResponseContentType": "application/pdf",
+            },
+            ExpiresIn=3600,
+        )
+    except (ClientError, BotoCoreError) as exc:
+        LOGGER.error(
+            "invoice_download_presign_failed",
+            invoice_id=invoice_id,
+            error=str(exc),
+        )
+        raise HTTPException(status_code=502, detail="Unable to generate download link") from exc
+
+    LOGGER.info("invoice_download_presign_success", invoice_id=invoice_id)
+
+    return {"url": url}
+
+
+# --------------------------------------------------------------------------
 # GET /invoices/download-zip/{vendor_id}/{month}
 # --------------------------------------------------------------------------
 @router.get("/download-zip/{vendor_id}/{month}")
@@ -353,6 +416,13 @@ async def download_invoices_zip(
         company=company_segment,
         month=normalized_month,
         user=current_user.email,
+    )
+
+    invoices = (
+        session.query(Invoice)
+        .filter(Invoice.vendor_id == vendor_id)
+        .order_by(Invoice.invoice_date.desc(), Invoice.created_at.desc())
+        .all()
     )
 
     def _build_presigned_url(target_key: str) -> str:
@@ -507,6 +577,69 @@ async def download_invoices_zip(
             raise HTTPException(status_code=502, detail="Unable to enumerate invoices")
 
     if not invoice_objects:
+        # Fall back to the invoice records if the storage layout has changed or
+        # objects are stored under legacy keys that are not discoverable via the
+        # expected prefix.
+        candidate_keys: list[str] = []
+
+        for invoice in invoices:
+            period_year, period_month = _determine_invoice_period(invoice)
+            if period_year != target_year or period_month != target_month:
+                continue
+
+            for attr in ("pdf_s3_key", "s3_key"):
+                value = getattr(invoice, attr, None)
+                if not value:
+                    continue
+                normalized = sanitize_object_key(str(value).strip())
+                if normalized:
+                    candidate_keys.append(normalized)
+
+        unique_keys = []
+        seen = set()
+        for key in candidate_keys:
+            if key not in seen:
+                seen.add(key)
+                unique_keys.append(key)
+
+        if unique_keys:
+            invoice_objects = []
+            for key in unique_keys:
+                try:
+                    await run_in_threadpool(
+                        client.head_object, Bucket=bucket_name, Key=key
+                    )
+                except ClientError as exc:
+                    error_code = exc.response.get("Error", {}).get("Code", "")
+                    if error_code in {"404", "NoSuchKey", "NotFound"}:
+                        continue
+                    LOGGER.error(
+                        "invoice_zip_head_failed",
+                        vendor_id=vendor_id,
+                        company=company_segment,
+                        month=normalized_month,
+                        key=key,
+                        error=str(exc),
+                    )
+                    raise HTTPException(
+                        status_code=502, detail="Unable to access invoice archive"
+                    )
+                except BotoCoreError as exc:
+                    LOGGER.error(
+                        "invoice_zip_head_error",
+                        vendor_id=vendor_id,
+                        company=company_segment,
+                        month=normalized_month,
+                        key=key,
+                        error=str(exc),
+                    )
+                    raise HTTPException(
+                        status_code=502, detail="Unable to access invoice archive"
+                    )
+
+                invoice_objects.append({"Key": key, "LastModified": None})
+
+    if not invoice_objects:
         LOGGER.warning(
             "invoice_zip_no_pdfs",
             vendor_id=vendor_id,
@@ -515,13 +648,6 @@ async def download_invoices_zip(
             prefix=selected_prefix,
         )
         raise HTTPException(status_code=404, detail="No invoices available for this month")
-
-    invoices = (
-        session.query(Invoice)
-        .filter(Invoice.vendor_id == vendor_id)
-        .order_by(Invoice.invoice_date.desc(), Invoice.created_at.desc())
-        .all()
-    )
 
     vendor_record = session.get(Vendor, vendor_id)
     vendor_display_name = (
