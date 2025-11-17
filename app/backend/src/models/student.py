@@ -4,7 +4,7 @@ from datetime import datetime
 
 from sqlalchemy import Column, DateTime, Integer, String, UniqueConstraint
 
-from .base import Base
+from app.backend.src.db.base import Base
 
 
 class Student(Base):

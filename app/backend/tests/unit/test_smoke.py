@@ -31,7 +31,7 @@ from app.backend.src.models import (
     Vendor,
     User,
 )
-from app.backend.src.models.base import Base
+from app.backend.src.db.base import Base
 from app.backend.src.core.security import get_current_user
 
 
