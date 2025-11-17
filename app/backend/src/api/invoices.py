@@ -736,6 +736,7 @@ def list_vendor_invoices(
                 "invoice_id": invoice.id,
                 "student_name": (invoice.student_name or "").strip() or None,
                 "total_cost": float(amount_value),
+                "pdf_s3_key": invoice.pdf_s3_key,
                 "uploaded_at": uploaded_at,
                 "status": (invoice.status or "").strip(),
             }
@@ -756,5 +757,8 @@ def list_vendor_invoices(
         month=month,
         count=len(results),
     )
+
+    for entry in results:
+        entry.pop("uploaded_at", None)
 
     return results
