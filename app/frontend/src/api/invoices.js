@@ -92,12 +92,25 @@ export async function fetchVendorInvoiceArchive(vendorId, month, accessToken) {
   return response.json();
 }
 
-export async function requestInvoicesZip(vendorId, monthKey) {
+export async function requestInvoicesZip(vendorId, monthKey, accessToken) {
+  if (vendorId == null || Number.isNaN(Number(vendorId))) {
+    throw new Error("Missing vendor identifier");
+  }
+
+  if (!monthKey) {
+    throw new Error("Missing invoice month key");
+  }
+
+  if (!accessToken) {
+    throw new Error("Missing access token for ZIP request");
+  }
+
   const response = await fetch(`/api/invoices/download-zip/${vendorId}/${monthKey}`, {
     method: "GET",
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
+      Authorization: `Bearer ${accessToken}`,
     },
   });
 

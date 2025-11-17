@@ -1759,7 +1759,12 @@ export default function DistrictDashboard({
     setDownloadingInvoices(true);
 
     try {
-      const archiveUrl = await requestInvoicesZip(vendorId, normalizedMonth);
+      const accessToken = await getAccessTokenSilently();
+      const archiveUrl = await requestInvoicesZip(
+        vendorId,
+        normalizedMonth,
+        accessToken,
+      );
 
       openInvoiceUrl(
         archiveUrl,
@@ -1778,6 +1783,7 @@ export default function DistrictDashboard({
     }
   }, [
     activeInvoiceDetails,
+    getAccessTokenSilently,
     openInvoiceUrl,
     requestInvoicesZip,
     selectedVendor?.id,
