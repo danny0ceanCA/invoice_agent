@@ -491,12 +491,46 @@ def _build_run_sql_tool(engine: Engine) -> Tool:
             query, context.district_id, context.district_key
         )
 
-        rows: list[dict[str, Any]] = []
-        with engine.connect() as connection:
-            result = connection.execute(sql_text(filtered_query), parameters)
-            for row in result:
-                rows.append(dict(row._mapping))
+        sql_statement = filtered_query.strip()
+        params = dict(parameters)
 
+        if "district_key" not in params and context.district_key is not None:
+            params["district_key"] = context.district_key
+
+        lowered = sql_statement.lower()
+        if " from invoices" in lowered and "district_key" not in lowered:
+            sql_statement = f"""
+        SELECT *
+        FROM (
+            {sql_statement}
+        ) AS sub
+        WHERE sub.district_key = :district_key
+        """
+
+        LOGGER.info(
+            "analytics_run_sql_request",
+            sql=sql_statement,
+            params=params,
+        )
+
+        try:
+            with engine.connect() as connection:
+                result = connection.execute(sql_text(sql_statement), params)
+                rows = [dict(row) for row in result.mappings()]
+        except Exception as exc:
+            LOGGER.error(
+                "analytics_run_sql_error",
+                sql=sql_statement,
+                params=params,
+                error=str(exc),
+            )
+            raise
+
+        LOGGER.info(
+            "analytics_run_sql_result",
+            sql=sql_statement,
+            row_count=len(rows),
+        )
         return rows
 
     return Tool(name="run_sql", description=description, input_schema=schema, handler=handler)
@@ -573,6 +607,12 @@ def _build_system_prompt() -> str:
         "    WHERE invoices.district_key = :district_key\n"
         "- Do NOT attempt to use invoices.district_id or vendors.district_id (they are not reliable).\n"
         "- Multiple vendors may share the same district_key; invoices are already tagged with it.\n\n"
+        "Multi-tenant scoping and district_key:\n"
+        "- Every query you run is tenant-scoped by district_key.\n"
+        "- The tools provide a parameter :district_key, taken from the current user's district.\n"
+        "- When you need a district filter, use \"invoices.district_key = :district_key\" (or rely on the tool's automatic scoping).\n"
+        "- You MUST NOT hard-code district values such as \"district_key = '1'\" or compare district_key to numeric literals.\n"
+        "- Never write \"district_key = '1'\"; always use the :district_key parameter instead.\n\n"
         "SQL RULES:\n"
         "- Only use columns that exist in the schema.\n"
         "- For invoice money totals, ALWAYS use invoices.total_cost.\n"

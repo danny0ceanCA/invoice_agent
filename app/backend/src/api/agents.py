@@ -10,13 +10,15 @@ from botocore.exceptions import BotoCoreError, ClientError, NoCredentialsError
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
 
 from app.backend.src.agents.district_analytics_agent import (
     AgentResponse,
     run_analytics_agent as _execute_analytics_agent,
 )
 from app.backend.src.core.security import get_current_user
-from app.backend.src.models import User
+from app.backend.src.db import get_session_dependency
+from app.backend.src.models import District, User
 
 LOGGER = structlog.get_logger(__name__)
 
@@ -43,6 +45,7 @@ def run_analytics_agent(query: str, user_context: dict[str, Any]) -> dict[str, A
 def analytics_agent_endpoint(
     payload: AnalyticsAgentRequest,
     user: User = Depends(get_current_user),
+    session: Session = Depends(get_session_dependency),
 ) -> dict[str, Any]:
     """Execute the district analytics agent and return the structured output."""
 
@@ -54,8 +57,18 @@ def analytics_agent_endpoint(
         )
 
     context: dict[str, Any] = dict(payload.context or {})
-    if user and getattr(user, "district_id", None) is not None:
-        context.setdefault("district_id", user.district_id)
+    district_id = context.get("district_id")
+
+    if user and getattr(user, "district_id", None) is not None and district_id is None:
+        district_id = user.district_id
+
+    district = session.get(District, district_id) if district_id is not None else None
+    district_key = (district.district_key if district is not None else None) or None
+
+    context.update({
+        "district_key": district_key,
+        "district_id": district_id,
+    })
 
     try:
         return run_analytics_agent(query=query, user_context=context)
