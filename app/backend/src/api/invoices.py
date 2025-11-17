@@ -546,7 +546,10 @@ async def download_invoices_zip(
         month=normalized_month,
         key=zip_key,
     )
-    return {"url": url}
+    return {
+        "url": url,
+        "download_url": url,  # backward compatibility for existing frontend
+    }
 
 
 # --------------------------------------------------------------------------
