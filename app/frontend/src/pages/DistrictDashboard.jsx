@@ -1839,7 +1839,7 @@ export default function DistrictDashboard({
       }
 
       const invoiceId = record.invoiceId ?? null;
-      const s3Key = record.s3Key ?? record.pdfS3Key ?? null;
+      const s3Key = record.pdfS3Key ?? null;
 
       const openPresignedUrl = async () => {
         if (!s3Key) {
