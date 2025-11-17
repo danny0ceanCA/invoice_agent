@@ -7,7 +7,7 @@ from contextlib import contextmanager
 
 from sqlalchemy.orm import Session
 
-from ..models.base import Base
+from .base import Base
 
 from .session import SessionLocal, engine as _engine
 

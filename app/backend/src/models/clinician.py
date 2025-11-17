@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime
-
-from sqlalchemy import Column, DateTime, Integer, String, UniqueConstraint
-
-from .base import Base
+from sqlalchemy import Column, Integer, String, UniqueConstraint
+from app.backend.src.db.base import Base
 
 
 class Clinician(Base):
@@ -22,17 +19,6 @@ class Clinician(Base):
     # Human readable, e.g. "Health Aide", "Licensed Vocational Nurse"
     license_title = Column(String(128), nullable=True)
 
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(
-        DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
-        nullable=False,
-    )
-
     __table_args__ = (
         UniqueConstraint("district_key", "full_name", name="uq_clinicians_district_full_name"),
     )
-
-
-__all__ = ["Clinician"]

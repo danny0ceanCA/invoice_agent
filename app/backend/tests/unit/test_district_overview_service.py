@@ -50,7 +50,7 @@ import pytest
 
 from app.backend.src.db import get_engine, session_scope
 from app.backend.src.models import District, Invoice, InvoiceLineItem, Vendor
-from app.backend.src.models.base import Base
+from app.backend.src.db.base import Base
 from app.backend.src.services.district_overview import fetch_district_vendor_overview
 
 
