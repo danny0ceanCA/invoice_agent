@@ -496,34 +496,55 @@ def _build_run_sql_tool(engine: Engine) -> Tool:
             query, context.district_id, context.district_key
         )
 
-        sql_text_query = filtered_query.strip()
-        log_params = dict(parameters or {})
+        sql_statement = filtered_query.strip()
+        params = dict(parameters)
+
+        # Ensure the real district_key from context is available as a parameter.
+        if context.district_key is not None:
+            params.setdefault("district_key", context.district_key)
+
+            # Rewrite any hard-coded district_key string literals into a parameterized filter.
+            # This fixes queries like "i.district_key = '1'" and ensures they use :district_key instead.
+            sql_statement = re.sub(
+                r"(?i)\b(i|invoices)\.district_key\s*=\s*'[^']*'",
+                r"\1.district_key = :district_key",
+                sql_statement,
+            )
+
+        lowered = sql_statement.lower()
+        if " from invoices" in lowered and "district_key" not in lowered and "sub.district_key" not in lowered:
+            sql_statement = f"""
+        SELECT *
+        FROM (
+            {sql_statement}
+        ) AS sub
+        WHERE sub.district_key = :district_key
+        """
 
         LOGGER.info(
             "analytics_run_sql_request",
-            sql=sql_text_query,
-            params=log_params,
+            sql=sql_statement,
+            params=params,
         )
 
-        with engine.connect() as connection:
-            try:
-                result = connection.execute(sql_text(sql_text_query), parameters)
-                rows = [dict(row._mapping) for row in result]
-            except Exception as exc:
-                LOGGER.error(
-                    "analytics_run_sql_error",
-                    sql=sql_text_query,
-                    params=log_params,
-                    error=str(exc),
-                )
-                raise
+        try:
+            with engine.connect() as connection:
+                result = connection.execute(sql_text(sql_statement), params)
+                rows = [dict(row) for row in result.mappings()]
+        except Exception as exc:
+            LOGGER.error(
+                "analytics_run_sql_error",
+                sql=sql_statement,
+                params=params,
+                error=str(exc),
+            )
+            raise
 
         LOGGER.info(
             "analytics_run_sql_result",
-            sql=sql_text_query,
+            sql=sql_statement,
             row_count=len(rows),
         )
-
         return rows
 
     return Tool(name="run_sql", description=description, input_schema=schema, handler=handler)
