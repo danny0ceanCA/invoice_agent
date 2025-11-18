@@ -65,6 +65,13 @@ def analytics_agent_endpoint(
     if key:
         context.setdefault("district_key", key)
 
+    # Default to the authenticated user's district key when available so that
+    # analytics queries are always scoped to the correct tenant.
+    if "district_key" not in context or not context.get("district_key"):
+        district_key = getattr(getattr(user, "district", None), "district_key", None)
+        if district_key:
+            context.setdefault("district_key", district_key)
+
     if user and getattr(user, "district_id", None) is not None:
         context.setdefault("district_id", user.district_id)
 

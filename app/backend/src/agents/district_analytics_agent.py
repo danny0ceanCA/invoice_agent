@@ -534,6 +534,30 @@ def _build_run_sql_tool(engine: Engine) -> Tool:
         sql_statement = filtered_query.strip()
         params = dict(parameters)
 
+        # If the caller did not provide a district_key but we have a district_id,
+        # resolve the key from the districts table so parameter binding succeeds.
+        if "district_key" not in params and context.district_id is not None:
+            try:
+                with engine.connect() as connection:
+                    result = connection.execute(
+                        sql_text(
+                            "SELECT district_key FROM districts WHERE id = :district_id"
+                        ),
+                        {"district_id": context.district_id},
+                    )
+                    resolved_key = result.scalar_one_or_none()
+            except Exception as exc:  # pragma: no cover - defensive
+                resolved_key = None
+                LOGGER.warning(
+                    "district_key_lookup_failed",
+                    district_id=context.district_id,
+                    error=str(exc),
+                )
+
+            if resolved_key:
+                params["district_key"] = resolved_key
+                context.user_context["district_key"] = resolved_key
+
         # Remove any hard-coded district_key string literals from the SQL.
         # This fixes queries like "i.district_key = '1'" that incorrectly
         # filter out all rows. Since the current deployment is effectively
