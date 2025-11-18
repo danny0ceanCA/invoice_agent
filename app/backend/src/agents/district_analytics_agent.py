@@ -630,6 +630,28 @@ def _build_run_sql_tool(engine: Engine) -> Tool:
             sql_no_dk,
         )
 
+        # Additional cleanup for bare district_key predicates without table alias.
+        # Case A: "WHERE district_key = '... ' AND ..." -> drop the predicate, keep the rest.
+        sql_no_dk = re.sub(
+            r"(?i)\bWHERE\s+district_key\s*=\s*'[^']*'\s+AND\s+",
+            "WHERE ",
+            sql_no_dk,
+        )
+
+        # Case B: "WHERE district_key = '...'" with no trailing AND -> replace with neutral WHERE 1=1.
+        sql_no_dk = re.sub(
+            r"(?i)\bWHERE\s+district_key\s*=\s*'[^']*'\s*(?=$|\s*(ORDER|GROUP|LIMIT|;))",
+            "WHERE 1=1 ",
+            sql_no_dk,
+        )
+
+        # Case C: "AND district_key = '...'" -> remove that AND clause.
+        sql_no_dk = re.sub(
+            r"(?i)\bAND\s+district_key\s*=\s*'[^']*'\s*",
+            " ",
+            sql_no_dk,
+        )
+
         sql_statement = sql_no_dk
 
         lowered = sql_statement.lower()
