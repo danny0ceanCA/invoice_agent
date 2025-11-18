@@ -655,7 +655,16 @@ def _build_run_sql_tool(engine: Engine) -> Tool:
         sql_statement = sql_no_dk
 
         lowered = sql_statement.lower()
-        if " from invoices" in lowered and "district_key" not in lowered and "sub.district_key" not in lowered:
+        needs_wrap = (
+            " from invoices" in lowered
+            and "district_key" not in lowered
+            and "sub.district_key" not in lowered
+        )
+
+        # Only auto-wrap when the query selects * from invoices; if it uses an explicit
+        # column list (no "*"), skip wrapping to avoid referencing sub.district_key when
+        # that column is not present in the projection.
+        if needs_wrap and re.search(r"(?i)\bselect\s+\*", sql_statement):
             sql_statement = f"""
         SELECT *
         FROM (
