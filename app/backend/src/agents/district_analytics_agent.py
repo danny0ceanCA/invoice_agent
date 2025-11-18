@@ -200,7 +200,8 @@ class Workflow:
                 sql = """
                 SELECT DISTINCT student_name
                 FROM invoices
-                WHERE strftime('%Y', invoice_date) = strftime('%Y', 'now')
+                WHERE district_key = :district_key
+                  AND strftime('%Y', invoice_date) = strftime('%Y','now')
                 ORDER BY student_name
                 """
 
