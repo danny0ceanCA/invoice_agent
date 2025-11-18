@@ -10,6 +10,8 @@ from .line_item import InvoiceLineItem
 from .upload import Upload
 from .user import User
 from .vendor import Vendor
+from .student import Student
+from .clinician import Clinician
 
 __all__ = [
     "Approval",
@@ -22,4 +24,6 @@ __all__ = [
     "User",
     "Vendor",
     "DistrictMembership",
+    "Student",
+    "Clinician",
 ]

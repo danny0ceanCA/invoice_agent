@@ -15,7 +15,7 @@ from fastapi import HTTPException
 
 from app.backend.src.db import get_engine, session_scope
 from app.backend.src.models import User
-from app.backend.src.models.base import Base
+from app.backend.src.db.base import Base
 from app.backend.src.services import admin_users
 
 
