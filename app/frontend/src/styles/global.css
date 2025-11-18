@@ -85,7 +85,17 @@ body {
 }
 
 /* Ensure charts and tables don’t blow out layout on small screens */
-.table-wrapper,
+.table-wrapper {
+  max-width: 100%;
+  overflow-x: auto;
+  display: flex;
+  justify-content: center;
+}
+
+.table-wrapper table {
+  margin: 0 auto;
+}
+
 .bar-chart {
   max-width: 100%;
   overflow-x: auto;
