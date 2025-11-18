@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+import re
 from datetime import datetime
 from typing import Any
 
@@ -40,15 +41,31 @@ MONTH_ORDER = [
 MONTH_INDEX = {month: index for index, month in enumerate(MONTH_ORDER)}
 
 
-def _extract_service_month(service_month: str | None) -> tuple[str | None, int | None]:
-    """Return the month name and year parsed from a service month string."""
+def _extract_service_month(
+    service_month: str | None, service_month_num: int | None
+) -> tuple[str | None, int | None]:
+    """Return the month name and year parsed from a service month string/number."""
 
-    if not service_month:
-        return None, None
-    parts = service_month.split()
-    if len(parts) >= 2 and parts[0] in MONTH_INDEX and parts[1].isdigit():
-        return parts[0], int(parts[1])
-    return service_month, None
+    month_name = None
+    year = None
+    if service_month_num and 1 <= service_month_num <= 12:
+        month_name = MONTH_ORDER[service_month_num - 1]
+
+    if service_month:
+        normalized = re.sub(r"[_\-]+", " ", service_month).replace(",", " ").strip()
+        month_match = re.search(
+            r"(January|February|March|April|May|June|July|August|September|October|November|December)",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+        if month_match:
+            month_name = month_name or month_match.group(1).title()
+
+        year_match = re.search(r"(19|20)\d{2}", normalized)
+        if year_match:
+            year = int(year_match.group(0))
+
+    return month_name, year
 
 
 def _format_processed_on(invoice_date: datetime | None) -> str | None:
@@ -100,16 +117,22 @@ def fetch_district_vendor_overview(
         monthly_groups: dict[tuple[int, str], dict[str, Any]] = {}
 
         for invoice in invoice_models:
-            month_name, service_year = _extract_service_month(invoice.service_month)
+            month_name, service_year = _extract_service_month(
+                invoice.service_month, getattr(invoice, "service_month_num", None)
+            )
             invoice_date = invoice.invoice_date
-            if invoice_date:
+            if month_name:
+                year = service_year or (invoice_date.year if invoice_date else datetime.utcnow().year)
+                month = month_name
+                month_index = MONTH_INDEX.get(month_name)
+            elif invoice_date:
                 year = invoice_date.year
                 month = invoice_date.strftime("%B")
                 month_index = MONTH_INDEX.get(month)
             else:
-                year = service_year or datetime.utcnow().year
-                month = month_name or "Unknown"
-                month_index = MONTH_INDEX.get(month_name or "")
+                year = datetime.utcnow().year
+                month = "Unknown"
+                month_index = None
 
             invoice_pdf_key = getattr(invoice, "s3_key", None) or getattr(
                 invoice, "pdf_s3_key", None

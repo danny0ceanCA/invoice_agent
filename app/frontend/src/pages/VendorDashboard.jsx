@@ -3,7 +3,6 @@ import { useAuth0 } from "@auth0/auth0-react";
 import toast from "react-hot-toast";
 import { useNavigate } from "react-router-dom";
 
-import { uploadInvoice } from "../api/invoices";
 import { listJobs } from "../api/jobs";
 import {
   fetchVendorProfile,
@@ -32,7 +31,6 @@ function formatPhoneNumberForDisplay(value = "") {
 
 export default function VendorDashboard({ vendorId }) {
   const [jobs, setJobs] = useState([]);
-  const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState(null);
   const [vendorProfile, setVendorProfile] = useState(null);
   const [profileLoading, setProfileLoading] = useState(false);
@@ -142,15 +140,28 @@ export default function VendorDashboard({ vendorId }) {
     }
   }
 
-  async function handleUpload(event) {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  const handleStartInvoice = () => {
+    setError(null);
 
     if (vendorId == null) {
       setError(
         "Your account is not linked to a vendor profile yet. Please contact an administrator.",
       );
-      event.target.value = "";
+      return;
+    }
+
+    if (profileLoading) {
+      setError("Loading your vendor profile. Please wait.");
+      return;
+    }
+
+    if (profileError) {
+      setError(profileError);
+      return;
+    }
+
+    if (!vendorProfile) {
+      setError("We couldn't load your vendor profile. Please try again.");
       return;
     }
 
@@ -158,41 +169,11 @@ export default function VendorDashboard({ vendorId }) {
       setError(
         "Connect to your district using the district access key before submitting invoices.",
       );
-      event.target.value = "";
       return;
     }
 
-    setIsUploading(true);
-    setError(null);
-
-    try {
-      if (!isAuthenticated) {
-        setError("Please log in to upload invoices.");
-        await loginWithRedirect();
-        return;
-      }
-
-      const token = await getAccessTokenSilently();
-      const payload = {
-        vendor_id: vendorId,
-        invoice_date: new Date().toISOString().split("T")[0],
-        service_month: new Date().toLocaleString("default", {
-          month: "long",
-          year: "numeric",
-        }),
-        invoice_code: `INV-${Date.now()}`,
-      };
-      await uploadInvoice(file, payload, token);
-      await fetchJobs();
-      toast.success("Upload received. We'll start processing right away.");
-    } catch (err) {
-      console.error("invoice_upload_failed", err);
-      setError("Upload failed. Please try again.");
-    } finally {
-      setIsUploading(false);
-      event.target.value = "";
-    }
-  }
+    navigate("/vendor/generate-invoice");
+  };
 
   if (!isAuthenticated) {
     return (
@@ -347,30 +328,28 @@ export default function VendorDashboard({ vendorId }) {
                   Manage access
                 </span>
               </button>
-            </section>
-            <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-              <div className="flex flex-wrap items-start justify-between gap-4">
+
+              <div className="flex h-full flex-col justify-between rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                 <div>
-                  <h2 className="text-lg font-semibold text-slate-900">
-                    Upload timesheets
-                  </h2>
-                  <p className="mt-1 text-sm text-slate-600">
-                    Upload a raw Excel timesheet to kick off automated invoice generation.
-                    Status updates appear below within a few seconds of submission.
+                  <h2 className="text-sm font-semibold text-slate-900">Generate invoice</h2>
+                  <p className="mt-2 text-sm text-slate-600">
+                    Upload your latest timesheet and add invoice details from one dedicated workspace.
                   </p>
                 </div>
-                <label className="inline-flex cursor-pointer items-center justify-center rounded-xl border border-dashed border-amber-400 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-700 shadow-sm transition hover:border-amber-500 hover:bg-amber-100">
-                  <input
-                    type="file"
-                    accept=".xlsx,.xls"
-                    onChange={handleUpload}
-                    disabled={isUploading}
-                    className="sr-only"
-                  />
-                  {isUploading ? "Uploading…" : "Select file"}
-                </label>
+                <div className="mt-4 space-y-2">
+                  <button
+                    type="button"
+                    onClick={handleStartInvoice}
+                    className="inline-flex items-center justify-center rounded-xl border border-dashed border-amber-400 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-700 shadow-sm transition hover:border-amber-500 hover:bg-amber-100"
+                  >
+                    Start invoice
+                  </button>
+                  <p className="text-xs text-slate-500">
+                    We will prompt for service month and invoice date before processing your file.
+                  </p>
+                  {error && <p className="text-sm text-red-600">{error}</p>}
+                </div>
               </div>
-              {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
             </section>
 
             <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">

@@ -1,5 +1,18 @@
 """Entrypoint for the FastAPI application."""
 
+import os
+from dotenv import load_dotenv
+
+# Explicitly point to the project root .env
+import os
+from dotenv import load_dotenv
+
+# Explicitly load the .env file located in app/backend/
+env_path = os.path.join(os.path.dirname(__file__), "../.env")
+load_dotenv(dotenv_path=os.path.abspath(env_path))
+print("DEBUG OPENAI_API_KEY:", os.getenv("OPENAI_API_KEY"))
+
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -7,6 +20,7 @@ from .api import (
     admin,
     admin_users,
     admin_districts,
+    agents,
     analytics,
     auth,
     debug,
@@ -18,6 +32,7 @@ from .api import (
     uploads,
     users,
 )
+from app.api import analytics_agent
 from .core.logging import configure_logging
 
 
@@ -41,6 +56,8 @@ def create_app() -> FastAPI:
     app.include_router(invoices.router, prefix="/api")
     app.include_router(jobs.router, prefix="/api")
     app.include_router(analytics.router, prefix="/api")
+    app.include_router(analytics_agent.router, prefix="/api")
+    app.include_router(agents.router, prefix="/api")
     app.include_router(admin.router, prefix="/api")
     app.include_router(admin_users.router, prefix="/api")
     app.include_router(admin_districts.router, prefix="/api")

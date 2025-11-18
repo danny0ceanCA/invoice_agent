@@ -227,6 +227,8 @@ def test_list_vendor_invoices_returns_monthly_records(client: TestClient) -> Non
             invoice_number="INV-2025-11-001",
             invoice_code="CODE-001",
             service_month="November 2025",
+            service_year=2025,
+            service_month_num=11,
             invoice_date=datetime(2025, 11, 11, 8, 52, 31, tzinfo=timezone.utc),
             total_hours=5.0,
             total_cost=1800.0,
@@ -246,14 +248,8 @@ def test_list_vendor_invoices_returns_monthly_records(client: TestClient) -> Non
     entry = payload[0]
 
     assert entry["invoice_id"] == invoice_id
-    assert entry["vendor_id"] == 42
-    assert entry["company"] == "Always Home Nursing"
-    assert entry["invoice_name"] == "Invoice_Lola_Day_November_2025.pdf"
-    assert (
-        entry["s3_key"]
-        == "invoices/ActionSupportiveCare/2025/11/Invoice_Lola_Day_November_2025.pdf"
-    )
-    assert entry["amount"] == pytest.approx(1800.0)
+    assert entry["student_name"] == "Lola Day"
+    assert entry["total_cost"] == pytest.approx(1800.0)
     assert entry["status"] == "approved"
     assert entry["uploaded_at"] == "2025-11-11T08:52:31Z"
 

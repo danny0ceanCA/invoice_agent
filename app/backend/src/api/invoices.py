@@ -176,6 +176,23 @@ def _format_uploaded_at(value: datetime | None) -> str | None:
     return value.isoformat().replace("+00:00", "Z")
 
 
+def _format_invoice_name_for_export(key: str) -> str:
+    if not key:
+        return ""
+
+    base_name = Path(key).stem
+    clean_name = re.sub(r"_[0-9a-f]{32}$", "", base_name, flags=re.IGNORECASE)
+    clean_name = re.sub(r"^Invoice_", "", clean_name)
+    parts = clean_name.split("_")
+    if len(parts) > 2 and len(parts[0]) > 1:
+        first_name, last_name, *rest = parts
+        compressed = f"{first_name[0]}{last_name}" if last_name else first_name[0]
+        if rest:
+            return "_".join([compressed, *rest])
+        return compressed
+    return "_".join(parts)
+
+
 # --------------------------------------------------------------------------
 # POST /invoices/generate
 # --------------------------------------------------------------------------
@@ -283,6 +300,69 @@ def presign_invoice_file(
 
 
 # --------------------------------------------------------------------------
+# GET /invoices/download/{invoice_id}
+# --------------------------------------------------------------------------
+@router.get("/download/{invoice_id}")
+def download_invoice(
+    invoice_id: int,
+    current_user: User = Depends(require_district_user),
+    session: Session = Depends(get_session_dependency),
+) -> dict[str, str]:
+    """Return a presigned URL for a specific invoice PDF."""
+
+    if invoice_id <= 0:
+        raise HTTPException(status_code=400, detail="Invalid invoice identifier")
+
+    invoice = session.get(Invoice, invoice_id)
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+
+    pdf_s3_key = getattr(invoice, "pdf_s3_key", None)
+    if not pdf_s3_key:
+        raise HTTPException(status_code=404, detail="Invoice PDF not available")
+
+    sanitized_key = sanitize_object_key(str(pdf_s3_key))
+
+    settings = get_settings()
+    bucket_name = settings.aws_s3_bucket or "invoice-agent-files"
+    if bucket_name.lower() == "local":
+        bucket_name = "invoice-agent-files"
+
+    client = get_s3_client()
+
+    LOGGER.info(
+        "invoice_download_request_received",
+        invoice_id=invoice_id,
+        user=current_user.email,
+        bucket=bucket_name,
+        key_preview=sanitized_key[:80],
+    )
+
+    try:
+        url = client.generate_presigned_url(
+            "get_object",
+            Params={
+                "Bucket": bucket_name,
+                "Key": sanitized_key,
+                "ResponseContentDisposition": f'inline; filename="{Path(sanitized_key).name}"',
+                "ResponseContentType": "application/pdf",
+            },
+            ExpiresIn=3600,
+        )
+    except (ClientError, BotoCoreError) as exc:
+        LOGGER.error(
+            "invoice_download_presign_failed",
+            invoice_id=invoice_id,
+            error=str(exc),
+        )
+        raise HTTPException(status_code=502, detail="Unable to generate download link") from exc
+
+    LOGGER.info("invoice_download_presign_success", invoice_id=invoice_id)
+
+    return {"url": url}
+
+
+# --------------------------------------------------------------------------
 # GET /invoices/download-zip/{vendor_id}/{month}
 # --------------------------------------------------------------------------
 @router.get("/download-zip/{vendor_id}/{month}")
@@ -314,19 +394,15 @@ async def download_invoices_zip(
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid month value") from None
 
+    target_year = reference_date.year
+    target_month = reference_date.month
+
     (
         prefix,
         company_segment,
         year_segment,
         month_segment,
     ) = build_invoice_storage_components(vendor_company, reference_date)
-
-    zip_filename = f"{company_segment}_{year_segment}_{month_segment}_invoices.zip"
-    zip_key = f"{prefix}{zip_filename}"
-
-    legacy_prefix = f"invoices/{company_segment}/{normalized_month}/"
-    legacy_zip_filename = f"{company_segment}_{normalized_month}_invoices.zip"
-    legacy_zip_key = f"{legacy_prefix}{legacy_zip_filename}"
 
     client = get_s3_client()
 
@@ -338,288 +414,96 @@ async def download_invoices_zip(
         user=current_user.email,
     )
 
-    def _build_presigned_url(target_key: str) -> str:
-        download_name = re.sub(r"[^A-Za-z0-9._-]+", "_", Path(target_key).name)
-        params = {
-            "Bucket": bucket_name,
-            "Key": sanitize_object_key(target_key),
-            "ResponseContentDisposition": f'attachment; filename="{download_name}"',
-            "ResponseContentType": "application/zip",
-        }
-        return client.generate_presigned_url(
-            "get_object",
-            Params=params,
-            ExpiresIn=3600,
-        )
-
-    async def _object_exists(target_key: str) -> bool:
-        try:
-            await run_in_threadpool(
-                client.head_object, Bucket=bucket_name, Key=target_key
-            )
-            return True
-        except ClientError as exc:
-            error_code = exc.response.get("Error", {}).get("Code", "")
-            if error_code not in {"404", "NoSuchKey", "NotFound"}:
-                LOGGER.error(
-                    "invoice_zip_head_failed",
-                    vendor_id=vendor_id,
-                    company=company_segment,
-                    month=normalized_month,
-                    key=target_key,
-                    error=str(exc),
-                )
-                raise HTTPException(
-                    status_code=502, detail="Unable to access invoice archive"
-                )
-        except BotoCoreError as exc:
-            LOGGER.error(
-                "invoice_zip_head_error",
-                vendor_id=vendor_id,
-                company=company_segment,
-                month=normalized_month,
-                key=target_key,
-                error=str(exc),
-            )
-            raise HTTPException(status_code=502, detail="Unable to access invoice archive")
-        return False
-
-    if await _object_exists(zip_key):
-        try:
-            url = await run_in_threadpool(_build_presigned_url, zip_key)
-        except (ClientError, BotoCoreError) as exc:
-            LOGGER.error(
-                "invoice_zip_presign_failed",
-                vendor_id=vendor_id,
-                company=company_segment,
-                month=normalized_month,
-                key=zip_key,
-                error=str(exc),
-            )
-            raise HTTPException(status_code=502, detail="Unable to generate download link")
-
-        LOGGER.info(
-            "invoice_zip_reused",
-            vendor_id=vendor_id,
-            company=company_segment,
-            month=normalized_month,
-            key=zip_key,
-        )
-        LOGGER.info(
-            "invoice_zip_success",
-            vendor_id=vendor_id,
-            company=company_segment,
-            month=normalized_month,
-            key=zip_key,
-        )
-        return {"download_url": url}
-
-    if await _object_exists(legacy_zip_key):
-        try:
-            url = await run_in_threadpool(_build_presigned_url, legacy_zip_key)
-        except (ClientError, BotoCoreError) as exc:
-            LOGGER.error(
-                "invoice_zip_presign_failed",
-                vendor_id=vendor_id,
-                company=company_segment,
-                month=normalized_month,
-                key=legacy_zip_key,
-                error=str(exc),
-            )
-            raise HTTPException(status_code=502, detail="Unable to generate download link")
-
-        LOGGER.info(
-            "invoice_zip_reused",
-            vendor_id=vendor_id,
-            company=company_segment,
-            month=normalized_month,
-            key=legacy_zip_key,
-        )
-        LOGGER.info(
-            "invoice_zip_success",
-            vendor_id=vendor_id,
-            company=company_segment,
-            month=normalized_month,
-            key=legacy_zip_key,
-        )
-        return {"download_url": url}
-
-    def _list_invoice_objects(target_prefix: str) -> list[dict[str, object]]:
-        paginator = client.get_paginator("list_objects_v2")
-        objects: list[dict[str, object]] = []
-        for page in paginator.paginate(Bucket=bucket_name, Prefix=target_prefix):
-            contents = page.get("Contents", []) or []
-            for entry in contents:
-                key = entry.get("Key")
-                if not key:
-                    continue
-                if key == zip_key or key == legacy_zip_key or str(key).endswith("/"):
-                    continue
-                objects.append(entry)
-        return objects
-
-    selected_prefix = prefix
-    try:
-        invoice_objects = await run_in_threadpool(_list_invoice_objects, prefix)
-    except (ClientError, BotoCoreError) as exc:
-        LOGGER.error(
-            "invoice_zip_list_failed",
-            vendor_id=vendor_id,
-            company=company_segment,
-            month=normalized_month,
-            prefix=prefix,
-            error=str(exc),
-        )
-        raise HTTPException(status_code=502, detail="Unable to enumerate invoices")
-
-    if not invoice_objects:
-        try:
-            invoice_objects = await run_in_threadpool(
-                _list_invoice_objects, legacy_prefix
-            )
-            selected_prefix = legacy_prefix
-        except (ClientError, BotoCoreError) as exc:
-            LOGGER.error(
-                "invoice_zip_list_failed",
-                vendor_id=vendor_id,
-                company=company_segment,
-                month=normalized_month,
-                prefix=legacy_prefix,
-                error=str(exc),
-            )
-            raise HTTPException(status_code=502, detail="Unable to enumerate invoices")
-
-    if not invoice_objects:
-        LOGGER.warning(
-            "invoice_zip_no_pdfs",
-            vendor_id=vendor_id,
-            company=company_segment,
-            month=normalized_month,
-            prefix=selected_prefix,
-        )
-        raise HTTPException(status_code=404, detail="No invoices available for this month")
-
     invoices = (
         session.query(Invoice)
         .filter(Invoice.vendor_id == vendor_id)
-        .order_by(Invoice.invoice_date.desc(), Invoice.created_at.desc())
+        .filter(Invoice.service_year == target_year)
+        .filter(Invoice.service_month_num == target_month)
+        .order_by(Invoice.student_name.asc())
         .all()
     )
 
-    vendor_record = session.get(Vendor, vendor_id)
-    vendor_display_name = (
-        (vendor_record.company_name or "").strip() if vendor_record else ""
-    ) or vendor_company
-
-    target_year = reference_date.year
-    target_month = reference_date.month
-
-    invoice_lookup: dict[str, Invoice] = {}
-    invoice_lookup_by_name: dict[str, Invoice] = {}
+    pdf_keys: list[tuple[str, Invoice]] = []
+    summary_rows: list[list[object]] = []
 
     for invoice in invoices:
-        period_year, period_month = _determine_invoice_period(invoice)
-        if period_year != target_year or period_month != target_month:
+        key = getattr(invoice, "pdf_s3_key", None)
+        if not key:
             continue
 
-        for attr in ("s3_key", "pdf_s3_key"):
-            key_value = getattr(invoice, attr, None)
-            if not key_value:
-                continue
+        sanitized = sanitize_object_key(str(key).strip())
+        if not sanitized:
+            continue
 
-            normalized_key = str(key_value).strip()
-            if not normalized_key:
-                continue
-
-            sanitized_key = sanitize_object_key(normalized_key)
-            invoice_lookup[normalized_key] = invoice
-            invoice_lookup[sanitized_key] = invoice
-            invoice_lookup_by_name[Path(normalized_key).name] = invoice
-            invoice_lookup_by_name[Path(sanitized_key).name] = invoice
-
-    def _build_zip() -> bytes:
-        buffer = BytesIO()
-        summary_rows: list[tuple[str, str, str, str]] = []
-        with ZipFile(buffer, "w", ZIP_DEFLATED) as archive:
-            for entry in invoice_objects:
-                key = str(entry["Key"])
-                file_buffer = BytesIO()
-                client.download_fileobj(
-                    Bucket=bucket_name,
-                    Key=key,
-                    Fileobj=file_buffer,
-                )
-                file_buffer.seek(0)
-                archive.writestr(Path(key).name, file_buffer.read())
-
-                invoice = invoice_lookup.get(key) or invoice_lookup.get(
-                    sanitize_object_key(key)
-                )
-                if invoice is None:
-                    invoice = invoice_lookup_by_name.get(Path(key).name)
-
-                if invoice:
-                    amount_value = Decimal(invoice.total_cost or 0).quantize(
-                        Decimal("0.01"), rounding=ROUND_HALF_UP
-                    )
-                    amount_display = format(amount_value, ".2f")
-                    uploaded_at = _format_uploaded_at(
-                        invoice.invoice_date or getattr(invoice, "created_at", None)
-                    )
-                else:
-                    amount_display = ""
-                    uploaded_at = None
-
-                if not uploaded_at:
-                    uploaded_at = _format_uploaded_at(entry.get("LastModified"))
-
-                summary_rows.append(
-                    (
-                        vendor_display_name,
-                        Path(key).name,
-                        amount_display,
-                        uploaded_at or "",
-                    )
-                )
-
-            csv_buffer = StringIO()
-            writer = csv.writer(csv_buffer)
-            writer.writerow(["Vendor", "Invoice Name", "Amount", "Uploaded At"])
-            writer.writerows(summary_rows)
-            archive.writestr("invoice_summary.csv", csv_buffer.getvalue())
-
-        buffer.seek(0)
-        return buffer.read()
-
-    try:
-        zip_payload = await run_in_threadpool(_build_zip)
-    except (ClientError, BotoCoreError) as exc:
-        LOGGER.error(
-            "invoice_zip_build_failed",
-            vendor_id=vendor_id,
-            month=normalized_month,
-            prefix=prefix,
-            error=str(exc),
-        )
-        raise HTTPException(status_code=502, detail="Unable to build invoice archive")
-
-    def _upload_zip(payload: bytes) -> None:
-        client.upload_fileobj(
-            Fileobj=BytesIO(payload),
-            Bucket=bucket_name,
-            Key=zip_key,
-            ExtraArgs={"ContentType": "application/zip"},
+        pdf_keys.append((sanitized, invoice))
+        summary_rows.append(
+            [
+                (invoice.student_name or "").strip(),
+                str(invoice.id),
+                float(invoice.total_cost or 0),
+                (invoice.status or "").strip(),
+                sanitized,
+            ]
         )
 
-    try:
-        await run_in_threadpool(_upload_zip, zip_payload)
-        LOGGER.info(
-            "invoice_zip_created",
+    if not pdf_keys:
+        LOGGER.warning(
+            "invoice_zip_no_objects",
             vendor_id=vendor_id,
             company=company_segment,
             month=normalized_month,
-            key=zip_key,
-            file_count=len(invoice_objects),
+        )
+        raise HTTPException(status_code=404, detail="No invoices available for this month")
+
+    buffer = BytesIO()
+    with ZipFile(buffer, "w", ZIP_DEFLATED) as zf:
+        for s3_key, invoice in pdf_keys:
+            try:
+                obj = await run_in_threadpool(
+                    client.get_object, Bucket=bucket_name, Key=s3_key
+                )
+                body = obj["Body"].read()
+            except (ClientError, BotoCoreError) as exc:
+                LOGGER.error(
+                    "invoice_zip_fetch_failed",
+                    vendor_id=vendor_id,
+                    company=company_segment,
+                    month=normalized_month,
+                    key=s3_key,
+                    error=str(exc),
+                )
+                raise HTTPException(
+                    status_code=502, detail="Unable to read invoice files"
+                ) from exc
+
+            student_slug = re.sub(
+                r"[^A-Za-z0-9._-]+",
+                "_",
+                (invoice.student_name or "").strip() or "invoice",
+            )
+            arcname = f"{student_slug}_{year_segment}_{month_segment}.pdf"
+            zf.writestr(arcname, body)
+
+        csv_buffer = StringIO()
+        writer = csv.writer(csv_buffer)
+        writer.writerow(
+            ["student_name", "invoice_id", "total_cost", "status", "pdf_s3_key"]
+        )
+        writer.writerows(summary_rows)
+        zf.writestr("invoice_summary.csv", csv_buffer.getvalue())
+
+    zip_bytes = buffer.getvalue()
+
+    zip_key = f"{prefix}{company_segment}_{year_segment}_{month_segment}_invoices_dynamic.zip"
+    zip_key = sanitize_object_key(zip_key)
+
+    try:
+        await run_in_threadpool(
+            client.put_object,
+            Bucket=bucket_name,
+            Key=zip_key,
+            Body=zip_bytes,
+            ContentType="application/zip",
         )
     except (ClientError, BotoCoreError) as exc:
         LOGGER.error(
@@ -632,8 +516,18 @@ async def download_invoices_zip(
         )
         raise HTTPException(status_code=502, detail="Unable to store invoice archive")
 
+    download_name = re.sub(r"[^A-Za-z0-9._-]+", "_", Path(zip_key).name)
+    params = {
+        "Bucket": bucket_name,
+        "Key": zip_key,
+        "ResponseContentDisposition": f'attachment; filename="{download_name}"',
+        "ResponseContentType": "application/zip",
+    }
+
     try:
-        download_url = await run_in_threadpool(_build_presigned_url, zip_key)
+        url = client.generate_presigned_url(
+            "get_object", Params=params, ExpiresIn=3600
+        )
     except (ClientError, BotoCoreError) as exc:
         LOGGER.error(
             "invoice_zip_presign_failed",
@@ -652,7 +546,10 @@ async def download_invoices_zip(
         month=normalized_month,
         key=zip_key,
     )
-    return {"download_url": download_url}
+    return {
+        "url": url,
+        "download_url": url,  # backward compatibility for existing frontend
+    }
 
 
 # --------------------------------------------------------------------------
@@ -686,193 +583,40 @@ def list_vendor_invoices(
     except ValueError as exc:  # pragma: no cover - defensive guard
         raise HTTPException(status_code=400, detail="Invalid invoice period") from exc
 
-    vendor_company = _resolve_vendor_company_name(session, vendor_id)
-    (
-        prefix,
-        company_segment,
-        year_segment,
-        month_segment,
-    ) = build_invoice_storage_components(vendor_company, reference_date)
-
-    legacy_month_token = f"{year_segment}-{month_segment}"
-    legacy_prefix = f"invoices/{company_segment}/{legacy_month_token}/"
-
     LOGGER.info(
         "district_invoice_listing_requested",
         vendor_id=vendor_id,
-        company=company_segment,
-        year=year_segment,
-        month=month_segment,
+        year=year,
+        month=month,
         user=current_user.email,
     )
-
-    settings = get_settings()
-    bucket_name = settings.aws_s3_bucket or "invoice-agent-files"
-    if bucket_name.lower() == "local":
-        bucket_name = "invoice-agent-files"
-
-    client = get_s3_client()
-
-    def _collect_invoice_objects(target_prefix: str) -> list[dict[str, object]]:
-        paginator = client.get_paginator("list_objects_v2")
-        objects: list[dict[str, object]] = []
-        for page in paginator.paginate(Bucket=bucket_name, Prefix=target_prefix):
-            contents = page.get("Contents", []) or []
-            for entry in contents:
-                key = entry.get("Key")
-                if not key:
-                    continue
-                if str(key).endswith("/"):
-                    continue
-                objects.append(entry)
-        return objects
-
-    invoice_objects: list[dict[str, object]] = []
-    active_prefix = prefix
-
-    try:
-        invoice_objects = _collect_invoice_objects(prefix)
-    except (ClientError, BotoCoreError) as exc:
-        LOGGER.error(
-            "district_invoice_listing_s3_error",
-            vendor_id=vendor_id,
-            company=company_segment,
-            year=year_segment,
-            month=month_segment,
-            prefix=prefix,
-            error=str(exc),
-        )
-
-    if not invoice_objects:
-        try:
-            legacy_objects = _collect_invoice_objects(legacy_prefix)
-        except (ClientError, BotoCoreError) as exc:
-            LOGGER.error(
-                "district_invoice_listing_legacy_s3_error",
-                vendor_id=vendor_id,
-                company=company_segment,
-                year=year_segment,
-                month=month_segment,
-                prefix=legacy_prefix,
-                error=str(exc),
-            )
-        else:
-            if legacy_objects:
-                invoice_objects = legacy_objects
-                active_prefix = legacy_prefix
 
     invoices = (
         session.query(Invoice)
         .filter(Invoice.vendor_id == vendor_id)
-        .order_by(Invoice.invoice_date.desc(), Invoice.created_at.desc())
+        .filter(Invoice.service_year == year)
+        .filter(Invoice.service_month_num == month)
         .all()
     )
 
-    vendor_company_display = vendor.company_name or company_segment
-
     results: list[dict[str, object]] = []
-    target_month = month
-    target_year = year
-
-    invoice_lookup: dict[str, Invoice] = {}
-    invoice_lookup_by_name: dict[str, Invoice] = {}
-
-    filtered_invoices: list[Invoice] = []
     for invoice in invoices:
-        period_year, period_month = _determine_invoice_period(invoice)
-        if period_year != target_year or period_month != target_month:
-            continue
-        filtered_invoices.append(invoice)
-        for attr in ("s3_key", "pdf_s3_key"):
-            key_value = getattr(invoice, attr, None)
-            if key_value:
-                normalized_key = str(key_value).strip()
-                sanitized_key = sanitize_object_key(normalized_key)
-                invoice_lookup[normalized_key] = invoice
-                invoice_lookup[sanitized_key] = invoice
-                invoice_lookup_by_name[Path(normalized_key).name] = invoice
-                invoice_lookup_by_name[Path(sanitized_key).name] = invoice
-
-    matched_invoice_ids: set[int] = set()
-
-    seen_s3_keys: set[str] = set()
-    for entry in invoice_objects:
-        key = str(entry.get("Key", ""))
-        if not key or key in seen_s3_keys:
-            continue
-        if Path(key).suffix.lower() == ".zip":
-            continue
-        seen_s3_keys.add(key)
-
-        invoice = invoice_lookup.get(key) or invoice_lookup.get(sanitize_object_key(key))
-        if invoice is None:
-            invoice = invoice_lookup_by_name.get(Path(key).name)
-
-        if invoice:
-            matched_invoice_ids.add(invoice.id)
-            amount_decimal = Decimal(invoice.total_cost or 0).quantize(
-                Decimal("0.01"), rounding=ROUND_HALF_UP
-            )
-            uploaded_at = _format_uploaded_at(
-                invoice.invoice_date or getattr(invoice, "created_at", None)
-            )
-        else:
-            amount_decimal = Decimal(0).quantize(
-                Decimal("0.01"), rounding=ROUND_HALF_UP
-            )
-            uploaded_at = None
-
-        if not uploaded_at:
-            uploaded_at = _format_uploaded_at(entry.get("LastModified"))
-
-        results.append(
-            {
-                "invoice_id": invoice.id if invoice else None,
-                "vendor_id": vendor_id,
-                "company": vendor_company_display,
-                "invoice_name": Path(key).name,
-                "s3_key": key,
-                "amount": float(amount_decimal),
-                "status": (invoice.status if invoice else "") or "",
-                "uploaded_at": uploaded_at,
-            }
-        )
-
-    for invoice in filtered_invoices:
-        if invoice.id in matched_invoice_ids:
-            continue
-
-        s3_key = getattr(invoice, "s3_key", None) or getattr(
-            invoice, "pdf_s3_key", None
-        )
-        if s3_key and Path(s3_key).suffix.lower() == ".zip":
-            continue
-
-        if s3_key:
-            invoice_name = Path(s3_key).name
-        else:
-            candidate_name = (invoice.invoice_number or invoice.student_name or "invoice").strip()
-            if not candidate_name.lower().endswith(".pdf"):
-                candidate_name = f"{candidate_name}.pdf"
-            invoice_name = candidate_name
-
-        amount = Decimal(invoice.total_cost or 0).quantize(
-            Decimal("0.01"), rounding=ROUND_HALF_UP
-        )
         uploaded_at = _format_uploaded_at(
-            invoice.invoice_date or getattr(invoice, "created_at", None)
+            getattr(invoice, "invoice_date", None) or getattr(invoice, "created_at", None)
+        )
+
+        amount_value = Decimal(invoice.total_cost or 0).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
         )
 
         results.append(
             {
                 "invoice_id": invoice.id,
-                "vendor_id": invoice.vendor_id,
-                "company": vendor_company_display,
-                "invoice_name": invoice_name,
-                "s3_key": s3_key,
-                "amount": float(amount),
-                "status": invoice.status or "",
+                "student_name": (invoice.student_name or "").strip() or None,
+                "total_cost": float(amount_value),
+                "pdf_s3_key": invoice.pdf_s3_key,
                 "uploaded_at": uploaded_at,
+                "status": (invoice.status or "").strip(),
             }
         )
 
@@ -887,11 +631,12 @@ def list_vendor_invoices(
     LOGGER.info(
         "district_invoice_listing_ready",
         vendor_id=vendor_id,
-        company=company_segment,
-        year=year_segment,
-        month=month_segment,
-        prefix_used=active_prefix,
+        year=year,
+        month=month,
         count=len(results),
     )
+
+    for entry in results:
+        entry.pop("uploaded_at", None)
 
     return results

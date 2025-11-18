@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "clean": "rm -rf node_modules/.vite dist",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview"
