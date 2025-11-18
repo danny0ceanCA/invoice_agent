@@ -229,6 +229,51 @@ class Workflow:
 
                     return _finalise_response(payload, context)
 
+            student_list_phrases = [
+                "list of students",
+                "student list",
+                "students ytd",
+                "all students",
+                "students in our system",
+                "students by year",
+            ]
+
+            if any(phrase in normalized_query for phrase in student_list_phrases):
+                sql = """
+                SELECT DISTINCT student_name
+                FROM invoices
+                WHERE district_key = :district_key
+                ORDER BY student_name
+                """
+
+                try:
+                    run_sql_tool = agent.lookup_tool("run_sql")
+                except RuntimeError:
+                    LOGGER.warning(
+                        "run_sql_tool_unavailable_for_student_list", query=query
+                    )
+                else:
+                    try:
+                        rows = run_sql_tool.invoke(context, {"query": sql})
+                    except Exception as exc:  # pragma: no cover - defensive
+                        context.last_error = str(exc)
+                        payload = {
+                            "text": f"Failed to fetch student list: {exc}",
+                            "rows": None,
+                            "html": None,
+                        }
+                    else:
+                        context.last_rows = rows
+                        if rows:
+                            text = (
+                                f"Found {len(rows)} student{'' if len(rows) == 1 else 's'}"
+                            )
+                        else:
+                            text = "No students found."
+                        payload = {"text": text, "rows": rows}
+
+                    return _finalise_response(payload, context)
+
             student_name = _extract_student_name(query)
             if student_name and context.district_key:
                 safe_name = student_name.replace("'", "''")
