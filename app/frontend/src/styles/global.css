@@ -39,7 +39,7 @@ body {
 /* -------- Analytics agent insights list -------- */
 
 .insights-list {
-  margin: 0 0 0.75rem 0;
+  margin: 1rem 0 0.75rem 0; /* add space above the narrative */
   padding-left: 1.1rem;
   font-size: 0.85rem;
   color: #374151;
