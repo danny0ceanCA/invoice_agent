@@ -497,14 +497,85 @@ def _strip_html(s: str) -> str:
 
 
 def _render_html_table(rows: Sequence[Mapping[str, Any]]) -> str:
+    """
+    Render a generic HTML table from rows, applying basic formatting rules:
+
+    - Columns with amount-like names (e.g., total_cost, total_spend, amount, cost)
+      are rendered as currency ($X,XXX.XX) and tagged with class="amount-col".
+    - Columns with date-like names (e.g., invoice_date, service_date, created_at)
+      are rendered as date-only (YYYY-MM-DD), stripping any time component.
+    - All other values are rendered as plain text.
+    - The table is wrapped in <div class="table-wrapper"><table class="analytics-table">...</table></div>
+      to align with analytics styling.
+    """
+    if not rows:
+        return "<div class=\"table-wrapper\"><table class=\"analytics-table\"></table></div>"
+
     headers = list(rows[0].keys())
+
+    amount_like = {
+        "total_cost",
+        "total_spend",
+        "amount",
+        "cost",
+        "highest_amount",
+    }
+    date_like = {
+        "invoice_date",
+        "service_date",
+        "created_at",
+        "last_modified",
+    }
+
     header_html = "".join(f"<th>{escape(str(header))}</th>" for header in headers)
     body_rows: list[str] = []
+
     for row in rows:
-        cells = "".join(f"<td>{escape(str(row.get(header, '')))}</td>" for header in headers)
-        body_rows.append(f"<tr>{cells}</tr>")
+        cells_html: list[str] = []
+        for header in headers:
+            key = str(header)
+            raw = row.get(header, "")
+
+            # Currency formatting for amount-like columns
+            if key in amount_like:
+                try:
+                    value = float(raw)
+                    display = f"${value:,.2f}"
+                except Exception:
+                    display = str(raw)
+                cell_html = f"<td class=\"amount-col\">{escape(display)}</td>"
+
+            # Date-only formatting for date-like columns
+            elif key in date_like:
+                text = str(raw)
+                # Split off time if present (supports 'YYYY-MM-DD HH:MM:SS' or ISO 'YYYY-MM-DDTHH:MM:SS')
+                if "T" in text:
+                    date_part = text.split("T", 1)[0]
+                else:
+                    date_part = text.split(" ", 1)[0]
+                cell_html = f"<td>{escape(date_part)}</td>"
+
+            # Default plain text
+            else:
+                cell_html = f"<td>{escape(str(raw))}</td>"
+
+            cells_html.append(cell_html)
+
+        body_rows.append("<tr>" + "".join(cells_html) + "</tr>")
+
     body_html = "".join(body_rows)
-    return f"<table><thead><tr>{header_html}</tr></thead><tbody>{body_html}</tbody></table>"
+    return (
+        "<div class=\"table-wrapper\">"
+        "<table class=\"analytics-table\">"
+        "<thead><tr>"
+        f"{header_html}"
+        "</tr></thead>"
+        "<tbody>"
+        f"{body_html}"
+        "</tbody>"
+        "</table>"
+        "</div>"
+    )
 
 
 def _month_sort_key(month_str: Any) -> int:
@@ -702,12 +773,86 @@ def _remember_interaction(context: AgentContext, response: AgentResponse) -> Non
 
 
 def _summarize_response(response: AgentResponse) -> str:
+    """
+    Build a compact, entity-rich summary of the agent's response for memory storage.
+
+    Priority:
+    - If 'text' exists, use it directly.
+    - Otherwise, if 'rows' exist, report row count and, when possible, list key entities
+      such as students, providers, vendors, or invoice numbers.
+    - Otherwise, fall back to stripped HTML or an empty string.
+    """
     if response.text:
         return response.text
+
     if response.rows:
-        return f"Returned {len(response.rows)} row{'s' if len(response.rows) != 1 else ''}."
+        rows = response.rows
+        count = len(rows)
+        summary_parts = [f"Returned {count} row{'s' if count != 1 else ''}."]
+        sample = rows[0]
+        keys = {str(k) for k in sample.keys()}
+
+        # Helper to extract distinct values for a given column name
+        def collect_entities(col_name: str, label: str, max_items: int = 10) -> str | None:
+            if col_name not in sample:
+                return None
+            values = {
+                str(r.get(col_name, "")).strip()
+                for r in rows
+                if r.get(col_name)
+            }
+            values = {v for v in values if v}
+            if not values:
+                return None
+            sorted_vals = sorted(values)
+            shown = sorted_vals[:max_items]
+            more = len(sorted_vals) - len(shown)
+            base = ", ".join(shown)
+            if more > 0:
+                base += f" (and {more} more)"
+            return f"{label}: {base}."
+
+        # Try students
+        if "student_name" in keys:
+            ent = collect_entities("student_name", "Students")
+            if ent:
+                summary_parts.append(ent)
+        elif "student" in keys:
+            ent = collect_entities("student", "Students")
+            if ent:
+                summary_parts.append(ent)
+
+        # Try providers/clinicians
+        if "clinician" in keys:
+            ent = collect_entities("clinician", "Providers")
+            if ent:
+                summary_parts.append(ent)
+        elif "provider" in keys:
+            ent = collect_entities("provider", "Providers")
+            if ent:
+                summary_parts.append(ent)
+
+        # Try vendors
+        if "vendor_name" in keys:
+            ent = collect_entities("vendor_name", "Vendors")
+            if ent:
+                summary_parts.append(ent)
+        elif "name" in keys and "vendor_id" in keys:
+            ent = collect_entities("name", "Vendors")
+            if ent:
+                summary_parts.append(ent)
+
+        # Try invoice numbers
+        if "invoice_number" in keys:
+            ent = collect_entities("invoice_number", "Invoices")
+            if ent:
+                summary_parts.append(ent)
+
+        return " ".join(summary_parts)
+
     if response.html:
         return _strip_html(response.html)
+
     return ""
 
 
@@ -1028,6 +1173,9 @@ def _build_system_prompt() -> str:
         "- Treat the last returned row set (students, invoices, vendors, months) as the active working set \n"
         "  unless the user explicitly changes scope.\n"
         "- Memory MUST influence how you construct SQL queries for follow-up questions.\n"
+        "- If the reference is ambiguous (for example, multiple prior results could match 'these students'),\n"
+        "  you should respond with a clarifying question rather than guessing. In that case, ask the user\n"
+        "  which students/invoices/vendors they mean in plain English, and do not run any SQL until they clarify.\n"
     )
 
     return (
