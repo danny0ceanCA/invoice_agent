@@ -656,15 +656,15 @@ def _finalise_response(payload: Mapping[str, Any], context: AgentContext) -> Age
         text_value = "See the table below for details."
 
     if rows:
-        if html_value:
-            html = html_value
+        # For the special case of monthly spend by student, always render
+        # a student-by-month pivot table from the long-format rows, even if
+        # the model provided its own HTML.
+        if _should_pivot_student_month(rows, context.query):
+            html = _render_student_month_pivot(rows)
         else:
-            # Decide whether to render a student-by-month pivot, otherwise fall back
-            # to the generic HTML table renderer.
-            if _should_pivot_student_month(rows, context.query):
-                html = _render_student_month_pivot(rows)
-            else:
-                html = _render_html_table(rows)
+            # In all other cases, respect any HTML provided by the model,
+            # or fall back to the generic table renderer.
+            html = html_value or _render_html_table(rows)
     else:
         html = html_value or _safe_html(text_value)
 
