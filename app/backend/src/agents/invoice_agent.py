@@ -386,6 +386,7 @@ class InvoiceAgent:
             )
             line_item = InvoiceLineItem(
                 invoice_id=invoice.id,
+                invoice_number=invoice.invoice_number,
                 student=student,
                 clinician=str(row["Employee"]),
                 service_code=str(row["Service Code"]),
