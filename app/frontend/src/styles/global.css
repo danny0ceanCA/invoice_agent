@@ -100,3 +100,9 @@ body {
   max-width: 100%;
   overflow-x: auto;
 }
+
+/* General spacing for analytics tables */
+.analytics-table th,
+.analytics-table td {
+  padding: 0.35rem 0.9rem; /* vertical, horizontal */
+}
