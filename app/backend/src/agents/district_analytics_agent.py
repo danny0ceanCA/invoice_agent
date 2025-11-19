@@ -519,7 +519,11 @@ def _should_pivot_student_month(
     Conditions:
     - Rows contain student_name and service_month keys.
     - Rows contain a numeric total field (e.g., total_cost).
-    Query text is ignored; we pivot whenever the row shape matches.
+    - Rows do NOT contain obvious invoice-detail or line-item fields
+      such as invoice_number, invoice_date, clinician, service_code,
+      service_date, hours, rate, or cost.
+    In other words, we only pivot "pure summary" row shapes and skip
+    true invoice-detail result sets.
     """
     if not rows:
         return False
@@ -527,9 +531,11 @@ def _should_pivot_student_month(
     sample = rows[0]
     keys = {str(k) for k in sample.keys()}
 
+    # Require summary shape: student_name + service_month present.
     if "student_name" not in keys or "service_month" not in keys:
         return False
 
+    # Identify the numeric total field.
     amount_key = None
     for candidate in ["total_cost", "total_spend", "amount", "total"]:
         if candidate in keys:
@@ -537,6 +543,22 @@ def _should_pivot_student_month(
             break
 
     if amount_key is None:
+        return False
+
+    # If there are obvious invoice-detail / line-item fields, this is not
+    # a pure summary rowset and should NOT be pivoted.
+    detail_like_keys = {
+        "invoice_number",
+        "invoice_date",
+        "status",
+        "clinician",
+        "service_code",
+        "service_date",
+        "hours",
+        "rate",
+        "cost",
+    }
+    if any(k in keys for k in detail_like_keys):
         return False
 
     # Basic numeric check on the first row
@@ -1238,6 +1260,37 @@ def _build_system_prompt() -> str:
         "- When a student may have multiple invoices, return all matching rows sorted by invoice_date DESC.\n"
         "- When asking ‘why is amount low?’ or ‘what happened?’, extract that student’s invoice(s) and return invoice_number, student_name, total_cost, service_month, status.\n"
         "- NEVER assume the student is a vendor — students and vendors are separate entities.\n\n"
+        "INVOICE DETAIL QUERIES:\n"
+        "- When the user asks for invoice information or invoice details for a student (for example, 'invoice information for Addison Johnson', 'invoice details for this student in September', 'list invoices for Jayden Ramsey by month'), you MUST return invoice-level rows, not aggregated totals.\n"
+        "- In these cases:\n"
+        "-   • Do NOT GROUP BY student_name or service_month.\n"
+        "-   • Select invoice-level columns such as:\n"
+        "       invoice_number,\n"
+        "       student_name,\n"
+        "       service_month,\n"
+        "       invoice_date,\n"
+        "       total_cost,\n"
+        "       status.\n"
+        "-   • When the user also cares about clinicians or services, you MAY join invoice_line_items to show line-item detail:\n"
+        "       SELECT i.invoice_number,\n"
+        "              i.student_name,\n"
+        "              i.service_month,\n"
+        "              i.invoice_date,\n"
+        "              ili.service_date,\n"
+        "              ili.clinician,\n"
+        "              ili.service_code,\n"
+        "              ili.hours,\n"
+        "              ili.rate,\n"
+        "              ili.cost\n"
+        "       FROM invoices i\n"
+        "       JOIN invoice_line_items ili ON ili.invoice_id = i.id\n"
+        "       WHERE i.district_key = :district_key\n"
+        "         AND LOWER(i.student_name) LIKE LOWER(:student_name_pattern)\n"
+        "       ORDER BY i.invoice_date, ili.clinician, ili.service_date;\n"
+        "- Always filter invoice detail queries by district_key when the parameter is available, e.g. i.district_key = :district_key.\n"
+        "- If the user specifies a month as well (e.g., 'for September'), add a filter such as LOWER(i.service_month) = LOWER('September').\n"
+        "- Invoice detail responses should produce a straightforward table of invoice rows or line items; DO NOT pivot these tables into Student × Month, and do NOT aggregate totals unless the user explicitly asks for a summary.\n"
+        "\n"
         "FINAL OUTPUT FORMAT:\n"
         "- You MUST respond with a single JSON object: {\"text\": str, \"rows\": list|None, \"html\": str}.\n"
         "- text: a concise human-readable summary in plain English.\n"
