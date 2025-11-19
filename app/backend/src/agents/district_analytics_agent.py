@@ -517,14 +517,11 @@ def _should_pivot_student_month(
     Decide whether to render a student-by-month pivot table.
 
     Conditions:
-    - Query mentions both 'student' and 'month' and either 'spend', 'cost', or 'total'.
-    - Rows contain student_name and service_month keys and a numeric total field.
+    - Rows contain student_name and service_month keys.
+    - Rows contain a numeric total field (e.g., total_cost).
+    Query text is ignored; we pivot whenever the row shape matches.
     """
     if not rows:
-        return False
-
-    q = (query or "").lower()
-    if not ("student" in q and "month" in q and any(w in q for w in ["spend", "cost", "total"])):
         return False
 
     sample = rows[0]
