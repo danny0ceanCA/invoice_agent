@@ -15,6 +15,7 @@ class InvoiceLineItem(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     invoice_id: Mapped[int] = mapped_column(ForeignKey("invoices.id"), nullable=False, index=True)
+    invoice_number: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     student: Mapped[str] = mapped_column(String(255), nullable=False)
     clinician: Mapped[str] = mapped_column(String(255), nullable=False)
     service_code: Mapped[str] = mapped_column(String(50), nullable=False)
