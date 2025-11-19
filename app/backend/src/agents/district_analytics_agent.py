@@ -483,6 +483,180 @@ def _render_html_table(rows: Sequence[Mapping[str, Any]]) -> str:
     return f"<table><thead><tr>{header_html}</tr></thead><tbody>{body_html}</tbody></table>"
 
 
+def _month_sort_key(month_str: Any) -> int:
+    """
+    Return a sort key for textual month names. Unknown values sort last.
+    """
+    if month_str is None:
+        return 99
+    name = str(month_str).strip().lower()
+    months = [
+        "january",
+        "february",
+        "march",
+        "april",
+        "may",
+        "june",
+        "july",
+        "august",
+        "september",
+        "october",
+        "november",
+        "december",
+    ]
+    try:
+        return months.index(name)
+    except ValueError:
+        return 99
+
+
+def _should_pivot_student_month(
+    rows: Sequence[Mapping[str, Any]], query: str | None
+) -> bool:
+    """
+    Decide whether to render a student-by-month pivot table.
+
+    Conditions:
+    - Rows contain student_name and service_month keys.
+    - Rows contain a numeric total field (e.g., total_cost).
+    - Rows do NOT contain obvious invoice-detail or line-item fields
+      such as invoice_number, invoice_date, clinician, service_code,
+      service_date, hours, rate, or cost.
+    In other words, we only pivot "pure summary" row shapes and skip
+    true invoice-detail result sets.
+    """
+    if not rows:
+        return False
+
+    sample = rows[0]
+    keys = {str(k) for k in sample.keys()}
+
+    # Require summary shape: student_name + service_month present.
+    if "student_name" not in keys or "service_month" not in keys:
+        return False
+
+    # Identify the numeric total field.
+    amount_key = None
+    for candidate in ["total_cost", "total_spend", "amount", "total"]:
+        if candidate in keys:
+            amount_key = candidate
+            break
+
+    if amount_key is None:
+        return False
+
+    # If there are obvious invoice-detail / line-item fields, this is not
+    # a pure summary rowset and should NOT be pivoted.
+    detail_like_keys = {
+        "invoice_number",
+        "invoice_date",
+        "status",
+        "clinician",
+        "service_code",
+        "service_date",
+        "hours",
+        "rate",
+        "cost",
+    }
+    if any(k in keys for k in detail_like_keys):
+        return False
+
+    # Basic numeric check on the first row
+    try:
+        float(sample[amount_key])
+    except Exception:
+        return False
+
+    return True
+
+
+def _render_student_month_pivot(rows: Sequence[Mapping[str, Any]]) -> str:
+    """
+    Render a pivot table of student vs month from long-format rows.
+
+    Expected keys in each row: student_name, service_month, and a numeric amount
+    (e.g., total_cost or total_spend).
+    """
+    if not rows:
+        return _render_html_table(rows)
+
+    sample = rows[0]
+    keys = {str(k) for k in sample.keys()}
+
+    student_key = "student_name"
+    month_key = "service_month"
+    amount_key = None
+    for candidate in ["total_cost", "total_spend", "amount", "total"]:
+        if candidate in keys:
+            amount_key = candidate
+            break
+
+    if amount_key is None:
+        return _render_html_table(rows)
+
+    # Collect unique students and months
+    students_set: set[str] = set()
+    months_set: set[str] = set()
+    data: dict[tuple[str, str], float] = {}
+
+    for row in rows:
+        student_raw = str(row.get(student_key, "")).strip()
+        month_raw = str(row.get(month_key, "")).strip()
+        if not student_raw or not month_raw:
+            continue
+
+        # Use title case for display
+        student = student_raw.title()
+        month = month_raw.title()
+
+        students_set.add(student)
+        months_set.add(month)
+
+        try:
+            amount = float(row.get(amount_key) or 0.0)
+        except Exception:
+            amount = 0.0
+
+        data[(student, month)] = data.get((student, month), 0.0) + amount
+
+    students = sorted(students_set)
+    months = sorted(months_set, key=_month_sort_key)
+
+    # Build HTML
+    header_cells = ["<th>Student</th>"] + [f"<th>{escape(m)}</th>" for m in months] + [
+        "<th>Total Spend ($)</th>"
+    ]
+    header_html = "<tr>" + "".join(header_cells) + "</tr>"
+
+    body_rows: list[str] = []
+    for student in students:
+        row_cells: list[str] = [f"<td>{escape(student)}</td>"]
+        total_for_student = 0.0
+        for month in months:
+            amount = data.get((student, month), 0.0)
+            total_for_student += amount
+            display = f"${amount:,.2f}" if amount != 0.0 else ""
+            row_cells.append(f"<td class=\"amount-col\">{escape(display)}</td>")
+        total_display = f"${total_for_student:,.2f}"
+        row_cells.append(f"<td class=\"amount-col\">{escape(total_display)}</td>")
+        body_rows.append("<tr>" + "".join(row_cells) + "</tr>")
+
+    body_html = "".join(body_rows)
+
+    return (
+        "<div class=\"table-wrapper\">"
+        "<table class=\"analytics-table\">"
+        "<thead>"
+        f"{header_html}"
+        "</thead>"
+        "<tbody>"
+        f"{body_html}"
+        "</tbody>"
+        "</table>"
+        "</div>"
+    )
+
+
 def _coerce_rows(candidate: Any) -> list[dict[str, Any]] | None:
     if isinstance(candidate, list) and all(isinstance(item, Mapping) for item in candidate):
         return [dict(item) for item in candidate]  # type: ignore[arg-type]
@@ -501,7 +675,15 @@ def _finalise_response(payload: Mapping[str, Any], context: AgentContext) -> Age
         text_value = "See the table below for details."
 
     if rows:
-        html = html_value or _render_html_table(rows)
+        # For the special case of monthly spend by student, always render
+        # a student-by-month pivot table from the long-format rows, even if
+        # the model provided its own HTML.
+        if _should_pivot_student_month(rows, context.query):
+            html = _render_student_month_pivot(rows)
+        else:
+            # In all other cases, respect any HTML provided by the model,
+            # or fall back to the generic table renderer.
+            html = html_value or _render_html_table(rows)
     else:
         html = html_value or _safe_html(text_value)
 
@@ -630,10 +812,41 @@ def _build_run_sql_tool(engine: Engine) -> Tool:
             sql_no_dk,
         )
 
+        # Additional cleanup for bare district_key predicates without table alias.
+        # Case A: "WHERE district_key = '... ' AND ..." -> drop the predicate, keep the rest.
+        sql_no_dk = re.sub(
+            r"(?i)\bWHERE\s+district_key\s*=\s*'[^']*'\s+AND\s+",
+            "WHERE ",
+            sql_no_dk,
+        )
+
+        # Case B: "WHERE district_key = '...'" with no trailing AND -> replace with neutral WHERE 1=1.
+        sql_no_dk = re.sub(
+            r"(?i)\bWHERE\s+district_key\s*=\s*'[^']*'\s*(?=$|\s*(ORDER|GROUP|LIMIT|;))",
+            "WHERE 1=1 ",
+            sql_no_dk,
+        )
+
+        # Case C: "AND district_key = '...'" -> remove that AND clause.
+        sql_no_dk = re.sub(
+            r"(?i)\bAND\s+district_key\s*=\s*'[^']*'\s*",
+            " ",
+            sql_no_dk,
+        )
+
         sql_statement = sql_no_dk
 
         lowered = sql_statement.lower()
-        if " from invoices" in lowered and "district_key" not in lowered and "sub.district_key" not in lowered:
+        needs_wrap = (
+            " from invoices" in lowered
+            and "district_key" not in lowered
+            and "sub.district_key" not in lowered
+        )
+
+        # Only auto-wrap when the query selects * from invoices; if it uses an explicit
+        # column list (no "*"), skip wrapping to avoid referencing sub.district_key when
+        # that column is not present in the projection.
+        if needs_wrap and re.search(r"(?i)\bselect\s+\*", sql_statement):
             sql_statement = f"""
         SELECT *
         FROM (
@@ -767,6 +980,15 @@ def _build_system_prompt() -> str:
         "- Example: LOWER(service_month) = LOWER('October') or service_month_num = 10.\n"
         "- Only use invoice_date when the user explicitly asks about when invoices were processed or uploaded (e.g., 'when were October invoices submitted?').\n"
         "- Keep queries simple: avoid unnecessary joins unless the question truly needs them.\n\n"
+        "MONTH GROUPING & ORDERING:\n"
+        "- When you GROUP BY month (for example, service_month with an aggregated total_cost), you MUST order the result by calendar month, not by amount, unless the user explicitly asks for 'highest month(s)', 'top month(s)', or a ranking.\n"
+        "- Use a chronological ORDER BY such as:\n"
+        "    ORDER BY MIN(strftime('%Y-%m', invoice_date)) ASC\n"
+        "  or, if a numeric month column exists (e.g., service_month_num), use:\n"
+        "    ORDER BY service_month_num ASC, service_year ASC\n"
+        "- Do NOT sort grouped month rows by total_cost unless the user has clearly requested a sort by amount (for example, 'show me the months with the highest spend').\n"
+        "- You may still compute the highest-spend month in your reasoning and use it in summary cards (e.g., 'Highest Month'), but the SQL result rows should remain in chronological order.\n"
+        "\n"
         "FULL RESULTS vs. LIMITS:\n"
         "- If the user asks for \"all invoices\", \"full table\", or similar wording, you MUST NOT add a LIMIT clause.\n"
         "- You MAY use LIMIT or return only top N rows ONLY if the user explicitly asks for \"top\", \"highest\", \"sample\", or similar phrasing.\n"
@@ -836,6 +1058,173 @@ def _build_system_prompt() -> str:
         "  GROUP BY LOWER(i.service_month), ili.clinician\n"
         "  ORDER BY LOWER(i.service_month), ili.clinician;\n\n"
         "- In all of these examples, never sum invoices.total_cost when you are grouping by clinician or other line-item fields; always sum invoice_line_items.cost.\n\n"
+        "PRESENTATION & VISUALIZATION RULES:\n"
+        "- The 'html' field may contain a simple dashboard-like layout composed of:\n"
+        "-   • Summary cards at the top (<div class=\"summary-cards\"> with child <div class=\"card\"> elements).\n"
+        "-   • A short list of key insights (<ul class=\"insights-list\"><li>...</li></ul>).\n"
+        "-   • Optional simple bar-chart-style visuals for trends or rankings (<div class=\"bar-chart\"> rows).\n"
+        "-   • A detailed data table (<div class=\"table-wrapper\"><table class=\"analytics-table\">...</table></div>).\n"
+        "- Keep the HTML structure simple and CSS-friendly. Do NOT use JavaScript.\n\n"
+        "SUMMARY CARDS:\n"
+        "- When numeric metrics are present (e.g., total spend, students served, total hours), start the HTML with summary cards like:\n"
+        "  <div class=\"summary-cards\">\n"
+        "    <div class=\"card\">\n"
+        "      <div class=\"label\">Total Spend</div>\n"
+        "      <div class=\"value\">$182,450.32</div>\n"
+        "    </div>\n"
+        "    <div class=\"card\">\n"
+        "      <div class=\"label\">Students Served</div>\n"
+        "      <div class=\"value\">47</div>\n"
+        "    </div>\n"
+        "  </div>\n"
+        "- Only include 2–4 cards that are clearly relevant to the question (e.g., Total Spend, Students Served, Total Hours, LVN vs HA mix).\n\n"
+        "AVERAGE MONTHLY SPEND CARD:\n"
+        "- When your SQL result is grouped by month (for example, one row per service_month with a monthly total_cost), you should:\n"
+        "-   • Identify the month with the highest total and show it as a summary card (e.g., \"Highest Month\" / \"Total Spend in July\").\n"
+        "-   • Compute the average monthly spend across the months in the result set and include an \"Average Monthly Spend\" summary card, for example:\n"
+        "      <div class=\"card\">\n"
+        "        <div class=\"label\">Average Monthly Spend</div>\n"
+        "        <div class=\"value\">$154,250.00</div>\n"
+        "      </div>\n"
+        "- Reference this average in your insights at the bottom (e.g., which months are noticeably above or below the average).\n"
+        "\n"
+        "INSIGHTS LIST (AT THE END):\n"
+        "- After you have rendered summary cards, any charts, and the detailed table, output 2–4 bullet points highlighting trends or notable facts:\n"
+        "  <ul class=\"insights-list\">\n"
+        "    <li>October spend increased 18% relative to September.</li>\n"
+        "    <li>Three students account for 42% of total costs.</li>\n"
+        "  </ul>\n"
+        "- These insights should appear at the bottom of the HTML so that staff see the numbers and visuals first, then the explanation.\n"
+        "- Focus on changes over time, concentration (top students/sites), and anomalies.\n\n"
+        "OPTIONAL CHARTS (ONLY WHEN USEFUL):\n"
+        "- You may include simple bar-chart-style visuals in HTML when they add value:\n"
+        "USER REQUESTS FOR CHARTS:\n"
+        "- The first user message you receive is always a JSON object like {\"query\": \"...\", \"context\": {...}}.\n"
+        "- The 'query' field contains the user's original natural-language question.\n"
+        "- If that original query string contains the phrase 'with a chart' in any casing (for example, 'with a chart', 'WITH A CHART'), you MUST include BOTH a chart and a table in the 'html' field.\n"
+        "- In that case, 'html' MUST contain:\n"
+        "  - At least one <div class=\"bar-chart\">...</div> element that visualises a relevant aggregation (such as totals by month, top students, top sites, or LVN vs Health Aide spend), AND\n"
+        "  - A <div class=\"table-wrapper\"><table class=\"analytics-table\">...</table></div> element containing the detailed rows.\n"
+        "- The chart and table MUST be consistent with the same underlying data shown in the 'rows' field.\n"
+        "- When the query does NOT contain 'with a chart', charts remain optional and you MAY return only summary cards, insights, and a table.\n"
+        "\n"
+        "- 1) Month-over-month / time-based charts:\n"
+        "-    - Show a month-over-month chart ONLY when:\n"
+        "-      • There are at least two time periods (e.g., two or more months), AND\n"
+        "-      • The user query implies a trend or time range (e.g., 'month over month', 'over the last three months', 'this school year', 'trend').\n"
+        "-    - Represent it as:\n"
+        "       <div class=\"bar-chart\">\n"
+        "         <div class=\"bar-row\">\n"
+        "           <span class=\"label\">August 2025</span>\n"
+        "           <div class=\"bar\" style=\"width: 55%\"></div>\n"
+        "           <span class=\"value\">$120,430.00</span>\n"
+        "         </div>\n"
+        "         <div class=\"bar-row\">\n"
+        "           <span class=\"label\">September 2025</span>\n"
+        "           <div class=\"bar\" style=\"width: 70%\"></div>\n"
+        "           <span class=\"value\">$152,980.00</span>\n"
+        "         </div>\n"
+        "       </div>\n"
+        "-    - The bar 'width' percentages must be proportional to the actual numeric values (each width ≈ value / max_value * 100).\n\n"
+        "- 2) Top-N bar charts (students, sites, vendors):\n"
+        "-    - If the query is clearly about 'top' students/sites/vendors or a ranking, you MAY use the same <div class=\"bar-chart\"> pattern with one row per entity.\n"
+        "-    - Only do this when there are at least 3–10 items; skip charts for 1–2 rows.\n\n"
+        "- 3) Mix/composition (LVN vs Health Aide, service codes):\n"
+        "-    - If the user asks about LVN vs Health Aide mix or spend by service_code, you MAY show a simple comparative bar chart:\n"
+        "       <div class=\"bar-chart\">\n"
+        "         <div class=\"bar-row\">\n"
+        "           <span class=\"label\">LVN</span>\n"
+        "           <div class=\"bar\" style=\"width: 40%\"></div>\n"
+        "           <span class=\"value\">$80,000.00</span>\n"
+        "         </div>\n"
+        "         <div class=\"bar-row\">\n"
+        "           <span class=\"label\">Health Aide</span>\n"
+        "           <div class=\"bar\" style=\"width: 60%\"></div>\n"
+        "           <span class=\"value\">$120,000.00</span>\n"
+        "         </div>\n"
+        "       </div>\n"
+        "-    - Do NOT use pie charts; use bar-style visuals only.\n\n"
+        "- When NOT to show charts:\n"
+        "-    - Do NOT include any chart if there is only a single time period or a single row.\n"
+        "-    - Do NOT include a chart for very small, highly specific lists (e.g., 'all invoices for this one student on a single date').\n"
+        "-    - In those cases, rely on summary cards, insights, and a detailed table only.\n\n"
+        "STUDENT-BY-MONTH PIVOT TABLES (HTML ONLY):\n"
+        "- When the user asks for monthly spend by student (for example, 'monthly spend by student', 'student spend by month', 'spend per student per month'), and your SQL result contains one row per (student_name, service_month) with an aggregated spend, you MUST:\n"
+        "-   • Keep the 'rows' field in the long format returned from SQL (e.g., {student_name, service_month, total_cost}).\n"
+        "-   • Build a pivot-style table in the 'html' field only, so that:\n"
+        "-       - Each row corresponds to a single student.\n"
+        "-       - Each column after the first corresponds to a service month (e.g., July, August, September, October), ordered chronologically.\n"
+        "-       - The final column shows the total spend for that student across all months.\n"
+        "-       - Missing month values for a student should be rendered as $0.00 or left blank.\n"
+        "- The HTML structure for this pivot table should look like:\n"
+        "  <div class=\"table-wrapper\">\n"
+        "    <table class=\"analytics-table\">\n"
+        "      <thead>\n"
+        "        <tr>\n"
+        "          <th>Student</th>\n"
+        "          <th>July</th>\n"
+        "          <th>August</th>\n"
+        "          <th>September</th>\n"
+        "          <th>October</th>\n"
+        "          <th>Total Spend ($)</th>\n"
+        "        </tr>\n"
+        "      </thead>\n"
+        "      <tbody>\n"
+        "        <tr>\n"
+        "          <td>Addison Johnson</td>\n"
+        "          <td>$6,950.75</td>\n"
+        "          <td>$5,178.60</td>\n"
+        "          <td>$6,211.70</td>\n"
+        "          <td>$5,985.00</td>\n"
+        "          <td>$24,326.05</td>\n"
+        "        </tr>\n"
+        "        <tr>\n"
+        "          <td>Addison Perez</td>\n"
+        "          <td>$4,907.95</td>\n"
+        "          <td>$5,177.25</td>\n"
+        "          <td>$5,698.45</td>\n"
+        "          <td>$5,838.85</td>\n"
+        "          <td>$21,622.50</td>\n"
+        "        </tr>\n"
+        "        <!-- etc -->\n"
+        "      </tbody>\n"
+        "    </table>\n"
+        "  </div>\n"
+        "- You must compute the per-student totals and the per-student per-month cell values from the long-format rows before generating the HTML. The aggregated numbers in the pivot table MUST match the underlying 'rows' data.\n"
+        "- The 'rows' field should still contain the original list of long-format rows from SQL (student_name, service_month, total_cost) so that CSV downloads continue to work as before.\n"
+        "\n"
+        "TABLE LAYOUT:\n"
+        "- Always include a table when you return structured rows.\n"
+        "- Prefer the following HTML structure so the frontend can style it:\n"
+        "  <div class=\"table-wrapper\">\n"
+        "    <table class=\"analytics-table\">\n"
+        "      <thead>\n"
+        "        <tr>\n"
+        "          <th>Student</th>\n"
+        "          <th>Service Month</th>\n"
+        "          <th class=\"hours-col\">Total Hours</th>\n"
+        "          <th class=\"amount-col\">Total Spend ($)</th>\n"
+        "        </tr>\n"
+        "      </thead>\n"
+        "      <tbody>\n"
+        "        <tr>\n"
+        "          <td>Aleen Hassoon</td>\n"
+        "          <td>October 2025</td>\n"
+        "          <td class=\"hours-col\">12.5</td>\n"
+        "          <td class=\"amount-col\">$3,346.00</td>\n"
+        "        </tr>\n"
+        "        <tr class=\"total-row\">\n"
+        "          <td colspan=\"2\">Total</td>\n"
+        "          <td class=\"hours-col\">140.0</td>\n"
+        "          <td class=\"amount-col\">$182,450.32</td>\n"
+        "        </tr>\n"
+        "      </tbody>\n"
+        "    </table>\n"
+        "  </div>\n"
+        "- Use <thead> for headers and <tbody> for data.\n"
+        "- Use the CSS classes 'hours-col' for hour columns, 'amount-col' for monetary columns, and 'total-row' for the final totals row.\n"
+        "- Monetary columns should be clearly labeled with '($)' in the header and formatted to two decimal places (e.g., $3,346.00).\n"
+        "- The 'rows' field MUST mirror the table data as clean JSON objects (one per row) without any HTML markup.\n\n"
         "EXAMPLES (assume :district_key is provided when appropriate):\n"
         "1) Count vendors (global):\n"
         "   SELECT COUNT(*) AS vendor_count FROM vendors;\n\n"
@@ -871,22 +1260,53 @@ def _build_system_prompt() -> str:
         "- When a student may have multiple invoices, return all matching rows sorted by invoice_date DESC.\n"
         "- When asking ‘why is amount low?’ or ‘what happened?’, extract that student’s invoice(s) and return invoice_number, student_name, total_cost, service_month, status.\n"
         "- NEVER assume the student is a vendor — students and vendors are separate entities.\n\n"
+        "INVOICE DETAIL QUERIES:\n"
+        "- When the user asks for invoice information or invoice details for a student (for example, 'invoice information for Addison Johnson', 'invoice details for this student in September', 'list invoices for Jayden Ramsey by month'), you MUST return invoice-level rows, not aggregated totals.\n"
+        "- In these cases:\n"
+        "-   • Do NOT GROUP BY student_name or service_month.\n"
+        "-   • Select invoice-level columns such as:\n"
+        "       invoice_number,\n"
+        "       student_name,\n"
+        "       service_month,\n"
+        "       invoice_date,\n"
+        "       total_cost,\n"
+        "       status.\n"
+        "-   • When the user also cares about clinicians or services, you MAY join invoice_line_items to show line-item detail:\n"
+        "       SELECT i.invoice_number,\n"
+        "              i.student_name,\n"
+        "              i.service_month,\n"
+        "              i.invoice_date,\n"
+        "              ili.service_date,\n"
+        "              ili.clinician,\n"
+        "              ili.service_code,\n"
+        "              ili.hours,\n"
+        "              ili.rate,\n"
+        "              ili.cost\n"
+        "       FROM invoices i\n"
+        "       JOIN invoice_line_items ili ON ili.invoice_id = i.id\n"
+        "       WHERE i.district_key = :district_key\n"
+        "         AND LOWER(i.student_name) LIKE LOWER(:student_name_pattern)\n"
+        "       ORDER BY i.invoice_date, ili.clinician, ili.service_date;\n"
+        "- Always filter invoice detail queries by district_key when the parameter is available, e.g. i.district_key = :district_key.\n"
+        "- If the user specifies a month as well (e.g., 'for September'), add a filter such as LOWER(i.service_month) = LOWER('September').\n"
+        "- Invoice detail responses should produce a straightforward table of invoice rows or line items; DO NOT pivot these tables into Student × Month, and do NOT aggregate totals unless the user explicitly asks for a summary.\n"
+        "\n"
         "FINAL OUTPUT FORMAT:\n"
         "- You MUST respond with a single JSON object: {\"text\": str, \"rows\": list|None, \"html\": str}.\n"
-        "- text: a concise human-readable summary.\n"
+        "- text: a concise human-readable summary in plain English.\n"
         "- rows: a list of result row dicts OR null.\n"
-        "- html: an HTML fragment (e.g. <table> with rows) derived from the rows or summary.\n"
+        "- html: an HTML fragment that may include summary cards, insight bullets, optional simple bar charts, and a data table.\n"
         "- Do NOT output plain text outside this JSON structure.\n"
         "OUTPUT FORMAT DISCIPLINE RULES:\n"
-        "- The 'text' field MUST contain ONLY plain English. NO HTML. NO <tags>. NO table markup.\n"
-        "- The 'html' field MUST contain ALL formatted HTML (tables, td, tr, th, p, strong, etc.).\n"
+        "- The 'text' field MUST contain ONLY plain English. NO HTML. NO <tags>. NO table or chart markup.\n"
+        "- The 'html' field MUST contain ALL visual HTML (summary-cards, insights list, tables, charts, etc.).\n"
         "- NEVER duplicate information. Whatever appears in 'html' MUST NOT also appear in 'text'.\n"
         "- The 'rows' field MUST contain ONLY raw structured data from SQL, not markup.\n"
         "- The model MUST NOT include </td>, <tr>, <table>, <p>, or any HTML-like text in the 'text' field.\n"
         "- 'text' should be a concise human-readable summary, e.g.:\n"
-        "    { \"text\": \"Here are the top 5 invoices by total cost.\" }\n"
-        "- 'html' should contain the visual result table ONLY, e.g.:\n"
-        "    { \"html\": \"<table>...</table>\" }\n"
+        "    { \"text\": \"Here are the top 5 invoices by total cost for November 2025.\" }\n"
+        "- 'html' should contain the visual layout (summary cards, insights, optional charts, and the table), e.g.:\n"
+        "    { \"html\": \"<div class=\\\"summary-cards\\\">...</div><div class=\\\"table-wrapper\\\">...\" }\n"
         "- NEVER put HTML in 'rows'.\n"
         "- NEVER mix description and table markup in the same field.\n"
         "- If generating a table, put it ONLY inside the 'html' field."
