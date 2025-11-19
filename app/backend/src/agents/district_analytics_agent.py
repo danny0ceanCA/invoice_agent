@@ -220,6 +220,60 @@ class Workflow:
 
             normalized_query = query.lower()
 
+            # Special-case: include provider information for the last invoice result set
+            if "include provider" in normalized_query and context.last_rows:
+                # Extract unique invoice numbers from the previous result
+                inv_values = {
+                    str(r.get("invoice_number", "")).strip()
+                    for r in (context.last_rows or [])
+                    if r.get("invoice_number")
+                }
+                inv_values = sorted({v for v in inv_values if v})
+                if inv_values:
+                    # Build a literal IN (...) list – invoice numbers are safe to embed as string constants
+                    inv_list_sql = ", ".join(
+                        f"'{inv.replace("'", "''")}'" for inv in inv_values
+                    )
+                    sql = f"""
+                    SELECT
+                        i.invoice_number,
+                        i.student_name,
+                        LOWER(i.service_month)   AS service_month,
+                        ili.clinician            AS provider,
+                        SUM(ili.cost)            AS provider_cost
+                    FROM invoice_line_items AS ili
+                    JOIN invoices AS i ON ili.invoice_id = i.id
+                    WHERE i.district_key = :district_key
+                      AND i.invoice_number IN ({inv_list_sql})
+                    GROUP BY
+                        i.invoice_number,
+                        i.student_name,
+                        LOWER(i.service_month),
+                        ili.clinician
+                    ORDER BY
+                        i.invoice_number,
+                        provider_cost DESC;
+                    """
+                    try:
+                        run_sql_tool = agent.lookup_tool("run_sql")
+                    except RuntimeError:
+                        LOGGER.warning("run_sql_tool_unavailable_for_provider_include", query=query)
+                    else:
+                        try:
+                            rows = run_sql_tool.invoke(context, {"query": sql})
+                        except Exception as exc:  # pragma: no cover - defensive
+                            context.last_error = str(exc)
+                            payload = {
+                                "text": f"Failed to include provider information: {exc}",
+                                "rows": None,
+                                "html": None,
+                            }
+                        else:
+                            context.last_rows = rows
+                            payload = {"text": "", "rows": rows, "html": None}
+
+                        return _finalise_response(payload, context)
+
             if "student list" in normalized_query and "ytd" in normalized_query:
                 sql = """
                 SELECT DISTINCT student_name
@@ -795,6 +849,20 @@ def _summarize_response(response: AgentResponse) -> str:
         sample = rows[0]
         keys = {str(k) for k in sample.keys()}
 
+        # PRIORITIZE invoice numbers in memory for drill-down behavior
+        if "invoice_number" in keys:
+            invoice_values = {
+                str(r.get("invoice_number", "")).strip()
+                for r in rows
+                if r.get("invoice_number")
+            }
+            invoice_values = sorted({v for v in invoice_values if v})
+            if invoice_values:
+                # invoice list, truncated to a reasonable size
+                inv_list = ", ".join(invoice_values[:10])
+                # insert at the front so invoices are always prominent in memory
+                summary_parts.insert(0, f"Invoices: {inv_list}.")
+
         # Helper to extract distinct values for a given column name
         def collect_entities(col_name: str, label: str, max_items: int = 10) -> str | None:
             if col_name not in sample:
@@ -842,12 +910,6 @@ def _summarize_response(response: AgentResponse) -> str:
                 summary_parts.append(ent)
         elif "name" in keys and "vendor_id" in keys:
             ent = collect_entities("name", "Vendors")
-            if ent:
-                summary_parts.append(ent)
-
-        # Try invoice numbers
-        if "invoice_number" in keys:
-            ent = collect_entities("invoice_number", "Invoices")
             if ent:
                 summary_parts.append(ent)
 
@@ -1232,6 +1294,8 @@ def _build_system_prompt() -> str:
         "- Use invoices.district_key = :district_key to scope results to the current district.\n"
         "- Use partial matches (LIKE) on the clinician name when only a first name or partial name is given.\n\n"
         "- When aggregating amounts by clinician, provider, or service_code, NEVER use invoices.total_cost. Always use SUM(invoice_line_items.cost) for the amount.\n\n"
+        "- For any table where each row corresponds to a provider, clinician, or service_code, you MUST compute the amount using SUM(invoice_line_items.cost) and label it clearly (e.g., provider_cost or code_total).\n"
+        "- You MUST NOT use invoices.total_cost for provider-level or clinician-level rows. Invoice totals belong only on invoice-level rows, not repeated per provider.\n\n"
         "- Example: list of students for a clinician (full name):\n"
         "  SELECT DISTINCT ili.student AS student_name\n"
         "  FROM invoice_line_items AS ili\n"
@@ -1508,6 +1572,7 @@ def _build_system_prompt() -> str:
         "\n"
         "- When the user requests provider-level totals for a specific invoice (e.g., 'providers for this invoice', 'include providers for this invoice'):\n"
         "  - You MUST aggregate using SUM(invoice_line_items.cost) grouped by clinician and NOT use invoices.total_cost.\n"
+        "  - This is a provider-level spend breakdown; do not mix invoice totals into these rows.\n"
         "  - Example:\n"
         "    SELECT invoice_number,\n"
         "           clinician      AS provider,\n"
