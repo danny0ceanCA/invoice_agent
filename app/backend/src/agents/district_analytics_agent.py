@@ -220,13 +220,59 @@ class Workflow:
 
             normalized_query = query.lower()
 
-            # Special-case: include provider information for the last invoice result set
+            # Special-case: include provider information based on the last result set
             if (
-                "include" in normalized_query
-                and "provider" in normalized_query
+                "includ" in normalized_query  # catches 'include', 'including'
+                and "provid" in normalized_query  # catches 'provider', 'providers', 'provide'
                 and context.last_rows
             ):
-                # Extract unique invoice numbers from the previous result
+                # Try to infer the service_month from the last rows
+                months = {
+                    str(r.get("service_month", "")).strip().lower()
+                    for r in (context.last_rows or [])
+                    if r.get("service_month")
+                }
+                months = {m for m in months if m}
+
+                # If the user says 'same month' or 'this month' and we have exactly one month in context,
+                # show ALL providers for that month across the district (month-scope provider summary).
+                if ("same month" in normalized_query or "this month" in normalized_query) and len(months) == 1:
+                    month = next(iter(months))
+                    sql = """
+                    SELECT
+                        ili.clinician            AS provider,
+                        SUM(ili.cost)            AS total_spend,
+                        LOWER(i.service_month)   AS service_month
+                    FROM invoice_line_items AS ili
+                    JOIN invoices AS i ON ili.invoice_id = i.id
+                    WHERE i.district_key = :district_key
+                      AND LOWER(i.service_month) = :month
+                    GROUP BY
+                        ili.clinician,
+                        LOWER(i.service_month)
+                    ORDER BY
+                        total_spend DESC;
+                    """
+                    try:
+                        run_sql_tool = agent.lookup_tool("run_sql")
+                    except RuntimeError:
+                        LOGGER.warning("run_sql_tool_unavailable_for_provider_month", query=query)
+                    else:
+                        try:
+                            rows = run_sql_tool.invoke(context, {"query": sql, "month": month})
+                        except Exception as exc:  # pragma: no cover - defensive
+                            context.last_error = str(exc)
+                            payload = {
+                                "text": f"Failed to fetch provider spend for {month}: {exc}",
+                                "rows": None,
+                                "html": None,
+                            }
+                        else:
+                            context.last_rows = rows
+                            payload = {"text": "", "rows": rows, "html": None}
+                        return _finalise_response(payload, context)
+
+                # Otherwise, fall back to invoice-scope provider breakdown using invoice_numbers from the last rows
                 inv_values = {
                     str(r.get("invoice_number", "")).strip()
                     for r in (context.last_rows or [])
@@ -234,7 +280,6 @@ class Workflow:
                 }
                 inv_values = sorted({v for v in inv_values if v})
                 if inv_values:
-                    # Build a literal IN (...) list – invoice numbers are safe to embed as string constants
                     inv_list_sql = ", ".join(
                         "'" + inv.replace("'", "''") + "'" for inv in inv_values
                     )
