@@ -221,7 +221,11 @@ class Workflow:
             normalized_query = query.lower()
 
             # Special-case: include provider information for the last invoice result set
-            if "include provider" in normalized_query and context.last_rows:
+            if (
+                "include" in normalized_query
+                and "provider" in normalized_query
+                and context.last_rows
+            ):
                 # Extract unique invoice numbers from the previous result
                 inv_values = {
                     str(r.get("invoice_number", "")).strip()
