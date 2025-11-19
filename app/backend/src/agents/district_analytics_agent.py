@@ -15,6 +15,7 @@ from sqlalchemy import text as sql_text
 from sqlalchemy.engine import Engine
 
 from app.backend.src.core.config import get_settings
+from app.backend.src.core.memory import ConversationMemory, RedisConversationMemory
 from app.backend.src.db import get_engine
 from app.backend.src.services.s3 import get_s3_client
 
@@ -114,6 +115,8 @@ class AgentContext:
     user_context: dict[str, Any] = field(default_factory=dict)
     last_rows: list[dict[str, Any]] | None = None
     last_error: str | None = None
+    session_id: str | None = None
+    memory: ConversationMemory | None = None
 
     @property
     def district_id(self) -> int | None:
@@ -162,14 +165,35 @@ class Tool:
 class Workflow:
     """Coordinates model reasoning and tool usage."""
 
-    def __init__(self, system_prompt: str, *, max_iterations: int = MAX_ITERATIONS) -> None:
+    def __init__(
+        self,
+        system_prompt: str,
+        *,
+        max_iterations: int = MAX_ITERATIONS,
+        memory: ConversationMemory | None = None,
+    ) -> None:
         self.system_prompt = system_prompt
         self.max_iterations = max_iterations
+        self.memory = memory
 
     def execute(self, agent: "Agent", query: str, user_context: dict[str, Any]) -> AgentResponse:
-        context = AgentContext(query=query, user_context=user_context or {})
-        messages: list[dict[str, Any]] = [
-            {"role": "system", "content": self.system_prompt},
+        session_id = _build_session_id(user_context)
+        context = AgentContext(
+            query=query, user_context=user_context or {}, session_id=session_id, memory=self.memory
+        )
+        history: list[dict[str, str]] = []
+        if self.memory and session_id:
+            try:
+                history = self.memory.load_messages(session_id)
+            except Exception as exc:  # pragma: no cover - defensive
+                LOGGER.warning("analytics_memory_load_failed", error=str(exc))
+
+        messages: list[dict[str, Any]] = [{"role": "system", "content": self.system_prompt}]
+
+        if history:
+            messages.extend(history)
+
+        messages.append(
             {
                 "role": "user",
                 "content": json.dumps(
@@ -178,8 +202,8 @@ class Workflow:
                         "context": context.user_context,
                     }
                 ),
-            },
-        ]
+            }
+        )
 
         def _extract_student_name(user_query: str) -> str | None:
             """Return a best-effort student name match from the query."""
@@ -663,6 +687,49 @@ def _coerce_rows(candidate: Any) -> list[dict[str, Any]] | None:
     return None
 
 
+def _remember_interaction(context: AgentContext, response: AgentResponse) -> None:
+    if not context.memory or not context.session_id:
+        return
+
+    try:
+        context.memory.append_interaction(
+            context.session_id,
+            user_message={"content": context.query},
+            assistant_message={"content": _summarize_response(response)},
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        LOGGER.warning("analytics_memory_append_failed", error=str(exc))
+
+
+def _summarize_response(response: AgentResponse) -> str:
+    if response.text:
+        return response.text
+    if response.rows:
+        return f"Returned {len(response.rows)} row{'s' if len(response.rows) != 1 else ''}."
+    if response.html:
+        return _strip_html(response.html)
+    return ""
+
+
+def _build_session_id(user_context: Mapping[str, Any] | None) -> str | None:
+    if not user_context:
+        return None
+
+    parts: list[str] = []
+    user_id = user_context.get("user_id")
+    district_key = user_context.get("district_key")
+
+    if user_id:
+        parts.append(f"user:{user_id}")
+    if district_key:
+        parts.append(f"district:{district_key}")
+
+    if not parts:
+        return None
+
+    return "|".join(parts)
+
+
 def _finalise_response(payload: Mapping[str, Any], context: AgentContext) -> AgentResponse:
     text_value = str(payload.get("text") or "").strip()
     text_value = _strip_html(text_value)
@@ -689,10 +756,13 @@ def _finalise_response(payload: Mapping[str, Any], context: AgentContext) -> Age
 
     # If HTML exists, suppress text to avoid rendering duplicate data
     if html:
-        return AgentResponse(text="", html=html, rows=rows)
+        response = AgentResponse(text="", html=html, rows=rows)
+    else:
+        # Otherwise return text-only version
+        response = AgentResponse(text=text_value or "", html=html, rows=rows)
 
-    # Otherwise return text-only version
-    return AgentResponse(text=text_value or "", html=html, rows=rows)
+    _remember_interaction(context, response)
+    return response
 
 
 def _apply_district_filter(
@@ -1320,9 +1390,27 @@ def _build_agent() -> Agent:
 
     client = OpenAI(api_key=settings.openai_api_key)
     engine = get_engine()
-    workflow = Workflow(system_prompt=_build_system_prompt(), max_iterations=MAX_ITERATIONS)
+    memory = _build_memory_store(settings)
+    workflow = Workflow(
+        system_prompt=_build_system_prompt(),
+        max_iterations=MAX_ITERATIONS,
+        memory=memory,
+    )
     tools = [_build_run_sql_tool(engine), _build_list_s3_tool()]
     return Agent(client=client, model=DEFAULT_MODEL, workflow=workflow, tools=tools)
+
+
+def _build_memory_store(settings: Any) -> ConversationMemory | None:
+    redis_url = getattr(settings, "redis_memory_dsn", None)
+    if not redis_url:
+        LOGGER.info("analytics_memory_disabled", reason="redis_url_missing")
+        return None
+
+    try:
+        return RedisConversationMemory(redis_url)
+    except Exception as exc:  # pragma: no cover - defensive
+        LOGGER.warning("analytics_memory_init_failed", error=str(exc))
+        return None
 
 
 _AGENT: Agent | None = None
