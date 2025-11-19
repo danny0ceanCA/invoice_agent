@@ -232,7 +232,7 @@ class Workflow:
                 if inv_values:
                     # Build a literal IN (...) list – invoice numbers are safe to embed as string constants
                     inv_list_sql = ", ".join(
-                        f"'{inv.replace("'", "''")}'" for inv in inv_values
+                        "'" + inv.replace("'", "''") + "'" for inv in inv_values
                     )
                     sql = f"""
                     SELECT
