@@ -32,7 +32,7 @@ class RedisConversationMemory(ConversationMemory):
         *,
         key_prefix: str = "analytics_agent",
         ttl_seconds: int = 60 * 60 * 24 * 7,
-        max_messages: int = 20,
+        max_messages: int = 40,
     ) -> None:
         self.client = Redis.from_url(url)
         self.key_prefix = key_prefix
