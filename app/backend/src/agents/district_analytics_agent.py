@@ -858,6 +858,29 @@ def _render_student_month_pivot(rows: Sequence[Mapping[str, Any]]) -> str:
     )
 
 
+def _strip_sensitive_columns(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    Remove sensitive keys (like rate) from all row dicts before returning them
+    to the frontend. This ensures we never display pay rates in analytics tables.
+    """
+    if not rows:
+        return rows
+
+    # Any key that matches these (case-insensitive) will be dropped.
+    banned_keys = {"rate", "hourly_rate", "pay_rate"}
+
+    sanitized: list[dict[str, Any]] = []
+    for row in rows:
+        clean_row: dict[str, Any] = {}
+        for key, value in row.items():
+            key_lower = str(key).lower()
+            if key_lower in banned_keys:
+                continue
+            clean_row[key] = value
+        sanitized.append(clean_row)
+    return sanitized
+
+
 def _coerce_rows(candidate: Any) -> list[dict[str, Any]] | None:
     if isinstance(candidate, list) and all(isinstance(item, Mapping) for item in candidate):
         return [dict(item) for item in candidate]  # type: ignore[arg-type]
@@ -996,6 +1019,11 @@ def _finalise_response(payload: Mapping[str, Any], context: AgentContext) -> Age
     html_value = payload.get("html") if isinstance(payload.get("html"), str) else None
 
     rows: list[dict[str, Any]] | None = rows_value or context.last_rows
+
+    if rows:
+        # Strip sensitive columns like 'rate' so they never appear in tables or memory.
+        rows = _strip_sensitive_columns(rows)
+        context.last_rows = rows
 
     if not text_value and rows:
         text_value = "See the table below for details."
@@ -1603,6 +1631,7 @@ def _build_system_prompt() -> str:
         "- When asking ‘why is amount low?’ or ‘what happened?’, extract that student’s invoice(s) and return invoice_number, student_name, total_cost, service_month, status.\n"
         "- NEVER assume the student is a vendor — students and vendors are separate entities.\n\n"
         "INVOICE DETAIL QUERIES:\n"
+        "- Do NOT select or return any rate or pay-rate columns (e.g., 'rate', 'hourly_rate', 'pay_rate') in your SQL. When showing invoice or line-item details, include hours and cost only, not the rate.\n"
         "- When the user asks for invoice information or invoice details for a specific invoice number (e.g., 'invoice details for Wood-OCT2025', 'drill into Jackson-OCT2025') you MUST use the invoice_line_items table keyed by invoice_number.\n"
         "- Example (raw line-item detail for an invoice):\n"
         "  SELECT invoice_number,\n"
