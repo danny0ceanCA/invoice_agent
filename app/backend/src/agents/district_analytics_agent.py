@@ -483,6 +483,161 @@ def _render_html_table(rows: Sequence[Mapping[str, Any]]) -> str:
     return f"<table><thead><tr>{header_html}</tr></thead><tbody>{body_html}</tbody></table>"
 
 
+def _month_sort_key(month_str: Any) -> int:
+    """
+    Return a sort key for textual month names. Unknown values sort last.
+    """
+    if month_str is None:
+        return 99
+    name = str(month_str).strip().lower()
+    months = [
+        "january",
+        "february",
+        "march",
+        "april",
+        "may",
+        "june",
+        "july",
+        "august",
+        "september",
+        "october",
+        "november",
+        "december",
+    ]
+    try:
+        return months.index(name)
+    except ValueError:
+        return 99
+
+
+def _should_pivot_student_month(
+    rows: Sequence[Mapping[str, Any]], query: str | None
+) -> bool:
+    """
+    Decide whether to render a student-by-month pivot table.
+
+    Conditions:
+    - Query mentions both 'student' and 'month' and either 'spend', 'cost', or 'total'.
+    - Rows contain student_name and service_month keys and a numeric total field.
+    """
+    if not rows:
+        return False
+
+    q = (query or "").lower()
+    if not ("student" in q and "month" in q and any(w in q for w in ["spend", "cost", "total"])):
+        return False
+
+    sample = rows[0]
+    keys = {str(k) for k in sample.keys()}
+
+    if "student_name" not in keys or "service_month" not in keys:
+        return False
+
+    amount_key = None
+    for candidate in ["total_cost", "total_spend", "amount", "total"]:
+        if candidate in keys:
+            amount_key = candidate
+            break
+
+    if amount_key is None:
+        return False
+
+    # Basic numeric check on the first row
+    try:
+        float(sample[amount_key])
+    except Exception:
+        return False
+
+    return True
+
+
+def _render_student_month_pivot(rows: Sequence[Mapping[str, Any]]) -> str:
+    """
+    Render a pivot table of student vs month from long-format rows.
+
+    Expected keys in each row: student_name, service_month, and a numeric amount
+    (e.g., total_cost or total_spend).
+    """
+    if not rows:
+        return _render_html_table(rows)
+
+    sample = rows[0]
+    keys = {str(k) for k in sample.keys()}
+
+    student_key = "student_name"
+    month_key = "service_month"
+    amount_key = None
+    for candidate in ["total_cost", "total_spend", "amount", "total"]:
+        if candidate in keys:
+            amount_key = candidate
+            break
+
+    if amount_key is None:
+        return _render_html_table(rows)
+
+    # Collect unique students and months
+    students_set: set[str] = set()
+    months_set: set[str] = set()
+    data: dict[tuple[str, str], float] = {}
+
+    for row in rows:
+        student_raw = str(row.get(student_key, "")).strip()
+        month_raw = str(row.get(month_key, "")).strip()
+        if not student_raw or not month_raw:
+            continue
+
+        # Use title case for display
+        student = student_raw.title()
+        month = month_raw.title()
+
+        students_set.add(student)
+        months_set.add(month)
+
+        try:
+            amount = float(row.get(amount_key) or 0.0)
+        except Exception:
+            amount = 0.0
+
+        data[(student, month)] = data.get((student, month), 0.0) + amount
+
+    students = sorted(students_set)
+    months = sorted(months_set, key=_month_sort_key)
+
+    # Build HTML
+    header_cells = ["<th>Student</th>"] + [f"<th>{escape(m)}</th>" for m in months] + [
+        "<th>Total Spend ($)</th>"
+    ]
+    header_html = "<tr>" + "".join(header_cells) + "</tr>"
+
+    body_rows: list[str] = []
+    for student in students:
+        row_cells: list[str] = [f"<td>{escape(student)}</td>"]
+        total_for_student = 0.0
+        for month in months:
+            amount = data.get((student, month), 0.0)
+            total_for_student += amount
+            display = f"${amount:,.2f}" if amount != 0.0 else ""
+            row_cells.append(f"<td class=\"amount-col\">{escape(display)}</td>")
+        total_display = f"${total_for_student:,.2f}"
+        row_cells.append(f"<td class=\"amount-col\">{escape(total_display)}</td>")
+        body_rows.append("<tr>" + "".join(row_cells) + "</tr>")
+
+    body_html = "".join(body_rows)
+
+    return (
+        "<div class=\"table-wrapper\">"
+        "<table class=\"analytics-table\">"
+        "<thead>"
+        f"{header_html}"
+        "</thead>"
+        "<tbody>"
+        f"{body_html}"
+        "</tbody>"
+        "</table>"
+        "</div>"
+    )
+
+
 def _coerce_rows(candidate: Any) -> list[dict[str, Any]] | None:
     if isinstance(candidate, list) and all(isinstance(item, Mapping) for item in candidate):
         return [dict(item) for item in candidate]  # type: ignore[arg-type]
@@ -501,7 +656,15 @@ def _finalise_response(payload: Mapping[str, Any], context: AgentContext) -> Age
         text_value = "See the table below for details."
 
     if rows:
-        html = html_value or _render_html_table(rows)
+        if html_value:
+            html = html_value
+        else:
+            # Decide whether to render a student-by-month pivot, otherwise fall back
+            # to the generic HTML table renderer.
+            if _should_pivot_student_month(rows, context.query):
+                html = _render_student_month_pivot(rows)
+            else:
+                html = _render_html_table(rows)
     else:
         html = html_value or _safe_html(text_value)
 
