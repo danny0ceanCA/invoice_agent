@@ -1012,6 +1012,24 @@ def _build_list_s3_tool() -> Tool:
 
 
 def _build_system_prompt() -> str:
+    memory_rules = (
+        "\n"
+        "MEMORY & CONTEXT RULES:\n"
+        "- You have access to conversation history loaded from Redis. \n"
+        "- Use this memory to interpret follow-up queries, pronouns, and references.\n"
+        "- When the user refers to:\n"
+        "    * \"these students\",\n"
+        "    * \"the same ones\",\n"
+        "    * \"those invoices\",\n"
+        "    * \"their totals\",\n"
+        "    * \"for these vendors\",\n"
+        "    * or any similar anaphoric reference,\n"
+        "  you MUST restrict your SQL queries to the entities returned in the most recent relevant result.\n"
+        "- Treat the last returned row set (students, invoices, vendors, months) as the active working set \n"
+        "  unless the user explicitly changes scope.\n"
+        "- Memory MUST influence how you construct SQL queries for follow-up questions.\n"
+    )
+
     return (
         "You are an analytics agent for a school district invoice system. "
         "You answer questions using SQLite via the run_sql tool and return structured JSON.\n\n"
@@ -1380,6 +1398,7 @@ def _build_system_prompt() -> str:
         "- NEVER put HTML in 'rows'.\n"
         "- NEVER mix description and table markup in the same field.\n"
         "- If generating a table, put it ONLY inside the 'html' field."
+        + memory_rules
     )
 
 
