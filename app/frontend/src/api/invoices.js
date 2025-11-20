@@ -105,11 +105,11 @@ export async function requestInvoicesZip(vendorId, monthKey, accessToken) {
     throw new Error("Missing access token for ZIP request");
   }
 
-  const url = `${API_BASE}/invoices/download-zip/${encodeURIComponent(
+  const requestUrl = `${API_BASE}/invoices/download-zip/${encodeURIComponent(
     vendorId,
   )}/${encodeURIComponent(monthKey)}`;
 
-  const response = await fetch(url, {
+  const response = await fetch(requestUrl, {
     method: "GET",
     headers: {
       Authorization: `Bearer ${accessToken}`,
