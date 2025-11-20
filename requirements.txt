@@ -17,3 +17,4 @@ uvicorn
 httpx
 python-dotenv
 python-jose[cryptography]
+openai>=1.12.0

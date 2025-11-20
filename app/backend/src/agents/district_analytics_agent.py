@@ -15,6 +15,7 @@ from sqlalchemy import text as sql_text
 from sqlalchemy.engine import Engine
 
 from app.backend.src.core.config import get_settings
+from app.backend.src.core.memory import ConversationMemory, RedisConversationMemory
 from app.backend.src.db import get_engine
 from app.backend.src.services.s3 import get_s3_client
 
@@ -114,6 +115,8 @@ class AgentContext:
     user_context: dict[str, Any] = field(default_factory=dict)
     last_rows: list[dict[str, Any]] | None = None
     last_error: str | None = None
+    session_id: str | None = None
+    memory: ConversationMemory | None = None
 
     @property
     def district_id(self) -> int | None:
@@ -159,17 +162,178 @@ class Tool:
         return self.handler(context, arguments)
 
 
+def _extract_active_filters_from_history(history: list[dict[str, str]]) -> dict[str, str]:
+    """
+    Inspect assistant messages in Redis-backed history and extract the last
+    active student filter (and potentially other filters in the future).
+
+    We look for lines in assistant content of the form:
+        ACTIVE_STUDENT_FILTER: <name>
+    and return {"student": "<name>"} when found.
+    """
+    active: dict[str, str] = {}
+    if not history:
+        return active
+
+    # Walk history from newest to oldest, looking for assistant messages
+    # with an ACTIVE_STUDENT_FILTER tag.
+    for message in reversed(history):
+        if not isinstance(message, dict):
+            continue
+        if message.get("role") != "assistant":
+            continue
+        content = message.get("content") or ""
+        # Split into lines and look for our tag.
+        for line in str(content).splitlines():
+            line = line.strip()
+            if line.startswith("ACTIVE_STUDENT_FILTER:"):
+                # Format: ACTIVE_STUDENT_FILTER: chloe taylor
+                parts = line.split(":", 1)
+                if len(parts) == 2:
+                    name = parts[1].strip()
+                    if name:
+                        active["student"] = name
+                        return active
+
+    # Fallback: if no explicit ACTIVE_STUDENT_FILTER tag was found in assistant
+    # messages, try to derive an active student from the most recent user queries.
+    if not active:
+        for message in reversed(history):
+            if not isinstance(message, dict):
+                continue
+            if message.get("role") != "user":
+                continue
+
+            content = (message.get("content") or "").strip()
+            if not content:
+                continue
+
+            # Look for patterns like:
+            #   "for Jack Wilson"
+            #   "monthly spend for avery smith"
+            #   "give me invoice details for July for Carter Sanchez"
+            #
+            # This regex captures one or more words after "for ".
+            m = re.search(r"\bfor\s+([A-Za-z]+(?:\s+[A-Za-z]+)+)", content, flags=re.IGNORECASE)
+            if m:
+                name = m.group(1).strip()
+                if name:
+                    # Use the raw name; SQL already uses LOWER() for matching.
+                    active["student"] = name
+                    return active
+
+    return active
+
+
+def _maybe_apply_active_student_filter(raw_query: str, active_filters: dict[str, str]) -> str:
+    """
+    If there is an active student filter (e.g., from a prior 'monthly spend for X' query),
+    and the current query does NOT explicitly change scope, rewrite the query text to
+    include that student so the model receives an explicit filter.
+    """
+    active_student = (active_filters.get("student") or "").strip()
+    if not active_student:
+        return raw_query
+
+    q_lower = raw_query.lower()
+
+    # If the user explicitly asks for "all students" / "entire district" / similar,
+    # do NOT apply the sticky filter.
+    if "all students" in q_lower or "entire district" in q_lower or "district" in q_lower:
+        return raw_query
+
+    # If the query already explicitly mentions this student, don't modify it.
+    if active_student.lower() in q_lower:
+        return raw_query
+
+    # Only apply the sticky filter for queries that look like detail/summary follow-ups.
+    trigger_phrases = [
+        "invoice detail",
+        "invoice details",
+        "monthly spend",
+        "monthly summary",
+        "invoice totals",
+        "invoice summary",
+        "details for",
+        "invoice info",
+        "only show me",
+        "only for",
+    ]
+    month_words = [
+        "january",
+        "february",
+        "march",
+        "april",
+        "may",
+        "june",
+        "july",
+        "august",
+        "september",
+        "october",
+        "november",
+        "december",
+    ]
+    has_month = any(m in q_lower for m in month_words)
+
+    if not any(p in q_lower for p in trigger_phrases) and not has_month:
+        return raw_query
+
+    # If the user already wrote a "for student ..." pattern, don't overwrite it.
+    if "for student" in q_lower:
+        return raw_query
+
+    # Rewrite by appending an explicit student clause in natural language.
+    # Example: "give me invoice details for September"
+    # becomes: "give me invoice details for September for student Chloe Taylor"
+    rewritten_query = raw_query.rstrip() + f" for student {active_student}"
+    LOGGER.debug(
+        "sticky_student_filter_applied",
+        active_student=active_student,
+        original=raw_query,
+        rewritten=rewritten_query,
+    )
+    return rewritten_query
+
+
 class Workflow:
     """Coordinates model reasoning and tool usage."""
 
-    def __init__(self, system_prompt: str, *, max_iterations: int = MAX_ITERATIONS) -> None:
+    def __init__(
+        self,
+        system_prompt: str,
+        *,
+        max_iterations: int = MAX_ITERATIONS,
+        memory: ConversationMemory | None = None,
+    ) -> None:
         self.system_prompt = system_prompt
         self.max_iterations = max_iterations
+        self.memory = memory
 
     def execute(self, agent: "Agent", query: str, user_context: dict[str, Any]) -> AgentResponse:
-        context = AgentContext(query=query, user_context=user_context or {})
-        messages: list[dict[str, Any]] = [
-            {"role": "system", "content": self.system_prompt},
+        session_id = _build_session_id(user_context)
+        context = AgentContext(
+            query=query, user_context=user_context or {}, session_id=session_id, memory=self.memory
+        )
+        history: list[dict[str, str]] = []
+        if self.memory and session_id:
+            try:
+                history = self.memory.load_messages(session_id)
+            except Exception as exc:  # pragma: no cover - defensive
+                LOGGER.warning("analytics_memory_load_failed", error=str(exc))
+
+        # Apply sticky student filter by inspecting history and, if we find an
+        # ACTIVE_STUDENT_FILTER tag, rewriting the incoming query so the model
+        # sees the student explicitly.
+        active_filters = _extract_active_filters_from_history(history)
+        if active_filters:
+            query = _maybe_apply_active_student_filter(query, active_filters)
+
+        messages: list[dict[str, Any]] = [{"role": "system", "content": self.system_prompt}]
+
+        if history:
+            messages.extend(history)
+
+        messages.append(
             {
                 "role": "user",
                 "content": json.dumps(
@@ -178,8 +342,8 @@ class Workflow:
                         "context": context.user_context,
                     }
                 ),
-            },
-        ]
+            }
+        )
 
         def _extract_student_name(user_query: str) -> str | None:
             """Return a best-effort student name match from the query."""
@@ -195,6 +359,109 @@ class Workflow:
             LOGGER.debug("agent_iteration_start", iteration=iteration)
 
             normalized_query = query.lower()
+
+            # Special-case: include provider information based on the last result set
+            if (
+                "includ" in normalized_query  # catches 'include', 'including'
+                and "provid" in normalized_query  # catches 'provider', 'providers', 'provide'
+                and context.last_rows
+            ):
+                # Try to infer the service_month from the last rows
+                months = {
+                    str(r.get("service_month", "")).strip().lower()
+                    for r in (context.last_rows or [])
+                    if r.get("service_month")
+                }
+                months = {m for m in months if m}
+
+                # If the user says 'same month' or 'this month' and we have exactly one month in context,
+                # show ALL providers for that month across the district (month-scope provider summary).
+                if ("same month" in normalized_query or "this month" in normalized_query) and len(months) == 1:
+                    month = next(iter(months))
+                    sql = """
+                    SELECT
+                        ili.clinician            AS provider,
+                        SUM(ili.cost)            AS total_spend,
+                        LOWER(i.service_month)   AS service_month
+                    FROM invoice_line_items AS ili
+                    JOIN invoices AS i ON ili.invoice_id = i.id
+                    WHERE i.district_key = :district_key
+                      AND LOWER(i.service_month) = :month
+                    GROUP BY
+                        ili.clinician,
+                        LOWER(i.service_month)
+                    ORDER BY
+                        total_spend DESC;
+                    """
+                    try:
+                        run_sql_tool = agent.lookup_tool("run_sql")
+                    except RuntimeError:
+                        LOGGER.warning("run_sql_tool_unavailable_for_provider_month", query=query)
+                    else:
+                        try:
+                            rows = run_sql_tool.invoke(context, {"query": sql, "month": month})
+                        except Exception as exc:  # pragma: no cover - defensive
+                            context.last_error = str(exc)
+                            payload = {
+                                "text": f"Failed to fetch provider spend for {month}: {exc}",
+                                "rows": None,
+                                "html": None,
+                            }
+                        else:
+                            context.last_rows = rows
+                            payload = {"text": "", "rows": rows, "html": None}
+                        return _finalise_response(payload, context)
+
+                # Otherwise, fall back to invoice-scope provider breakdown using invoice_numbers from the last rows
+                inv_values = {
+                    str(r.get("invoice_number", "")).strip()
+                    for r in (context.last_rows or [])
+                    if r.get("invoice_number")
+                }
+                inv_values = sorted({v for v in inv_values if v})
+                if inv_values:
+                    inv_list_sql = ", ".join(
+                        "'" + inv.replace("'", "''") + "'" for inv in inv_values
+                    )
+                    sql = f"""
+                    SELECT
+                        i.invoice_number,
+                        i.student_name,
+                        LOWER(i.service_month)   AS service_month,
+                        ili.clinician            AS provider,
+                        SUM(ili.cost)            AS provider_cost
+                    FROM invoice_line_items AS ili
+                    JOIN invoices AS i ON ili.invoice_id = i.id
+                    WHERE i.district_key = :district_key
+                      AND i.invoice_number IN ({inv_list_sql})
+                    GROUP BY
+                        i.invoice_number,
+                        i.student_name,
+                        LOWER(i.service_month),
+                        ili.clinician
+                    ORDER BY
+                        i.invoice_number,
+                        provider_cost DESC;
+                    """
+                    try:
+                        run_sql_tool = agent.lookup_tool("run_sql")
+                    except RuntimeError:
+                        LOGGER.warning("run_sql_tool_unavailable_for_provider_include", query=query)
+                    else:
+                        try:
+                            rows = run_sql_tool.invoke(context, {"query": sql})
+                        except Exception as exc:  # pragma: no cover - defensive
+                            context.last_error = str(exc)
+                            payload = {
+                                "text": f"Failed to include provider information: {exc}",
+                                "rows": None,
+                                "html": None,
+                            }
+                        else:
+                            context.last_rows = rows
+                            payload = {"text": "", "rows": rows, "html": None}
+
+                        return _finalise_response(payload, context)
 
             if "student list" in normalized_query and "ytd" in normalized_query:
                 sql = """
@@ -473,14 +740,88 @@ def _strip_html(s: str) -> str:
 
 
 def _render_html_table(rows: Sequence[Mapping[str, Any]]) -> str:
+    """
+    Render a generic HTML table from rows, applying basic formatting rules:
+
+    - Columns with amount-like names (e.g., total_cost, total_spend, amount, cost)
+      are rendered as currency ($X,XXX.XX) and tagged with class="amount-col".
+    - Columns with date-like names (e.g., invoice_date, service_date, created_at)
+      are rendered as date-only (YYYY-MM-DD), stripping any time component.
+    - All other values are rendered as plain text.
+    - The table is wrapped in <div class="table-wrapper"><table class="analytics-table">...</table></div>
+      to align with analytics styling.
+    """
+    if not rows:
+        return "<div class=\"table-wrapper\"><table class=\"analytics-table\"></table></div>"
+
     headers = list(rows[0].keys())
+
+    amount_like = {
+        "total_cost",
+        "total_spend",
+        "amount",
+        "cost",
+        "highest_amount",
+        "provider_cost",
+        "code_total",
+        "daily_cost",
+    }
+    date_like = {
+        "invoice_date",
+        "service_date",
+        "created_at",
+        "last_modified",
+    }
+
     header_html = "".join(f"<th>{escape(str(header))}</th>" for header in headers)
     body_rows: list[str] = []
+
     for row in rows:
-        cells = "".join(f"<td>{escape(str(row.get(header, '')))}</td>" for header in headers)
-        body_rows.append(f"<tr>{cells}</tr>")
+        cells_html: list[str] = []
+        for header in headers:
+            key = str(header)
+            raw = row.get(header, "")
+
+            # Currency formatting for amount-like columns
+            if key in amount_like:
+                try:
+                    value = float(raw)
+                    display = f"${value:,.2f}"
+                except Exception:
+                    display = str(raw)
+                cell_html = f"<td class=\"amount-col\">{escape(display)}</td>"
+
+            # Date-only formatting for date-like columns
+            elif key in date_like:
+                text = str(raw)
+                # Split off time if present (supports 'YYYY-MM-DD HH:MM:SS' or ISO 'YYYY-MM-DDTHH:MM:SS')
+                if "T" in text:
+                    date_part = text.split("T", 1)[0]
+                else:
+                    date_part = text.split(" ", 1)[0]
+                cell_html = f"<td>{escape(date_part)}</td>"
+
+            # Default plain text
+            else:
+                cell_html = f"<td>{escape(str(raw))}</td>"
+
+            cells_html.append(cell_html)
+
+        body_rows.append("<tr>" + "".join(cells_html) + "</tr>")
+
     body_html = "".join(body_rows)
-    return f"<table><thead><tr>{header_html}</tr></thead><tbody>{body_html}</tbody></table>"
+    return (
+        "<div class=\"table-wrapper\">"
+        "<table class=\"analytics-table\">"
+        "<thead><tr>"
+        f"{header_html}"
+        "</tr></thead>"
+        "<tbody>"
+        f"{body_html}"
+        "</tbody>"
+        "</table>"
+        "</div>"
+    )
 
 
 def _month_sort_key(month_str: Any) -> int:
@@ -657,10 +998,180 @@ def _render_student_month_pivot(rows: Sequence[Mapping[str, Any]]) -> str:
     )
 
 
+def _strip_sensitive_columns(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    Remove sensitive keys (like rate) from all row dicts before returning them
+    to the frontend. This ensures we never display pay rates in analytics tables.
+    """
+    if not rows:
+        return rows
+
+    # Any key that matches these (case-insensitive) will be dropped.
+    banned_keys = {"rate", "hourly_rate", "pay_rate"}
+
+    sanitized: list[dict[str, Any]] = []
+    for row in rows:
+        clean_row: dict[str, Any] = {}
+        for key, value in row.items():
+            key_lower = str(key).lower()
+            if key_lower in banned_keys:
+                continue
+            clean_row[key] = value
+        sanitized.append(clean_row)
+    return sanitized
+
+
 def _coerce_rows(candidate: Any) -> list[dict[str, Any]] | None:
     if isinstance(candidate, list) and all(isinstance(item, Mapping) for item in candidate):
         return [dict(item) for item in candidate]  # type: ignore[arg-type]
     return None
+
+
+def _remember_interaction(context: AgentContext, response: AgentResponse) -> None:
+    if not context.memory or not context.session_id:
+        return
+
+    try:
+        context.memory.append_interaction(
+            context.session_id,
+            user_message={"content": context.query},
+            assistant_message={"content": _summarize_response(response)},
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        LOGGER.warning("analytics_memory_append_failed", error=str(exc))
+
+
+def _summarize_response(response: AgentResponse) -> str:
+    """
+    Build a compact, entity-rich summary of the agent's response for memory storage.
+
+    Priority:
+    - If 'text' exists, use it directly.
+    - Otherwise, if 'rows' exist, report row count and, when possible, list key entities
+      such as students, providers, vendors, or invoice numbers.
+    - Otherwise, fall back to stripped HTML or an empty string.
+    """
+    if response.text:
+        return response.text
+
+    if response.rows:
+        rows = response.rows
+        count = len(rows)
+        summary_parts = [f"Returned {count} row{'s' if count != 1 else ''}."]
+        sample = rows[0]
+        keys = {str(k) for k in sample.keys()}
+
+        # PRIORITIZE invoice numbers in memory for drill-down behavior
+        if "invoice_number" in keys:
+            invoice_values = {
+                str(r.get("invoice_number", "")).strip()
+                for r in rows
+                if r.get("invoice_number")
+            }
+            invoice_values = sorted({v for v in invoice_values if v})
+            if invoice_values:
+                # invoice list, truncated to a reasonable size
+                inv_list = ", ".join(invoice_values[:10])
+                # insert at the front so invoices are always prominent in memory
+                summary_parts.insert(0, f"Invoices: {inv_list}.")
+
+        # Helper to extract distinct values for a given column name
+        def collect_entities(col_name: str, label: str, max_items: int = 10) -> str | None:
+            if col_name not in sample:
+                return None
+            values = {
+                str(r.get(col_name, "")).strip()
+                for r in rows
+                if r.get(col_name)
+            }
+            values = {v for v in values if v}
+            if not values:
+                return None
+            sorted_vals = sorted(values)
+            shown = sorted_vals[:max_items]
+            more = len(sorted_vals) - len(shown)
+            base = ", ".join(shown)
+            if more > 0:
+                base += f" (and {more} more)"
+            return f"{label}: {base}."
+
+        # Try students
+        if "student_name" in keys:
+            ent = collect_entities("student_name", "Students")
+            if ent:
+                summary_parts.append(ent)
+        elif "student" in keys:
+            ent = collect_entities("student", "Students")
+            if ent:
+                summary_parts.append(ent)
+
+        # Try providers/clinicians
+        if "clinician" in keys:
+            ent = collect_entities("clinician", "Providers")
+            if ent:
+                summary_parts.append(ent)
+        elif "provider" in keys:
+            ent = collect_entities("provider", "Providers")
+            if ent:
+                summary_parts.append(ent)
+
+        # Try vendors
+        if "vendor_name" in keys:
+            ent = collect_entities("vendor_name", "Vendors")
+            if ent:
+                summary_parts.append(ent)
+        elif "name" in keys and "vendor_id" in keys:
+            ent = collect_entities("name", "Vendors")
+            if ent:
+                summary_parts.append(ent)
+
+        # If we have a single, clear student in this result set, record an
+        # ACTIVE_STUDENT_FILTER tag so future queries can be auto-scoped.
+        student_values: set[str] = set()
+        if "student_name" in keys:
+            student_values = {
+                str(r.get("student_name", "")).strip()
+                for r in rows
+                if r.get("student_name")
+            }
+        elif "student" in keys:
+            student_values = {
+                str(r.get("student", "")).strip()
+                for r in rows
+                if r.get("student")
+            }
+
+        student_values = {v for v in student_values if v}
+        if len(student_values) == 1:
+            only_student = sorted(student_values)[0]
+            # Append a special tag that _extract_active_filters_from_history can read.
+            summary_parts.append(f"ACTIVE_STUDENT_FILTER: {only_student}")
+
+        return " ".join(summary_parts)
+
+    if response.html:
+        return _strip_html(response.html)
+
+    return ""
+
+
+def _build_session_id(user_context: Mapping[str, Any] | None) -> str | None:
+    if not user_context:
+        return None
+
+    parts: list[str] = []
+    user_id = user_context.get("user_id")
+    district_key = user_context.get("district_key")
+
+    if user_id:
+        parts.append(f"user:{user_id}")
+    if district_key:
+        parts.append(f"district:{district_key}")
+
+    if not parts:
+        return None
+
+    return "|".join(parts)
 
 
 def _finalise_response(payload: Mapping[str, Any], context: AgentContext) -> AgentResponse:
@@ -670,6 +1181,11 @@ def _finalise_response(payload: Mapping[str, Any], context: AgentContext) -> Age
     html_value = payload.get("html") if isinstance(payload.get("html"), str) else None
 
     rows: list[dict[str, Any]] | None = rows_value or context.last_rows
+
+    if rows:
+        # Strip sensitive columns like 'rate' so they never appear in tables or memory.
+        rows = _strip_sensitive_columns(rows)
+        context.last_rows = rows
 
     if not text_value and rows:
         text_value = "See the table below for details."
@@ -689,10 +1205,13 @@ def _finalise_response(payload: Mapping[str, Any], context: AgentContext) -> Age
 
     # If HTML exists, suppress text to avoid rendering duplicate data
     if html:
-        return AgentResponse(text="", html=html, rows=rows)
+        response = AgentResponse(text="", html=html, rows=rows)
+    else:
+        # Otherwise return text-only version
+        response = AgentResponse(text=text_value or "", html=html, rows=rows)
 
-    # Otherwise return text-only version
-    return AgentResponse(text=text_value or "", html=html, rows=rows)
+    _remember_interaction(context, response)
+    return response
 
 
 def _apply_district_filter(
@@ -942,6 +1461,41 @@ def _build_list_s3_tool() -> Tool:
 
 
 def _build_system_prompt() -> str:
+    memory_rules = (
+        "\n"
+        "MEMORY & CONTEXT RULES:\n"
+        "- You have access to conversation history loaded from Redis.\n"
+        "- Use this memory to interpret follow-up queries, pronouns, and references to 'these students', 'these invoices', 'these providers', 'same ones', etc.\n"
+        "- Treat the last returned row set (students, invoices, providers, vendors, months) as the active working set unless the user explicitly changes scope.\n"
+        "- When the user refers to 'these students', 'those invoices', or similar, you MUST restrict your SQL to the entities in the most recent relevant result set.\n"
+        "- If multiple prior results could match an ambiguous phrase, you must ask a clarifying question in plain English (inside the 'text' field) and NOT run SQL until the user clarifies.\n"
+        "\n"
+        "ACTIVE FILTER SCOPES (STUDENT & CLINICIAN):\n"
+        "- When the last result set clearly reflects a filter on one or more students (e.g., a table where all rows have the same student_name, such as 'Jack Garcia'),\n"
+        "  you MUST treat those students as the active student filter for subsequent queries.\n"
+        "- This means that follow-up questions that do not name a different student and do not say \"all students\" or \"entire district\" MUST remain scoped to the same student(s).\n"
+        "- Example:\n"
+        "    User: \"Give me monthly spend for Jack Garcia.\"\n"
+        "    Agent (SQL): SELECT LOWER(service_month) AS service_month, SUM(total_cost) AS total_cost\n"
+        "                 FROM invoices\n"
+        "                 WHERE LOWER(student_name) LIKE LOWER('%jack garcia%')\n"
+        "                 GROUP BY LOWER(service_month);\n"
+        "    User: \"Now give me invoice details for August.\"\n"
+        "    Agent (SQL): SELECT invoice_number, student_name, total_cost, service_month, invoice_date, status\n"
+        "                 FROM invoices\n"
+        "                 WHERE LOWER(student_name) LIKE LOWER('%jack garcia%')\n"
+        "                   AND LOWER(service_month) = LOWER('august')\n"
+        "                 ORDER BY invoice_date, invoice_number;\n"
+        "- In this example, the Jack Garcia filter MUST persist automatically into the August invoice-details query.\n"
+        "- Do NOT drop the student filter between queries unless the user explicitly changes scope (e.g., \"show all students\", \"for the district\", or names a different student).\n"
+        "\n"
+        "- Apply the same principle for clinician/provider filters when the user explicitly frames the query as provider-centric (e.g., 'monthly spend by clinician X').\n"
+        "- However, when a name can refer to both a student and a clinician, ALWAYS prefer student interpretation unless the user explicitly says 'clinician', 'provider', or similar.\n"
+        "\n"
+        "- If both an active student filter and an explicit new filter are present in the follow-up question, obey the explicit new filter.\n"
+        "- If the user wants to clear the active filter, they can say things like 'for all students', 'for the whole district', or 'ignore the previous filters'; in that case, do NOT apply the earlier student/clinician filter.\n"
+    )
+
     return (
         "You are an analytics agent for a school district invoice system. "
         "You answer questions using SQLite via the run_sql tool and return structured JSON.\n\n"
@@ -976,18 +1530,18 @@ def _build_system_prompt() -> str:
         "-     JOIN invoices i ON ili.invoice_id = i.id\n"
         "-     WHERE LOWER(i.student_name) LIKE LOWER(:student_name)\n"
         "-     GROUP BY ili.clinician;\n\n"
-        "- For monthly buckets, interpret 'October invoices', 'spend in August', etc. as **month of service**, and use service_month/service_year or service_month_num.\n"
-        "- Example: LOWER(service_month) = LOWER('October') or service_month_num = 10.\n"
-        "- Only use invoice_date when the user explicitly asks about when invoices were processed or uploaded (e.g., 'when were October invoices submitted?').\n"
+        "- For ANY question that mentions a month together with invoices or spend (e.g., 'invoices for July', 'highest invoices in August', 'total spend in September'), you MUST interpret the month as **month of service** and filter using service_month/service_year or service_month_num.\n"
+        "- Example filter: WHERE LOWER(service_month) = LOWER('July').\n"
+        "- You MUST NOT filter by invoice_date when answering generic month questions unless the user explicitly mentions 'invoice date', 'submitted', 'processed', or 'uploaded'.\n"
+        "- Only when the user explicitly asks about when invoices were processed or uploaded (e.g., 'when were October invoices submitted?') should you use invoice_date in the WHERE clause.\n"
         "- Keep queries simple: avoid unnecessary joins unless the question truly needs them.\n\n"
         "MONTH GROUPING & ORDERING:\n"
         "- When you GROUP BY month (for example, service_month with an aggregated total_cost), you MUST order the result by calendar month, not by amount, unless the user explicitly asks for 'highest month(s)', 'top month(s)', or a ranking.\n"
-        "- Use a chronological ORDER BY such as:\n"
+        "- You can order months chronologically using either service_month/service_year columns or, if necessary, invoice_date for ORDER BY only. For example:\n"
         "    ORDER BY MIN(strftime('%Y-%m', invoice_date)) ASC\n"
         "  or, if a numeric month column exists (e.g., service_month_num), use:\n"
         "    ORDER BY service_month_num ASC, service_year ASC\n"
-        "- Do NOT sort grouped month rows by total_cost unless the user has clearly requested a sort by amount (for example, 'show me the months with the highest spend').\n"
-        "- You may still compute the highest-spend month in your reasoning and use it in summary cards (e.g., 'Highest Month'), but the SQL result rows should remain in chronological order.\n"
+        "- Regardless of how you ORDER BY months, the FILTER for month-based questions MUST use service_month as described above (e.g., WHERE LOWER(service_month) = LOWER('July')).\n"
         "\n"
         "FULL RESULTS vs. LIMITS:\n"
         "- If the user asks for \"all invoices\", \"full table\", or similar wording, you MUST NOT add a LIMIT clause.\n"
@@ -1003,6 +1557,9 @@ def _build_system_prompt() -> str:
         "- When the user asks which students a clinician serves (for example, 'which students does clinician X provide care for?' or 'which students is clinician X assigned to?'), use invoice_line_items joined to invoices and filter by clinician.\n"
         "- Use invoices.district_key = :district_key to scope results to the current district.\n"
         "- Use partial matches (LIKE) on the clinician name when only a first name or partial name is given.\n\n"
+        "- When aggregating amounts by clinician, provider, or service_code, NEVER use invoices.total_cost. Always use SUM(invoice_line_items.cost) for the amount.\n\n"
+        "- For any table where each row corresponds to a provider, clinician, or service_code, you MUST compute the amount using SUM(invoice_line_items.cost) and label it clearly (e.g., provider_cost or code_total).\n"
+        "- You MUST NOT use invoices.total_cost for provider-level or clinician-level rows. Invoice totals belong only on invoice-level rows, not repeated per provider.\n\n"
         "- Example: list of students for a clinician (full name):\n"
         "  SELECT DISTINCT ili.student AS student_name\n"
         "  FROM invoice_line_items AS ili\n"
@@ -1260,36 +1817,98 @@ def _build_system_prompt() -> str:
         "- When a student may have multiple invoices, return all matching rows sorted by invoice_date DESC.\n"
         "- When asking ‘why is amount low?’ or ‘what happened?’, extract that student’s invoice(s) and return invoice_number, student_name, total_cost, service_month, status.\n"
         "- NEVER assume the student is a vendor — students and vendors are separate entities.\n\n"
+        "AMBIGUITY RESOLUTION — STUDENT VS PROVIDER:\n"
+        "- When a name exists both as a student and as a clinician, ALWAYS treat it as a STUDENT unless the user explicitly refers to “provider”, “clinician”, “care staff”, or otherwise indicates a staff query.\n"
+        "- Examples:\n"
+        "    “monthly spend for Jack Garcia” → student spend query\n"
+        "    “provider list for Jack Garcia” → providers serving the student\n"
+        "    “monthly spend by clinician Jack Garcia” → provider query\n"
+        "- Never default to provider matching unless the user includes explicit provider intent.\n"
+        "- When ambiguous, force invoice-level filtering on invoices.student_name or invoice_line_items.student and NEVER invoice_line_items.clinician.\n\n"
         "INVOICE DETAIL QUERIES:\n"
-        "- When the user asks for invoice information or invoice details for a student (for example, 'invoice information for Addison Johnson', 'invoice details for this student in September', 'list invoices for Jayden Ramsey by month'), you MUST return invoice-level rows, not aggregated totals.\n"
-        "- In these cases:\n"
-        "-   • Do NOT GROUP BY student_name or service_month.\n"
-        "-   • Select invoice-level columns such as:\n"
-        "       invoice_number,\n"
-        "       student_name,\n"
-        "       service_month,\n"
-        "       invoice_date,\n"
-        "       total_cost,\n"
-        "       status.\n"
-        "-   • When the user also cares about clinicians or services, you MAY join invoice_line_items to show line-item detail:\n"
-        "       SELECT i.invoice_number,\n"
-        "              i.student_name,\n"
-        "              i.service_month,\n"
-        "              i.invoice_date,\n"
-        "              ili.service_date,\n"
-        "              ili.clinician,\n"
-        "              ili.service_code,\n"
-        "              ili.hours,\n"
-        "              ili.rate,\n"
-        "              ili.cost\n"
-        "       FROM invoices i\n"
-        "       JOIN invoice_line_items ili ON ili.invoice_id = i.id\n"
-        "       WHERE i.district_key = :district_key\n"
-        "         AND LOWER(i.student_name) LIKE LOWER(:student_name_pattern)\n"
-        "       ORDER BY i.invoice_date, ili.clinician, ili.service_date;\n"
-        "- Always filter invoice detail queries by district_key when the parameter is available, e.g. i.district_key = :district_key.\n"
-        "- If the user specifies a month as well (e.g., 'for September'), add a filter such as LOWER(i.service_month) = LOWER('September').\n"
-        "- Invoice detail responses should produce a straightforward table of invoice rows or line items; DO NOT pivot these tables into Student × Month, and do NOT aggregate totals unless the user explicitly asks for a summary.\n"
+        "- Do NOT select or return any rate or pay-rate columns (e.g., 'rate', 'hourly_rate', 'pay_rate') in your SQL. When showing invoice or line-item details, include hours and cost only, not the rate.\n"
+        "- When the user asks for invoice information or invoice details for a specific invoice number (e.g., 'invoice details for Wood-OCT2025', 'drill into Jackson-OCT2025') you MUST use the invoice_line_items table keyed by invoice_number.\n"
+        "- Example (raw line-item detail for an invoice):\n"
+        "  SELECT invoice_number,\n"
+        "         student        AS student_name,\n"
+        "         clinician,\n"
+        "         service_code,\n"
+        "         hours,\n"
+        "         rate,\n"
+        "         cost,\n"
+        "         service_date\n"
+        "  FROM invoice_line_items\n"
+        "  WHERE invoice_number = 'Jackson-OCT2025'\n"
+        "  ORDER BY service_date, clinician;\n"
+        "- This table should show the detailed breakdown of work on that invoice (daily rows, provider, service code, hours, rate, cost).\n"
+        "- Invoice totals from the invoices table should NOT be repeated per provider; they are scoped to the whole invoice.\n"
+        "\n"
+        "- When the user requests provider-level totals for a specific invoice (e.g., 'providers for this invoice', 'include providers for this invoice'):\n"
+        "  - You MUST aggregate using SUM(invoice_line_items.cost) grouped by clinician and NOT use invoices.total_cost.\n"
+        "  - This is a provider-level spend breakdown; do not mix invoice totals into these rows.\n"
+        "  - Example:\n"
+        "    SELECT invoice_number,\n"
+        "           clinician      AS provider,\n"
+        "           SUM(cost)      AS provider_cost\n"
+        "    FROM invoice_line_items\n"
+        "    WHERE invoice_number = 'Jackson-OCT2025'\n"
+        "    GROUP BY clinician\n"
+        "    ORDER BY provider_cost DESC;\n"
+        "  - Label this column as 'Provider Spend ($)' or similar so it is clearly per provider.\n"
+        "\n"
+        "- For daily breakdowns, group line items by service_date and SUM(cost) per date.\n"
+        "- For service_code breakdowns, group line items by service_code and SUM(cost) per code.\n"
+        "- In all of these breakdowns, invoice-level totals from invoices.total_cost must never be duplicated per provider.\n"
+        "\n"
+        "\n"
+
+        ####################################################################
+        # STRICT INVOICE DETAIL ENFORCEMENT – ABSOLUTELY REQUIRED FIX
+        ####################################################################
+        "INVOICE DETAIL ENFORCEMENT RULE:\n"
+        "- When the user asks for invoice details, breakdown, line items, or indicates intent to inspect the contents of a specific invoice (e.g.: \n"
+        "      'invoice details for Jenkins-JUL2025',\n"
+        "      'show me the details for Brown-JUL2025',\n"
+        "      'breakdown for Matthew Rodriguez for September',\n"
+        "      'line items for this invoice', etc.)\n"
+        "  you MUST obey ALL of the following rules:\n"
+        "\n"
+        "  1. ALWAYS query ONLY invoice_line_items joined to invoices. NEVER run a standalone SELECT on the invoices table for invoice details.\n"
+        "\n"
+        "  2. The ONLY permitted columns in invoice-detail rows are:\n"
+        "         - invoice_number\n"
+        "         - student AS student_name\n"
+        "         - clinician AS provider\n"
+        "         - service_code\n"
+        "         - hours\n"
+        "         - cost\n"
+        "         - service_date\n"
+        "     (and NEVER rate unless user explicitly requests it).\n"
+        "\n"
+        "  3. DO NOT include invoice-level totals, invoice_date, status, service_month, vendor info, or any invoice summary fields.\n"
+        "\n"
+        "  4. DO NOT combine invoice_line_items results with invoice summary results. Invoice-detail mode MUST output only line-item rows.\n"
+        "\n"
+        "  5. DO NOT let conversation memory trigger queries on the invoices table during invoice-detail questions. Memory must NOT override this rule.\n"
+        "\n"
+        "  6. The final output table MUST contain ONLY line-item details. HTML must not include invoice summary cards for invoice-detail queries.\n"
+        "\n"
+        "  7. If the user mentions an invoice_number directly, e.g. 'Hernandez-OCT2025', you MUST treat this as an invoice-detail query.\n"
+        "\n"
+        "Correct example:\n"
+        "  SELECT i.invoice_number,\n"
+        "         ili.student AS student_name,\n"
+        "         ili.clinician AS provider,\n"
+        "         ili.service_code,\n"
+        "         ili.hours,\n"
+        "         ili.cost,\n"
+        "         ili.service_date\n"
+        "  FROM invoice_line_items ili\n"
+        "  JOIN invoices i ON ili.invoice_id = i.id\n"
+        "  WHERE i.invoice_number = 'Brown-JUL2025'\n"
+        "  ORDER BY ili.service_date, ili.clinician;\n"
+        "\n"
+        "Under no circumstances should invoice summaries overwrite invoice-detail results.\n"
         "\n"
         "FINAL OUTPUT FORMAT:\n"
         "- You MUST respond with a single JSON object: {\"text\": str, \"rows\": list|None, \"html\": str}.\n"
@@ -1310,6 +1929,7 @@ def _build_system_prompt() -> str:
         "- NEVER put HTML in 'rows'.\n"
         "- NEVER mix description and table markup in the same field.\n"
         "- If generating a table, put it ONLY inside the 'html' field."
+        + memory_rules
     )
 
 
@@ -1320,9 +1940,27 @@ def _build_agent() -> Agent:
 
     client = OpenAI(api_key=settings.openai_api_key)
     engine = get_engine()
-    workflow = Workflow(system_prompt=_build_system_prompt(), max_iterations=MAX_ITERATIONS)
+    memory = _build_memory_store(settings)
+    workflow = Workflow(
+        system_prompt=_build_system_prompt(),
+        max_iterations=MAX_ITERATIONS,
+        memory=memory,
+    )
     tools = [_build_run_sql_tool(engine), _build_list_s3_tool()]
     return Agent(client=client, model=DEFAULT_MODEL, workflow=workflow, tools=tools)
+
+
+def _build_memory_store(settings: Any) -> ConversationMemory | None:
+    redis_url = getattr(settings, "redis_memory_dsn", None)
+    if not redis_url:
+        LOGGER.info("analytics_memory_disabled", reason="redis_url_missing")
+        return None
+
+    try:
+        return RedisConversationMemory(redis_url)
+    except Exception as exc:  # pragma: no cover - defensive
+        LOGGER.warning("analytics_memory_init_failed", error=str(exc))
+        return None
 
 
 _AGENT: Agent | None = None
