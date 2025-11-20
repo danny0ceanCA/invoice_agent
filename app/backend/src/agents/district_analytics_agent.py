@@ -619,7 +619,7 @@ class Workflow:
                 messages=messages,
                 tools=[tool.schema() for tool in agent.tools],
                 tool_choice="auto",
-                temperature=0,
+                temperature=0.1,
             )
             message = completion.choices[0].message
             tool_calls = message.tool_calls or []
@@ -1237,9 +1237,10 @@ def _finalise_response(payload: Mapping[str, Any], context: AgentContext) -> Age
     else:
         html = html_value or _safe_html(text_value)
 
-    # If HTML exists, suppress text to avoid rendering duplicate data
+    # If HTML exists, keep both: conversational text + visuals.
+    # 'text' should be a short explanation, not a duplication of the table.
     if html:
-        response = AgentResponse(text="", html=html, rows=rows)
+        response = AgentResponse(text=text_value or "", html=html, rows=rows)
     else:
         # Otherwise return text-only version
         response = AgentResponse(text=text_value or "", html=html, rows=rows)
@@ -1532,10 +1533,27 @@ def _build_system_prompt() -> str:
         "- If the user wants to clear the active filter, they can say things like 'for all students', 'for the whole district', or 'ignore the previous filters'; in that case, do NOT apply the earlier student/clinician filter.\n"
     )
 
+    conversational_rules = (
+        "\n"
+        "CONVERSATION STYLE & CLARIFICATION:\n"
+        "- Use a friendly, conversational tone, like ChatGPT helping a district analyst.\n"
+        "- It is OK to say 'I' and 'you'. Keep sentences short and clear, avoid heavy jargon.\n"
+        "- When the user's question is missing key filters (for example: which student, which time period, which vendor, or whether they want a single student vs the entire district), do NOT guess and do NOT call any tools yet.\n"
+        "- In that case, respond with JSON where:\n"
+        "  - 'text' asks 1–2 very specific follow-up questions,\n"
+        "  - 'rows' is null,\n"
+        "  - 'html' is an empty string.\n"
+        "- Only once the user has answered these clarifying questions should you call run_sql or list_s3.\n"
+        "- When you do answer with data, start 'text' with a brief conversational summary of what you did, for example:\n"
+        "    \"Here’s the monthly spend by student for August through October for the whole district.\"\n"
+        "- Never restate the entire table in 'text'. Use 'text' for the friendly explanation and use 'html' for tables, charts, and summary cards.\n"
+    )
+
     return (
         "You are an analytics agent for a school district invoice system. "
         "You answer questions using SQLite via the run_sql tool and return structured JSON.\n\n"
         f"{DB_SCHEMA_HINT}\n\n"
+        f"{conversational_rules}\n\n"
         "TOOL USAGE:\n"
         "- Use list_s3 ONLY when the user asks about invoice files, PDFs, S3 keys, or prefixes.\n"
         "- Use run_sql for counts, totals, vendors, students, spending, and summaries.\n\n"
