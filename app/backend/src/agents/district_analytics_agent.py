@@ -195,6 +195,19 @@ def _extract_active_filters_from_history(history: list[dict[str, str]]) -> dict[
                         active["student"] = name
                         return active
 
+    # Fallback: infer the student from the most recent user message that
+    # mentions "for <Name>" when no explicit tag was found in assistant messages.
+    for message in reversed(history):
+        if not isinstance(message, dict):
+            continue
+        if message.get("role") != "user":
+            continue
+        content = (message.get("content") or "").strip()
+        match = re.search(r"for\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)", content)
+        if match:
+            active["student"] = match.group(1).strip()
+            return active
+
     return active
 
 
@@ -229,8 +242,26 @@ def _maybe_apply_active_student_filter(raw_query: str, active_filters: dict[str,
         "invoice summary",
         "details for",
         "invoice info",
+        "only show me",
+        "only for",
     ]
-    if not any(p in q_lower for p in trigger_phrases):
+    month_words = [
+        "january",
+        "february",
+        "march",
+        "april",
+        "may",
+        "june",
+        "july",
+        "august",
+        "september",
+        "october",
+        "november",
+        "december",
+    ]
+    has_month = any(m in q_lower for m in month_words)
+
+    if not any(p in q_lower for p in trigger_phrases) and not has_month:
         return raw_query
 
     # If the user already wrote a "for student ..." pattern, don't overwrite it.
@@ -240,7 +271,14 @@ def _maybe_apply_active_student_filter(raw_query: str, active_filters: dict[str,
     # Rewrite by appending an explicit student clause in natural language.
     # Example: "give me invoice details for September"
     # becomes: "give me invoice details for September for student Chloe Taylor"
-    return raw_query.rstrip() + f" for student {active_student}"
+    rewritten_query = raw_query.rstrip() + f" for student {active_student}"
+    LOGGER.debug(
+        "sticky_student_filter_applied",
+        active_student=active_student,
+        original=raw_query,
+        rewritten=rewritten_query,
+    )
+    return rewritten_query
 
 
 class Workflow:
