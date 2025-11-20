@@ -3,6 +3,9 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth0 } from "@auth0/auth0-react";
 
+// Backend API base URL (Render: VITE_API_BASE_URL, Dev: fallback to /api)
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api";
+
 function ChatAgent({ districtKey }) {
   console.log("ChatAgent using districtKey:", districtKey);
   const { isAuthenticated, isLoading, getAccessTokenSilently } = useAuth0();
@@ -68,7 +71,7 @@ function ChatAgent({ districtKey }) {
         district_key: districtKey,
       });
 
-      const res = await fetch("/api/agents/analytics", {
+      const res = await fetch(`${API_BASE_URL}/agents/analytics`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
