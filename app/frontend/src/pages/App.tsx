@@ -180,7 +180,7 @@ export function App() {
       <Toaster position="top-right" />
       <header className="border-b bg-white">
         <div className="mx-auto flex max-w-4xl items-center justify-between gap-6 px-6 py-4">
-          <h1 className="text-xl font-semibold">ASCS Invoice Automation</h1>
+          <h1 className="text-xl font-semibold">CareSpend Analytics</h1>
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-3">
               {isAuthenticated ? (
