@@ -195,18 +195,27 @@ def _extract_active_filters_from_history(history: list[dict[str, str]]) -> dict[
                         active["student"] = name
                         return active
 
-    # Fallback: infer the student from the most recent user message that
-    # mentions "for <Name>" when no explicit tag was found in assistant messages.
-    for message in reversed(history):
-        if not isinstance(message, dict):
-            continue
-        if message.get("role") != "user":
-            continue
-        content = (message.get("content") or "").strip()
-        match = re.search(r"for\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)", content)
-        if match:
-            active["student"] = match.group(1).strip()
-            return active
+    # Fallback: if no explicit ACTIVE_STUDENT_FILTER tag was found in assistant
+    # messages, try to derive an active student from the most recent user queries.
+    if not active:
+        for message in reversed(history):
+            if not isinstance(message, dict):
+                continue
+            if message.get("role") != "user":
+                continue
+            content = (message.get("content") or "").strip()
+            if not content:
+                continue
+
+            # Look for patterns like "for Jack Wilson", "for avery smith", etc.
+            # This regex captures one or more words after 'for '.
+            m = re.search(r"\bfor\s+([A-Za-z]+(?:\s+[A-Za-z]+)+)", content, flags=re.IGNORECASE)
+            if m:
+                # Use the raw name from the query; SQL already uses LOWER() for matching.
+                name = m.group(1).strip()
+                if name:
+                    active["student"] = name
+                    return active
 
     return active
 
