@@ -577,42 +577,72 @@ class Workflow:
 
             student_name = _extract_student_name(query)
             if student_name and context.district_key:
-                safe_name = student_name.replace("'", "''")
-                sql = (
-                    "SELECT invoice_number, student_name, total_cost, "
-                    "service_month, status "
-                    "FROM invoices "
-                    "WHERE invoices.district_key = :district_key "
-                    "AND LOWER(invoices.student_name) LIKE LOWER('%{name}%') "
-                    "ORDER BY invoice_date DESC, total_cost DESC;"
-                ).format(name=safe_name)
+                # STUDENT-ONLY SHORTCUT:
+                # This shortcut is safe when the query is essentially just the student's
+                # name (e.g., "Avery Smith") and does NOT mention months or other filters.
+                # If the query mentions a month (e.g., "July") or the word "month", we
+                # skip the shortcut so the model can construct a full student+month query.
+                q_lower = query.lower()
+                month_words = [
+                    "january",
+                    "february",
+                    "march",
+                    "april",
+                    "may",
+                    "june",
+                    "july",
+                    "august",
+                    "september",
+                    "october",
+                    "november",
+                    "december",
+                ]
+                mentions_month = "month" in q_lower or any(m in q_lower for m in month_words)
 
-                try:
-                    run_sql_tool = agent.lookup_tool("run_sql")
-                except RuntimeError:
-                    LOGGER.warning("run_sql_tool_unavailable_for_student", query=query)
+                if mentions_month:
+                    # Example: "Jayden Ramsey and the month is for July"
+                    # -> let the model + tools build:
+                    #    WHERE student_name LIKE '%jayden ramsey%'
+                    #      AND LOWER(service_month) = LOWER('july')
+                    # instead of returning all months.
+                    pass
                 else:
-                    try:
-                        rows = run_sql_tool.invoke(context, {"query": sql})
-                    except Exception as exc:  # pragma: no cover - defensive
-                        context.last_error = str(exc)
-                        payload = {
-                            "text": f"Failed to fetch invoices for {student_name}: {exc}",
-                            "rows": None,
-                            "html": None,
-                        }
-                    else:
-                        context.last_rows = rows
-                        if rows:
-                            text = (
-                                f"Fetched {len(rows)} invoice"
-                                f"{'s' if len(rows) != 1 else ''} for {student_name}."
-                            )
-                        else:
-                            text = f"No invoices found for {student_name}."
-                        payload = {"text": text, "rows": rows}
+                    safe_name = student_name.replace("'", "''")
+                    sql = (
+                        "SELECT invoice_number, student_name, total_cost, "
+                        "service_month, status "
+                        "FROM invoices "
+                        "WHERE invoices.district_key = :district_key "
+                        "AND LOWER(invoices.student_name) LIKE LOWER('%{name}%') "
+                        "ORDER BY invoice_date DESC, total_cost DESC;"
+                    ).format(name=safe_name)
 
-                    return _finalise_response(payload, context)
+                    try:
+                        run_sql_tool = agent.lookup_tool("run_sql")
+                    except RuntimeError:
+                        LOGGER.warning("run_sql_tool_unavailable_for_student", query=query)
+                    else:
+                        try:
+                            rows = run_sql_tool.invoke(context, {"query": sql})
+                        except Exception as exc:  # pragma: no cover - defensive
+                            context.last_error = str(exc)
+                            payload = {
+                                "text": f"Failed to fetch invoices for {student_name}: {exc}",
+                                "rows": None,
+                                "html": None,
+                            }
+                        else:
+                            context.last_rows = rows
+                            if rows:
+                                text = (
+                                    f"Fetched {len(rows)} invoice"
+                                    f"{'s' if len(rows) != 1 else ''} for {student_name}."
+                                )
+                            else:
+                                text = f"No invoices found for {student_name}."
+                            payload = {"text": text, "rows": rows}
+
+                        return _finalise_response(payload, context)
 
             completion = agent.client.chat.completions.create(
                 model=agent.model,
@@ -1561,7 +1591,7 @@ def _build_system_prompt() -> str:
     conversational_rules = (
         "\n"
         "CONVERSATION STYLE & CLARIFICATION:\n"
-        "- Use a friendly, conversational tone, like ChatGPT helping a district analyst.\n"
+        "- Use a friendly, conversational tone, like a helpful data analyst supporting district staff.\n"
         "- It is OK to say 'I' and 'you'. Keep sentences short and clear, avoid heavy jargon.\n"
         "- When the user's question is missing key filters (for example: which student, which time period, which vendor, or whether they want a single student vs the entire district), do NOT guess and do NOT call any tools yet.\n"
         "- In that case, respond with JSON where:\n"
@@ -1572,6 +1602,24 @@ def _build_system_prompt() -> str:
         "- When you do answer with data, start 'text' with a brief conversational summary of what you did, for example:\n"
         "    \"Here’s the monthly spend by student for August through October for the whole district.\"\n"
         "- Never restate the entire table in 'text'. Use 'text' for the friendly explanation and use 'html' for tables, charts, and summary cards.\n"
+        "\n"
+        "REPORT TYPES & GUIDED ANALYTICS:\n"
+        "- Think in terms of reusable report types, such as:\n"
+        "    • Student invoice summary (invoices, totals, and months for a specific student),\n"
+        "    • Providers and hours for a student by month,\n"
+        "    • Monthly spend by student or by provider,\n"
+        "    • Provider-level totals for the district,\n"
+        "    • Full invoice tables for a given month.\n"
+        "- When the user asks a broad question like \"I want to see information about students\" or \"show me spend\", do NOT immediately call tools. First, acknowledge the request and offer 2–3 concrete report options they can choose from. For example:\n"
+        "    \"I can show: (1) a list of all students, (2) invoices and totals for a specific student, or (3) monthly spend by student or provider. Which would you like?\"\n"
+        "- In these broad cases, your 'text' field should clearly ask which report type they want, and 'rows' MUST be null so that no table is shown until they choose.\n"
+        "- After you successfully return a first report in a session, you MAY occasionally ask if the user would like to know other ways you can slice the same data (for example, providers and hours, monthly trends, or comparisons to other students). Do this sparingly—at most once near the start of a session.\n"
+        "- For follow-up questions that are vague, such as \"what else can you provide?\" or \"can you provide anything else?\", do NOT rerun the same SQL or re-display the same table. Instead, treat this as a request for a different view on the same student/district context: suggest 2–3 relevant alternative reports and ask which one they want. Only call run_sql again after they pick a specific option.\n"
+        "- When the user asks a very specific question that clearly changes the filter or view (for example, switching from August to September, or from invoices to providers and hours), you SHOULD run a new query and describe in 'text' how this report differs from the previous one.\n"
+        "- Always prefer reusing the existing context and active filters over repeating identical reports. If a new question is essentially the same as the last one (no new filters, no new dimension), you may simply confirm that the current table already answers it and offer an alternative view instead of running SQL again.\n"
+        "- When you introduce a report type or suggest options, be concise and practical. For example:\n"
+        "    \"I can show Avery Smith’s providers and hours by month, or compare her monthly spend to other students. Which would you like?\"\n"
+        "- If the user ignores your suggestions and asks a direct question, always prioritize answering that direct question accurately.\n"
     )
 
     return (
