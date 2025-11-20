@@ -75,6 +75,9 @@ def analytics_agent_endpoint(
     if user and getattr(user, "district_id", None) is not None:
         context.setdefault("district_id", user.district_id)
 
+    if user and getattr(user, "id", None) is not None:
+        context.setdefault("user_id", user.id)
+
     print("RESOLVED CONTEXT:", context)
 
     try:

@@ -17,6 +17,9 @@ class Settings(BaseSettings):
         default="sqlite:///./invoice.db", alias="DATABASE_URL"
     )
     redis_url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
+    redis_memory_url: str | None = Field(
+        default=None, alias="REDIS_URL_MEMORY"
+    )
     redis_enabled_flag: bool = Field(default=True, alias="REDIS_ENABLED")
     redis_ca_cert_path: str = Field(
         default="certs/redis_ca.pem", alias="REDIS_CA_CERT_PATH"
@@ -72,6 +75,16 @@ class Settings(BaseSettings):
         """Return ``True`` when Redis integrations should be used."""
 
         return self.redis_enabled_flag
+
+    @property
+    def redis_memory_dsn(self) -> str | None:
+        """Return the Redis connection string for conversation memory."""
+
+        if self.redis_memory_url:
+            return self.redis_memory_url
+        if not self.redis_enabled:
+            return None
+        return self.redis_url
 
 
 @lru_cache()
