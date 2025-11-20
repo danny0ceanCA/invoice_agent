@@ -107,6 +107,40 @@ class AgentResponse(BaseModel):
     rows: list[dict[str, Any]] | None = None
 
 
+def normalize_sql_for_postgres(sql: str) -> str:
+    """
+    Normalize analytics SQL that may contain SQLite-specific functions so it
+    runs cleanly on PostgreSQL.
+
+    This is a short-term safety net while we migrate from SQLite to Postgres
+    and update agent prompts. It is intentionally conservative and only
+    rewrites patterns we know are invalid on Postgres.
+
+    Currently handled:
+      - strftime('%m', invoice_date) -> EXTRACT(MONTH FROM invoice_date)
+
+    If additional SQLite-only patterns show up in logs, they can be added
+    here in a controlled way.
+    """
+
+    # Replace simple month-extraction via strftime with Postgres EXTRACT()
+    replacements = [
+        # common pattern with spaces: strftime('%m', invoice_date)
+        (r"strftime\('%m',\s*invoice_date\)", "EXTRACT(MONTH FROM invoice_date)"),
+        # sometimes the agent may qualify the column: strftime('%m', invoices.invoice_date)
+        (
+            r"strftime\('%m',\s*invoices\.invoice_date\)",
+            "EXTRACT(MONTH FROM invoices.invoice_date)",
+        ),
+    ]
+
+    normalized = sql
+    for pattern, replacement in replacements:
+        normalized = re.sub(pattern, replacement, normalized)
+
+    return normalized
+
+
 @dataclass
 class AgentContext:
     """Runtime context shared between the workflow and tools."""
@@ -1374,20 +1408,22 @@ def _build_run_sql_tool(engine: Engine) -> Tool:
         WHERE sub.district_key = :district_key
         """
 
+        normalized_sql = normalize_sql_for_postgres(sql_statement)
+
         LOGGER.info(
             "analytics_run_sql_request",
-            sql=sql_statement,
+            sql=normalized_sql,
             params=params,
         )
 
         try:
             with engine.connect() as connection:
-                result = connection.execute(sql_text(sql_statement), params)
+                result = connection.execute(sql_text(normalized_sql), params)
                 rows = [dict(row) for row in result.mappings()]
         except Exception as exc:
             LOGGER.error(
                 "analytics_run_sql_error",
-                sql=sql_statement,
+                sql=normalized_sql,
                 params=params,
                 error=str(exc),
             )
@@ -1395,7 +1431,7 @@ def _build_run_sql_tool(engine: Engine) -> Tool:
 
         LOGGER.info(
             "analytics_run_sql_result",
-            sql=sql_statement,
+            sql=normalized_sql,
             row_count=len(rows),
         )
         return rows
