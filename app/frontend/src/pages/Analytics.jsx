@@ -1,22 +1,33 @@
+import { useEffect, useState } from "react";
 import { useAuth0 } from "@auth0/auth0-react";
-import { useQuery } from "@tanstack/react-query";
-
 import api from "../api";
 import ChatAgent from "../components/ChatAgent.jsx";
 
 export default function Analytics() {
   const { isAuthenticated } = useAuth0();
+  const [districtKey, setDistrictKey] = useState(null);
 
-  const { data: district } = useQuery({
-    queryKey: ["district-profile"],
-    queryFn: async () => {
-      const response = await api.get("/api/districts/me");
-      return response.data;
-    },
-    enabled: isAuthenticated,
-  });
+  useEffect(() => {
+    let cancelled = false;
 
-  const districtKey = district?.district_key ?? null;
+    async function loadDistrict() {
+      if (!isAuthenticated) return;
+      try {
+        const response = await api.get("/api/districts/me");
+        if (!cancelled) {
+          setDistrictKey(response.data?.district_key ?? null);
+        }
+      } catch (err) {
+        console.error("Failed to load district profile in Analytics:", err);
+        if (!cancelled) setDistrictKey(null);
+      }
+    }
+
+    loadDistrict();
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated]);
 
   return (
     <div className="analytics-page" style={{ padding: "1rem 0" }}>
