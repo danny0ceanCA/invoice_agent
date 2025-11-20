@@ -203,17 +203,22 @@ def _extract_active_filters_from_history(history: list[dict[str, str]]) -> dict[
                 continue
             if message.get("role") != "user":
                 continue
+
             content = (message.get("content") or "").strip()
             if not content:
                 continue
 
-            # Look for patterns like "for Jack Wilson", "for avery smith", etc.
-            # This regex captures one or more words after 'for '.
+            # Look for patterns like:
+            #   "for Jack Wilson"
+            #   "monthly spend for avery smith"
+            #   "give me invoice details for July for Carter Sanchez"
+            #
+            # This regex captures one or more words after "for ".
             m = re.search(r"\bfor\s+([A-Za-z]+(?:\s+[A-Za-z]+)+)", content, flags=re.IGNORECASE)
             if m:
-                # Use the raw name from the query; SQL already uses LOWER() for matching.
                 name = m.group(1).strip()
                 if name:
+                    # Use the raw name; SQL already uses LOWER() for matching.
                     active["student"] = name
                     return active
 
