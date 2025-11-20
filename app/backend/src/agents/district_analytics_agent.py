@@ -1211,10 +1211,27 @@ def _build_session_id(user_context: Mapping[str, Any] | None) -> str | None:
 def _finalise_response(payload: Mapping[str, Any], context: AgentContext) -> AgentResponse:
     text_value = str(payload.get("text") or "").strip()
     text_value = _strip_html(text_value)
-    rows_value = _coerce_rows(payload.get("rows"))
+
+    # We need to distinguish between:
+    # - rows not mentioned at all (reuse last_rows for follow-up views)
+    # - rows explicitly set to null (clarifying questions: no table)
+    # - rows set to a new list (new result set)
+    rows_field_present = "rows" in payload
+    raw_rows_field = payload.get("rows", None)
+    rows_value = _coerce_rows(raw_rows_field)
     html_value = payload.get("html") if isinstance(payload.get("html"), str) else None
 
-    rows: list[dict[str, Any]] | None = rows_value or context.last_rows
+    # Decide which rows to show:
+    # - If the model returned a valid row list, use it.
+    # - If the model explicitly returned rows: null, show no rows.
+    # - If the model omitted the 'rows' field entirely, reuse last_rows
+    #   (typical follow-up / restatement behavior).
+    if rows_value is not None:
+        rows: list[dict[str, Any]] | None = rows_value
+    elif rows_field_present:
+        rows = None
+    else:
+        rows = context.last_rows
 
     if rows:
         # Strip sensitive columns like 'rate' so they never appear in tables or memory.
@@ -1531,6 +1548,14 @@ def _build_system_prompt() -> str:
         "\n"
         "- If both an active student filter and an explicit new filter are present in the follow-up question, obey the explicit new filter.\n"
         "- If the user wants to clear the active filter, they can say things like 'for all students', 'for the whole district', or 'ignore the previous filters'; in that case, do NOT apply the earlier student/clinician filter.\n"
+        "- When an ACTIVE_STUDENT_FILTER tag is present (for example 'Jack Garcia'), you MUST treat that full value as the canonical student name for SQL filters.\n"
+        "- While this active filter is in effect, you MUST use the full name pattern in SQL, e.g.:\n"
+        "    WHERE LOWER(invoices.student_name) LIKE LOWER('%jack garcia%')\n"
+        "  or\n"
+        "    WHERE LOWER(invoice_line_items.student) LIKE LOWER('%jack garcia%')\n"
+        "  and you MUST NOT broaden the filter to partial tokens such as '%jack%' or '%garcia%'.\n"
+        "- Follow-up questions that refer to 'Jack', 'this student', 'they', etc. MUST stay scoped to the same full-name active student, unless the user explicitly names a different student or asks for 'all students' / 'entire district'.\n"
+        "- If the user FIRST introduces a name in an ambiguous way (e.g., just 'Jack') and more than one student could match, you should NOT run SQL immediately; instead, ask the user to clarify or show a short list of matching students so they can pick one.\n"
     )
 
     conversational_rules = (
@@ -1871,6 +1896,12 @@ def _build_system_prompt() -> str:
         "- When a student may have multiple invoices, return all matching rows sorted by invoice_date DESC.\n"
         "- When asking ‘why is amount low?’ or ‘what happened?’, extract that student’s invoice(s) and return invoice_number, student_name, total_cost, service_month, status.\n"
         "- NEVER assume the student is a vendor — students and vendors are separate entities.\n\n"
+        "- Once you have clearly identified a single student and the memory contains an ACTIVE_STUDENT_FILTER tag (for example 'Jack Garcia'), you MUST treat that full name as the student_name value in subsequent SQL filters.\n"
+        "- In follow-up queries for that student, use the full-name pattern in WHERE clauses instead of a looser first-name-only pattern. For example, prefer:\n"
+        "      WHERE LOWER(invoices.student_name) LIKE LOWER('%jack garcia%')\n"
+        "  over:\n"
+        "      WHERE LOWER(invoices.student_name) LIKE LOWER('%jack%').\n"
+        "- When aggregating provider or clinician data for a student (e.g., 'who supported Jack in September?' or 'hours per provider for this student'), you should typically filter on invoice_line_items.student using the full-name pattern, joined back to invoices for dates and district scoping.\n\n"
         "AMBIGUITY RESOLUTION — STUDENT VS PROVIDER:\n"
         "- When a name exists both as a student and as a clinician, ALWAYS treat it as a STUDENT unless the user explicitly refers to “provider”, “clinician”, “care staff”, or otherwise indicates a staff query.\n"
         "- Examples:\n"
@@ -1879,6 +1910,10 @@ def _build_system_prompt() -> str:
         "    “monthly spend by clinician Jack Garcia” → provider query\n"
         "- Never default to provider matching unless the user includes explicit provider intent.\n"
         "- When ambiguous, force invoice-level filtering on invoices.student_name or invoice_line_items.student and NEVER invoice_line_items.clinician.\n\n"
+        "- On the first ambiguous mention of a name like 'Jack' (with no prior ACTIVE_STUDENT_FILTER), if more than one student could plausibly match, you should either:\n"
+        "    • Ask the user which specific student they mean, or\n"
+        "    • Show a short list of matching students and let the user choose,\n"
+        "  rather than silently guessing.\n\n"
         "INVOICE DETAIL QUERIES:\n"
         "- Do NOT select or return any rate or pay-rate columns (e.g., 'rate', 'hourly_rate', 'pay_rate') in your SQL. When showing invoice or line-item details, include hours and cost only, not the rate.\n"
         "- When the user asks for invoice information or invoice details for a specific invoice number (e.g., 'invoice details for Wood-OCT2025', 'drill into Jackson-OCT2025') you MUST use the invoice_line_items table keyed by invoice_number.\n"
