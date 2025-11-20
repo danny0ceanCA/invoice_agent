@@ -162,6 +162,87 @@ class Tool:
         return self.handler(context, arguments)
 
 
+def _extract_active_filters_from_history(history: list[dict[str, str]]) -> dict[str, str]:
+    """
+    Inspect assistant messages in Redis-backed history and extract the last
+    active student filter (and potentially other filters in the future).
+
+    We look for lines in assistant content of the form:
+        ACTIVE_STUDENT_FILTER: <name>
+    and return {"student": "<name>"} when found.
+    """
+    active: dict[str, str] = {}
+    if not history:
+        return active
+
+    # Walk history from newest to oldest, looking for assistant messages
+    # with an ACTIVE_STUDENT_FILTER tag.
+    for message in reversed(history):
+        if not isinstance(message, dict):
+            continue
+        if message.get("role") != "assistant":
+            continue
+        content = message.get("content") or ""
+        # Split into lines and look for our tag.
+        for line in str(content).splitlines():
+            line = line.strip()
+            if line.startswith("ACTIVE_STUDENT_FILTER:"):
+                # Format: ACTIVE_STUDENT_FILTER: chloe taylor
+                parts = line.split(":", 1)
+                if len(parts) == 2:
+                    name = parts[1].strip()
+                    if name:
+                        active["student"] = name
+                        return active
+
+    return active
+
+
+def _maybe_apply_active_student_filter(raw_query: str, active_filters: dict[str, str]) -> str:
+    """
+    If there is an active student filter (e.g., from a prior 'monthly spend for X' query),
+    and the current query does NOT explicitly change scope, rewrite the query text to
+    include that student so the model receives an explicit filter.
+    """
+    active_student = (active_filters.get("student") or "").strip()
+    if not active_student:
+        return raw_query
+
+    q_lower = raw_query.lower()
+
+    # If the user explicitly asks for "all students" / "entire district" / similar,
+    # do NOT apply the sticky filter.
+    if "all students" in q_lower or "entire district" in q_lower or "district" in q_lower:
+        return raw_query
+
+    # If the query already explicitly mentions this student, don't modify it.
+    if active_student.lower() in q_lower:
+        return raw_query
+
+    # Only apply the sticky filter for queries that look like detail/summary follow-ups.
+    trigger_phrases = [
+        "invoice detail",
+        "invoice details",
+        "monthly spend",
+        "monthly summary",
+        "invoice totals",
+        "invoice summary",
+        "details for",
+        "invoice info",
+    ]
+    if not any(p in q_lower for p in trigger_phrases):
+        return raw_query
+
+    # If the user already wrote a "for student ..." pattern, don't overwrite it.
+    if "for student" in q_lower:
+        return raw_query
+
+    # Rewrite by appending an explicit student clause in natural language.
+    # Example: "give me invoice details for September"
+    # becomes: "give me invoice details for September for student Chloe Taylor"
+    return raw_query.rstrip() + f" for student {active_student}"
+
+
 class Workflow:
     """Coordinates model reasoning and tool usage."""
 
@@ -187,6 +268,13 @@ class Workflow:
                 history = self.memory.load_messages(session_id)
             except Exception as exc:  # pragma: no cover - defensive
                 LOGGER.warning("analytics_memory_load_failed", error=str(exc))
+
+        # Apply sticky student filter by inspecting history and, if we find an
+        # ACTIVE_STUDENT_FILTER tag, rewriting the incoming query so the model
+        # sees the student explicitly.
+        active_filters = _extract_active_filters_from_history(history)
+        if active_filters:
+            query = _maybe_apply_active_student_filter(query, active_filters)
 
         messages: list[dict[str, Any]] = [{"role": "system", "content": self.system_prompt}]
 
@@ -984,6 +1072,28 @@ def _summarize_response(response: AgentResponse) -> str:
             ent = collect_entities("name", "Vendors")
             if ent:
                 summary_parts.append(ent)
+
+        # If we have a single, clear student in this result set, record an
+        # ACTIVE_STUDENT_FILTER tag so future queries can be auto-scoped.
+        student_values: set[str] = set()
+        if "student_name" in keys:
+            student_values = {
+                str(r.get("student_name", "")).strip()
+                for r in rows
+                if r.get("student_name")
+            }
+        elif "student" in keys:
+            student_values = {
+                str(r.get("student", "")).strip()
+                for r in rows
+                if r.get("student")
+            }
+
+        student_values = {v for v in student_values if v}
+        if len(student_values) == 1:
+            only_student = sorted(student_values)[0]
+            # Append a special tag that _extract_active_filters_from_history can read.
+            summary_parts.append(f"ACTIVE_STUDENT_FILTER: {only_student}")
 
         return " ".join(summary_parts)
 
