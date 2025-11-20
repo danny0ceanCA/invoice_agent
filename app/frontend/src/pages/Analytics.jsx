@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { useAuth0 } from "@auth0/auth0-react";
-import api from "../api";
+import { fetchDistrictProfile } from "../api/districts";
 import ChatAgent from "../components/ChatAgent.jsx";
 
 export default function Analytics() {
-  const { isAuthenticated } = useAuth0();
+  const { isAuthenticated, getAccessTokenSilently } = useAuth0();
   const [districtKey, setDistrictKey] = useState(null);
 
   useEffect(() => {
@@ -13,9 +13,10 @@ export default function Analytics() {
     async function loadDistrict() {
       if (!isAuthenticated) return;
       try {
-        const response = await api.get("/api/districts/me");
+        const token = await getAccessTokenSilently();
+        const profile = await fetchDistrictProfile(token);
         if (!cancelled) {
-          setDistrictKey(response.data?.district_key ?? null);
+          setDistrictKey(profile?.district_key ?? null);
         }
       } catch (err) {
         console.error("Failed to load district profile in Analytics:", err);
@@ -27,7 +28,7 @@ export default function Analytics() {
     return () => {
       cancelled = true;
     };
-  }, [isAuthenticated]);
+  }, [isAuthenticated, getAccessTokenSilently]);
 
   return (
     <div className="analytics-page" style={{ padding: "1rem 0" }}>
