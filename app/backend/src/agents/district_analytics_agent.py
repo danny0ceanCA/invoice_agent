@@ -105,9 +105,15 @@ class AgentResponse(BaseModel):
     text: str
     html: str
     rows: list[dict[str, Any]] | None = None
+    class Config:
+        extra = "allow"
 
 
-def normalize_sql_for_postgres(sql: str) -> str:
+
+def normalize_sql_for_postgres(sql: str, engine=None) -> str:
+    # LOCAL TESTING MODE — do not rewrite strftime() to EXTRACT()
+    return sql
+
     """
     Normalize analytics SQL that may contain SQLite-specific functions so it
     runs cleanly on PostgreSQL.
@@ -151,6 +157,7 @@ class AgentContext:
     last_error: str | None = None
     session_id: str | None = None
     memory: ConversationMemory | None = None
+    last_sql: str | None = None
 
     @property
     def district_id(self) -> int | None:
@@ -1292,6 +1299,9 @@ def _finalise_response(payload: Mapping[str, Any], context: AgentContext) -> Age
         # Otherwise return text-only version
         response = AgentResponse(text=text_value or "", html=html, rows=rows)
 
+    # ATTACH SQL (THIS IS THE IMPORTANT PART)
+    setattr(response, "debug_sql", context.last_sql)
+
     _remember_interaction(context, response)
     return response
 
@@ -1482,6 +1492,9 @@ def _build_run_sql_tool(engine: Engine) -> Tool:
             sql=normalized_sql,
             row_count=len(rows),
         )
+
+        context.last_sql = normalized_sql
+
         return rows
 
     return Tool(name="run_sql", description=description, input_schema=schema, handler=handler)

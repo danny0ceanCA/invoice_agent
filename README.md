@@ -9,7 +9,8 @@ pipeline powered by OpenAI AgentKit.
 ## Repository Layout
 
 ```
-app/
+app/uvicorn app.backend.main:app --reload
+
   backend/
     src/
       api/                # FastAPI routers
