@@ -39,7 +39,7 @@ from .core.logging import configure_logging
 def create_app() -> FastAPI:
     """Create the FastAPI application and register routers."""
     configure_logging()
-    app = FastAPI(title="ASCS x SCUSD Invoice Agent", version="0.1.0")
+    app = FastAPI(title="CareSpend Analytics", version="0.1.0")
 
     app.add_middleware(
         CORSMiddleware,
