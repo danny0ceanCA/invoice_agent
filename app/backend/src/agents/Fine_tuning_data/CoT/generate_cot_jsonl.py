@@ -65,6 +65,183 @@ def clean_text(raw: str) -> str:
     return s.strip()
 
 
+def decode_maybe_json_string(s: str) -> str:
+    """
+    Many of your MD fields look like `"text here"`.
+    Try json.loads first; if that fails, strip outer quotes.
+    """
+    s = s.strip()
+    if not s:
+        return s
+    if s[0] in ('"', "'") and s[-1] == s[0]:
+        try:
+            return json.loads(s)
+        except Exception:
+            return s[1:-1].strip()
+    return s
+
+
+# ------------------------------------------------------
+# SQL → SCHEMA → SYNTHETIC PAYLOAD HELPERS
+# ------------------------------------------------------
+
+def extract_select_columns(canonical_sql: str) -> list:
+    """
+    Very simple parser to pull column aliases from the SELECT clause.
+
+    Example:
+      SELECT LOWER(service_month) AS service_month,
+             SUM(total_cost) AS total_cost
+      FROM ...
+
+    → ["service_month", "total_cost"]
+    """
+    if not canonical_sql:
+        return []
+
+    m = re.search(r"select\s+(.*?)\s+from", canonical_sql, flags=re.IGNORECASE | re.DOTALL)
+    if not m:
+        return []
+
+    select_body = m.group(1)
+    parts = [p.strip() for p in select_body.split(",") if p.strip()]
+
+    cols = []
+    for part in parts:
+        # Look for "AS alias"
+        m_alias = re.search(r"\s+as\s+([a-zA-Z_][a-zA-Z0-9_]*)", part, flags=re.IGNORECASE)
+        if m_alias:
+            col_name = m_alias.group(1)
+        else:
+            # Fallback: last token (strip functions)
+            tokens = re.split(r"[\s\.]+", part)
+            token = tokens[-1] if tokens else "col"
+            col_name = re.sub(r"[^a-zA-Z0-9_]", "", token) or "col"
+        cols.append(col_name)
+    return cols
+
+
+def fake_value_for_column(col_name: str, row_idx: int):
+    """
+    Heuristics to generate plausible synthetic values based on column name.
+    """
+    name = col_name.lower()
+
+    # Dates / Months
+    if "month" in name:
+        months = ["september", "october", "november", "december"]
+        return months[row_idx % len(months)]
+    if "date" in name:
+        # simple YYYY-MM-DD
+        base_days = [1, 8, 15, 22]
+        day = base_days[row_idx % len(base_days)]
+        return f"2024-10-{day:02d}"
+
+    # Names
+    if "student" in name:
+        students = ["Jack Garcia", "Tatiana Ortiz", "Carter Sanchez", "Maria Lopez"]
+        return students[row_idx % len(students)]
+    if "vendor" in name or "provider" in name:
+        vendors = ["Always Home Nursing", "Healthcare Solutions LLC", "Sunrise Pediatrics"]
+        return vendors[row_idx % len(vendors)]
+    if "clinician" in name or "nurse" in name:
+        clinicians = ["Nurse Williams", "Therapist Kim", "Clinician Patel"]
+        return clinicians[row_idx % len(clinicians)]
+    if "district" in name:
+        districts = ["Northside Unified", "Lakeview ISD", "Hillside USD"]
+        return districts[row_idx % len(districts)]
+
+    # Metrics / numbers
+    if any(k in name for k in ["hours", "qty", "quantity"]):
+        return round(5 + row_idx * 2.5, 2)
+    if any(k in name for k in ["cost", "spend", "amount", "total", "rate"]):
+        return round(1500 + row_idx * 750.25, 2)
+    if "count" in name:
+        return 3 + row_idx
+
+    # Status / generic
+    if "status" in name:
+        statuses = ["paid", "pending", "void"]
+        return statuses[row_idx % len(statuses)]
+
+    # Fallback string
+    return f"value_{row_idx + 1}"
+
+
+def build_html_table(rows: list[dict]) -> str:
+    """
+    Simple HTML <table> builder from rows.
+    """
+    if not rows:
+        return "<p>No data available for this synthetic example.</p>"
+
+    columns = list(rows[0].keys())
+    html = ["<table>", "<thead><tr>"]
+    html.extend(f"<th>{col}</th>" for col in columns)
+    html.append("</tr></thead><tbody>")
+    for r in rows:
+        html.append("<tr>")
+        for col in columns:
+            html.append(f"<td>{r.get(col, '')}</td>")
+        html.append("</tr>")
+    html.append("</tbody></table>")
+    return "".join(html)
+
+
+def synthesize_text(canonical_sql: str, user_text: str) -> str:
+    """
+    Create a short narrative based on canonical_sql and/or user_text.
+    """
+    sql_lower = canonical_sql.lower() if canonical_sql else ""
+    if "hours" in sql_lower:
+        return "Here are the service hours for your request, summarized by the relevant dimensions."
+    if "total_cost" in sql_lower or "spend" in sql_lower or "cost" in sql_lower:
+        return "Here is the cost summary for your request, summarized by the relevant dimensions."
+    if "invoice" in sql_lower:
+        return "Here are the invoices matching your request."
+    return "Here is the report for your request."
+
+
+def synthesize_assistant_payload(
+    canonical_id: str,
+    canonical_sql: str,
+    user_text: str,
+    cot_reasoning: str | None = None,
+    num_rows: int = 3,
+) -> dict:
+    """
+    Core of Option 2: auto-populate NLV assistant outputs.
+
+    For each canonical:
+      - infer output columns from SELECT,
+      - generate synthetic rows,
+      - build HTML table,
+      - write a short narrative.
+
+    This converts NLV "shell" records into real supervision.
+    """
+    cols = extract_select_columns(canonical_sql)
+    if not cols:
+        # Fallback generic schema if we can't parse SQL
+        cols = ["label", "value"]
+
+    rows = []
+    for i in range(num_rows):
+        row = {}
+        for col in cols:
+            row[col] = fake_value_for_column(col, i)
+        rows.append(row)
+
+    html = build_html_table(rows)
+    text = synthesize_text(canonical_sql, user_text)
+
+    return {
+        "text": text,
+        "rows": rows,
+        "html": html,
+    }
+
+
 # ------------------------------------------------------
 # LOADERS
 # ------------------------------------------------------
@@ -168,7 +345,7 @@ def load_nlv_md(path: Path) -> list:
 
 def load_edge_cases(path: Path) -> list:
     """
-    Parse edge_cases.md of the form: (matches your file)
+    Parse edge_cases.md of the form:
 
     ## EdgeCase 0001 – ...
     User: "Show me the hours."
@@ -213,19 +390,9 @@ def load_edge_cases(path: Path) -> list:
         raw_asst = m_asst.group(1).strip()
         raw_cot  = m_cot.group(1).strip() if m_cot else ""
 
-        # Try to decode quoted strings like "Show me the hours."
-        def decode_maybe_json(s: str) -> str:
-            s = s.strip()
-            if s.startswith('"'):
-                try:
-                    return json.loads(s)
-                except Exception:
-                    return s.strip('"')
-            return s
-
-        user_text = decode_maybe_json(raw_user)
-        asst_text = decode_maybe_json(raw_asst)
-        cot_text  = decode_maybe_json(raw_cot) if raw_cot else ""
+        user_text = decode_maybe_json_string(raw_user)
+        asst_text = decode_maybe_json_string(raw_asst)
+        cot_text  = decode_maybe_json_string(raw_cot) if raw_cot else ""
 
         out.append(
             {
@@ -243,7 +410,7 @@ def load_edge_cases(path: Path) -> list:
 
 def load_multi_turn(path: Path) -> list:
     """
-    Parse multi_turn_data.md of the form: (matches your file)
+    Parse multi_turn_data.md of the form:
 
     ## MultiTurn 0001 – ...
     Turn1_User: "..."
@@ -288,22 +455,13 @@ def load_multi_turn(path: Path) -> list:
         messages = []
         cot_by_turn = {}
 
-        def decode_maybe_json(s: str) -> str:
-            s = s.strip()
-            if s.startswith('"'):
-                try:
-                    return json.loads(s)
-                except Exception:
-                    return s.strip('"')
-            return s
-
         for ln in lines:
             # TurnN_User: ...
             m_user = re.match(r"Turn(\d+)_User:\s*(.+)", ln)
             if m_user:
                 turn = m_user.group(1)
                 raw = m_user.group(2).strip()
-                text = decode_maybe_json(raw)
+                text = decode_maybe_json_string(raw)
                 messages.append({"role": "user", "content": text})
                 continue
 
@@ -312,7 +470,7 @@ def load_multi_turn(path: Path) -> list:
             if m_ast_text:
                 turn = m_ast_text.group(1)
                 raw = m_ast_text.group(2).strip()
-                decoded = decode_maybe_json(raw)
+                decoded = decode_maybe_json_string(raw)
                 messages.append({"role": "assistant", "content": decoded})
                 continue
 
@@ -321,7 +479,7 @@ def load_multi_turn(path: Path) -> list:
             if m_ast_json:
                 turn = m_ast_json.group(1)
                 raw = m_ast_json.group(2).strip()
-                decoded = decode_maybe_json(raw)
+                decoded = decode_maybe_json_string(raw)
                 messages.append({"role": "assistant", "content": decoded})
                 continue
 
@@ -330,7 +488,7 @@ def load_multi_turn(path: Path) -> list:
             if m_cot:
                 turn = m_cot.group(1)
                 raw_cot = m_cot.group(2).strip()
-                cot_by_turn[turn] = decode_maybe_json(raw_cot)
+                cot_by_turn[turn] = decode_maybe_json_string(raw_cot)
                 continue
 
         if len(messages) >= 2:
@@ -493,7 +651,7 @@ def build_jsonl():
     with OUTPUT_JSONL_PATH.open("w", encoding="utf-8") as fout:
 
         # --------------------------------------------------
-        # 1) NLV → Canonical (with canonical + CoT as metadata)
+        # 1) NLV → Canonical (auto-populated assistant payloads)
         # --------------------------------------------------
         for entry in nlv_entries:
             cid = entry["canonical_id"]
@@ -503,11 +661,15 @@ def build_jsonl():
                 print(f"  ⚠ Canonical ID {cid} (NLV {entry['nlv_id']}) not in canonical.md, skipping.")
                 continue
 
-            asst_payload = {
-                "text": "",
-                "rows": None,
-                "html": "",
-            }
+            canonical_sql = canonical_sql_map.get(cid, "")
+            cot_text = cot_map.get(cid)
+
+            asst_payload = synthesize_assistant_payload(
+                canonical_id=cid,
+                canonical_sql=canonical_sql,
+                user_text=nlv_text,
+                cot_reasoning=cot_text,
+            )
 
             record = {
                 "messages": [
@@ -518,12 +680,10 @@ def build_jsonl():
                         "content": json.dumps(asst_payload, ensure_ascii=False),
                     },
                 ],
-                # extra metadata (ignored by fine-tune APIs but useful / future-proof)
                 "canonical_id": cid,
-                "canonical_sql": canonical_sql_map.get(cid, ""),
+                "canonical_sql": canonical_sql,
             }
 
-            cot_text = cot_map.get(cid)
             if cot_text:
                 record["cot_reasoning"] = cot_text
 
@@ -536,6 +696,9 @@ def build_jsonl():
         for ec in edge_cases:
             messages = [{"role": "system", "content": system_prompt}] + ec["messages"]
             record = {"messages": messages}
+            # keep CoT as metadata if present
+            if "cot_reasoning" in ec and ec["cot_reasoning"]:
+                record["cot_reasoning"] = ec["cot_reasoning"]
             fout.write(json.dumps(record, ensure_ascii=False) + "\n")
             edge_count += 1
 
@@ -545,6 +708,8 @@ def build_jsonl():
         for mt in multi_turn_convos:
             messages = [{"role": "system", "content": system_prompt}] + mt["messages"]
             record = {"messages": messages}
+            if "cot_reasoning" in mt and mt["cot_reasoning"]:
+                record["cot_reasoning"] = mt["cot_reasoning"]
             fout.write(json.dumps(record, ensure_ascii=False) + "\n")
             multi_count += 1
 
