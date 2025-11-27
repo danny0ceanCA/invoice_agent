@@ -43,24 +43,101 @@ OUTPUT_JSONL_PATH = Path(
 
 
 
+
 # ------------------------------------------------------
-#  CLEANING HELPERS
+# CLEANERS
 # ------------------------------------------------------
 
 def clean_text(raw: str) -> str:
-    """Normalize whitespace and remove code fences/backticks."""
     if not isinstance(raw, str):
         return ""
     s = raw
     s = re.sub(r"```(?:.|\n)*?```", "", s)
     s = s.replace("```", "")
-    s = s.replace("\\`", "")
-    s = s.replace("`", "")
+    s = s.replace("\\`", "").replace("`", "")
     return s.strip()
 
 
+
 # ------------------------------------------------------
-# LOADERS
+# LOAD CANONICAL.MD (Format B)
+# ------------------------------------------------------
+
+def load_canonical_md(path: Path):
+    """
+    Expected pattern:
+
+    ## Canonical 0001
+    USER_INTENT: student_monthly_spend
+    VALID_CASE: student_missing
+
+    SQL:
+    SELECT ...
+    """
+    txt = path.read_text(encoding="utf-8")
+    blocks = re.split(r"^##\s+Canonical", txt, flags=re.MULTILINE)
+    out = {}
+
+    for blk in blocks:
+        blk = blk.strip()
+        if not blk:
+            continue
+
+        # ID
+        m_id = re.match(r"^(\d{4})", blk)
+        if not m_id:
+            continue
+        cid = m_id.group(1)
+
+        # VALID_CASE
+        m_case = re.search(r"VALID_CASE:\s*(.+)", blk)
+        valid_case = m_case.group(1).strip() if m_case else "student_missing"
+
+        # SQL (still needed for NLV → canonical pairing even though the assistant will NOT output SQL)
+        m_sql = re.search(r"SQL:\s*(.*)", blk, flags=re.DOTALL)
+        sql = m_sql.group(1).strip() if m_sql else ""
+
+        out[cid] = {
+            "valid_case": valid_case,
+            "sql": sql
+        }
+
+    return out
+
+
+
+# ------------------------------------------------------
+# LOAD COT REASONING
+# ------------------------------------------------------
+
+def load_cot(path: Path):
+    """COT file must use same ## Canonical 0001 headers."""
+    text = clean_text(path.read_text(encoding="utf-8"))
+    lines = text.splitlines()
+    out = {}
+    current = None
+    buf = []
+
+    for line in lines:
+        m = re.match(r"^##\s+Canonical\s+(\d{4})", line.strip())
+        if m:
+            if current and buf:
+                out[current] = clean_text("\n".join(buf))
+            current = m.group(1)
+            buf = []
+        else:
+            if current:
+                buf.append(line)
+
+    if current and buf:
+        out[current] = clean_text("\n".join(buf))
+
+    return out
+
+
+
+# ------------------------------------------------------
+# LOAD NLV
 # ------------------------------------------------------
 
 def normalize_col(name: str) -> str:
@@ -72,13 +149,12 @@ def load_nlv_excel(path: Path):
     df.columns = [normalize_col(c) for c in df.columns]
 
     col_map = {}
-
-    for c in ("nlv_text", "text", "nvl_text"):
+    for c in ("nlv_text", "text"):
         if c in df.columns:
             col_map["nlv_text"] = c
             break
 
-    for c in ("canonical_id", "canonical", "canonicalid"):
+    for c in ("canonical_id", "canonicalid"):
         if c in df.columns:
             col_map["canonical_id"] = c
             break
@@ -86,65 +162,12 @@ def load_nlv_excel(path: Path):
     return df, col_map
 
 
-def load_canonical_md(path: Path) -> dict:
-    """
-    Loads canonical SQL from canonical.md formatted as:
 
-    ## Canonical 0001
-    SELECT ...
+# ------------------------------------------------------
+# LOAD EDGE CASES
+# ------------------------------------------------------
 
-    Returns { "0001": "SELECT ..." }
-    """
-    text = clean_text(path.read_text(encoding="utf-8"))
-    lines = text.splitlines()
-
-    mapping = {}
-    cid = None
-    buf = []
-
-    for ln in lines:
-        m = re.match(r"^##\s+Canonical\s+(\d{4})", ln.strip())
-        if m:
-            if cid and buf:
-                mapping[cid] = clean_text("\n".join(buf))
-            cid = m.group(1)
-            buf = []
-        else:
-            if cid is not None:
-                buf.append(ln)
-
-    if cid and buf:
-        mapping[cid] = clean_text("\n".join(buf))
-
-    return mapping
-
-
-def load_cot(path: Path) -> dict:
-    text = clean_text(path.read_text(encoding="utf-8"))
-    lines = text.splitlines()
-
-    out = {}
-    cid = None
-    buf = []
-
-    for ln in lines:
-        m = re.match(r"^##\s+Canonical\s+(\d{4})", ln.strip())
-        if m:
-            if cid and buf:
-                out[cid] = clean_text("\n".join(buf))
-            cid = m.group(1)
-            buf = []
-        else:
-            if cid:
-                buf.append(ln)
-
-    if cid and buf:
-        out[cid] = clean_text("\n".join(buf))
-
-    return out
-
-
-def load_edge_cases(path: Path) -> list:
+def load_edge_cases(path: Path):
     txt = clean_text(path.read_text(encoding="utf-8"))
     blocks = re.split(r"^##\s+EdgeCase", txt, flags=re.MULTILINE)
 
@@ -152,57 +175,70 @@ def load_edge_cases(path: Path) -> list:
     for blk in blocks:
         if "User:" not in blk:
             continue
-
         m_user = re.search(r"User:\s*(.+)", blk)
-        m_assistant = re.search(r"Assistant:\s*(\{.+\})", blk, re.DOTALL)
-
-        if not (m_user and m_assistant):
+        m_bot = re.search(r"Assistant:\s*(\{.+\})", blk, flags=re.DOTALL)
+        if not (m_user and m_bot):
             continue
 
         out.append({
             "messages": [
+                {"role": "system", "content": load_system_prompt()},
                 {"role": "user", "content": m_user.group(1).strip()},
-                {"role": "assistant", "content": m_assistant.group(1).strip()}
+                {"role": "assistant", "content": m_bot.group(1).strip()}
             ]
         })
     return out
 
 
-def load_multi_turn(path: Path) -> list:
+
+# ------------------------------------------------------
+# LOAD MULTI-TURN
+# ------------------------------------------------------
+
+def load_multi_turn(path: Path):
     txt = clean_text(path.read_text(encoding="utf-8"))
     convos = re.split(r"^##\s+MultiTurn", txt, flags=re.MULTILINE)
 
     out = []
-    for blk in convos:
-        if "User:" not in blk:
+    for c in convos:
+        if "User:" not in c:
             continue
 
-        lines = blk.strip().splitlines()
+        lines = c.strip().splitlines()
         msgs = []
+        msgs.append({"role": "system", "content": load_system_prompt()})
 
         for ln in lines:
             if ln.startswith("User:"):
-                msgs.append(
-                    {"role": "user", "content": ln.replace("User:", "").strip()}
-                )
+                msgs.append({"role": "user", "content": ln.replace("User:", "").strip()})
             elif ln.startswith("Assistant:"):
-                msgs.append(
-                    {"role": "assistant", "content": ln.replace("Assistant:", "").strip()}
-                )
+                payload = ln.replace("Assistant:", "").strip()
+                msgs.append({"role": "assistant", "content": payload})
 
         if len(msgs) >= 2:
             out.append({"messages": msgs})
+
     return out
 
 
+
 # ------------------------------------------------------
-# MAIN BUILDER
+# SYSTEM PROMPT LOADER
+# ------------------------------------------------------
+
+def load_system_prompt():
+    return clean_text(SYSTEM_PROMPT_PATH.read_text(encoding="utf-8"))
+
+
+
+# ------------------------------------------------------
+# BUILD JSONL
 # ------------------------------------------------------
 
 def build_jsonl():
 
     print("Loading system prompt…")
-    system_prompt = clean_text(Path(SYSTEM_PROMPT_PATH).read_text(encoding="utf-8"))
+    system_prompt = load_system_prompt()
 
     print("Loading canonical.md…")
     canonical = load_canonical_md(CANONICAL_MD_PATH)
@@ -224,23 +260,39 @@ def build_jsonl():
 
     with OUTPUT_JSONL_PATH.open("w", encoding="utf-8") as fout:
 
-        # --------------------------------------------------
-        # 1. NLV → Canonical + CoT (Format B, no SQL)
-        # --------------------------------------------------
+        # ----------------------------------------------------------
+        # 1. NLV-driven examples
+        # ----------------------------------------------------------
         for _, row in nlv_df.iterrows():
-
-            user_msg = row[col_map["nlv_text"]]
+            user_msg = str(row[col_map["nlv_text"]]).strip()
             cid = str(row[col_map["canonical_id"]]).zfill(4)
 
             if cid not in canonical:
                 continue
 
-            # Assistant should NOT output SQL in fine-tuning.
-            assistant_payload = {
-                "text": "",
-                "rows": None,
-                "html": ""
-            }
+            valid_case = canonical[cid]["valid_case"]
+
+            # Determine assistant output
+            if valid_case == "student_missing":
+                assistant_payload = {
+                    "text": "Which student should I check? Please share their full name.",
+                    "rows": None,
+                    "html": ""
+                }
+
+            elif valid_case == "vendor_missing":
+                assistant_payload = {
+                    "text": "Which vendor do you want to look at?",
+                    "rows": None,
+                    "html": ""
+                }
+
+            else:  # student_present, vendor_present, month_present, etc.
+                assistant_payload = {
+                    "text": "",
+                    "rows": None,
+                    "html": ""
+                }
 
             record = {
                 "messages": [
@@ -252,19 +304,20 @@ def build_jsonl():
 
             fout.write(json.dumps(record, ensure_ascii=False) + "\n")
 
-        # --------------------------------------------------
+        # ----------------------------------------------------------
         # 2. EDGE CASES
-        # --------------------------------------------------
+        # ----------------------------------------------------------
         for ec in edge_cases:
             fout.write(json.dumps(ec, ensure_ascii=False) + "\n")
 
-        # --------------------------------------------------
-        # 3. MULTI-TURN (already in final format)
-        # --------------------------------------------------
+        # ----------------------------------------------------------
+        # 3. MULTI TURN
+        # ----------------------------------------------------------
         for mt in multi_turn:
             fout.write(json.dumps(mt, ensure_ascii=False) + "\n")
 
     print("✔ DONE – Clean JSONL ready.")
+
 
 
 if __name__ == "__main__":
