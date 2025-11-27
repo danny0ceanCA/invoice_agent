@@ -12,8 +12,8 @@ NLV_XLSX_PATH = Path(
     r"C:\Users\danie\Documents\invoice_agent\app\backend\src\agents\Fine_tuning_data\Natural Language Variants\NLV_Data_Mapping.xlsx"
 )
 
-CANONICAL_JSONL_PATH = Path(
-    r"C:\Users\danie\Documents\invoice_agent\app\backend\src\agents\Fine_tuning_data\Canonical Data\canonical_query_testing_results.jsonl"
+CANONICAL_MD_PATH = Path(
+    r"C:\Users\danie\Documents\invoice_agent\app\backend\src\agents\Fine_tuning_data\Canonical Data\canonical.md"
 )
 
 COT_MD_PATH = Path(
@@ -42,20 +42,20 @@ OUTPUT_JSONL_PATH = Path(
 
 
 
+
 # ------------------------------------------------------
-# CLEANING HELPERS
+#  CLEANING HELPERS
 # ------------------------------------------------------
 
 def clean_text(raw: str) -> str:
+    """Normalize whitespace and remove code fences/backticks."""
     if not isinstance(raw, str):
         return ""
     s = raw
-    # remove code fences
     s = re.sub(r"```(?:.|\n)*?```", "", s)
     s = s.replace("```", "")
     s = s.replace("\\`", "")
     s = s.replace("`", "")
-    s = re.sub(r"(?m)^\s*sql\s*$", "", s)
     return s.strip()
 
 
@@ -86,61 +86,69 @@ def load_nlv_excel(path: Path):
     return df, col_map
 
 
-def load_canonical_jsonl(path: Path) -> dict:
+def load_canonical_md(path: Path) -> dict:
+    """
+    Loads canonical SQL from canonical.md formatted as:
+
+    ## Canonical 0001
+    SELECT ...
+
+    Returns { "0001": "SELECT ..." }
+    """
+    text = clean_text(path.read_text(encoding="utf-8"))
+    lines = text.splitlines()
+
     mapping = {}
-    with path.open("r", encoding="utf-8") as f:
-        for line in f:
-            if not line.strip():
-                continue
-            rec = json.loads(line)
-            cid = str(rec["id"]).zfill(4)
-            sql = clean_text(rec.get("sql_used") or rec.get("sql"))
-            mapping[cid] = sql
+    cid = None
+    buf = []
+
+    for ln in lines:
+        m = re.match(r"^##\s+Canonical\s+(\d{4})", ln.strip())
+        if m:
+            if cid and buf:
+                mapping[cid] = clean_text("\n".join(buf))
+            cid = m.group(1)
+            buf = []
+        else:
+            if cid is not None:
+                buf.append(ln)
+
+    if cid and buf:
+        mapping[cid] = clean_text("\n".join(buf))
+
     return mapping
 
 
 def load_cot(path: Path) -> dict:
-    """
-    Expected markdown format:
-
-    ## Canonical 0001
-    reasoning...
-    """
     text = clean_text(path.read_text(encoding="utf-8"))
     lines = text.splitlines()
+
     out = {}
-    current = None
+    cid = None
     buf = []
 
-    for line in lines:
-        m = re.match(r"^##\s+Canonical\s+(\d{4})", line.strip())
+    for ln in lines:
+        m = re.match(r"^##\s+Canonical\s+(\d{4})", ln.strip())
         if m:
-            if current and buf:
-                out[current] = clean_text("\n".join(buf))
-            current = m.group(1)
+            if cid and buf:
+                out[cid] = clean_text("\n".join(buf))
+            cid = m.group(1)
             buf = []
         else:
-            if current:
-                buf.append(line)
+            if cid:
+                buf.append(ln)
 
-    if current and buf:
-        out[current] = clean_text("\n".join(buf))
+    if cid and buf:
+        out[cid] = clean_text("\n".join(buf))
 
     return out
 
 
 def load_edge_cases(path: Path) -> list:
-    """Expected format:
-
-    ## EdgeCase 0001
-    User: ...
-    Assistant: {"text": "...", "rows": null, "html": ""}
-
-    """
     txt = clean_text(path.read_text(encoding="utf-8"))
     blocks = re.split(r"^##\s+EdgeCase", txt, flags=re.MULTILINE)
-    out = []
 
+    out = []
     for blk in blocks:
         if "User:" not in blk:
             continue
@@ -157,23 +165,14 @@ def load_edge_cases(path: Path) -> list:
                 {"role": "assistant", "content": m_assistant.group(1).strip()}
             ]
         })
-
     return out
 
 
 def load_multi_turn(path: Path) -> list:
-    """Expected format:
-
-    ## MultiTurn 0001
-    User: ...
-    Assistant: {...}
-    User: ...
-    Assistant: {...}
-    """
-    txt = clean_text(path.read_text())
+    txt = clean_text(path.read_text(encoding="utf-8"))
     convos = re.split(r"^##\s+MultiTurn", txt, flags=re.MULTILINE)
-    out = []
 
+    out = []
     for blk in convos:
         if "User:" not in blk:
             continue
@@ -183,14 +182,16 @@ def load_multi_turn(path: Path) -> list:
 
         for ln in lines:
             if ln.startswith("User:"):
-                msgs.append({"role": "user", "content": ln.replace("User:", "").strip()})
+                msgs.append(
+                    {"role": "user", "content": ln.replace("User:", "").strip()}
+                )
             elif ln.startswith("Assistant:"):
-                payload = ln.replace("Assistant:", "").strip()
-                msgs.append({"role": "assistant", "content": payload})
+                msgs.append(
+                    {"role": "assistant", "content": ln.replace("Assistant:", "").strip()}
+                )
 
         if len(msgs) >= 2:
             out.append({"messages": msgs})
-
     return out
 
 
@@ -200,22 +201,22 @@ def load_multi_turn(path: Path) -> list:
 
 def build_jsonl():
 
-    print("Loading system prompt...")
+    print("Loading system prompt…")
     system_prompt = clean_text(Path(SYSTEM_PROMPT_PATH).read_text(encoding="utf-8"))
 
-    print("Loading canonical SQL...")
-    canonical = load_canonical_jsonl(CANONICAL_JSONL_PATH)
+    print("Loading canonical.md…")
+    canonical = load_canonical_md(CANONICAL_MD_PATH)
 
-    print("Loading NLV Excel...")
+    print("Loading NLV Excel…")
     nlv_df, col_map = load_nlv_excel(NLV_XLSX_PATH)
 
-    print("Loading CoT reasoning...")
+    print("Loading CoT reasoning…")
     cot_map = load_cot(COT_MD_PATH)
 
-    print("Loading edge cases...")
+    print("Loading edge cases…")
     edge_cases = load_edge_cases(EDGE_CASES_MD_PATH)
 
-    print("Loading multi-turn...")
+    print("Loading multi-turn…")
     multi_turn = load_multi_turn(MULTI_TURN_MD_PATH)
 
     print(f"Writing → {OUTPUT_JSONL_PATH}")
@@ -223,23 +224,22 @@ def build_jsonl():
 
     with OUTPUT_JSONL_PATH.open("w", encoding="utf-8") as fout:
 
-        # -----------------------
-        # NLV → Canonical + CoT
-        # -----------------------
+        # --------------------------------------------------
+        # 1. NLV → Canonical + CoT (Format B, no SQL)
+        # --------------------------------------------------
         for _, row in nlv_df.iterrows():
+
             user_msg = row[col_map["nlv_text"]]
             cid = str(row[col_map["canonical_id"]]).zfill(4)
 
-            if cid not in canonical or cid not in cot_map:
+            if cid not in canonical:
                 continue
 
-            sql = canonical[cid]
-
+            # Assistant should NOT output SQL in fine-tuning.
             assistant_payload = {
                 "text": "",
                 "rows": None,
-                "html": "",
-                "sql": sql
+                "html": ""
             }
 
             record = {
@@ -252,20 +252,19 @@ def build_jsonl():
 
             fout.write(json.dumps(record, ensure_ascii=False) + "\n")
 
-        # -----------------------
-        # EDGE CASES
-        # -----------------------
+        # --------------------------------------------------
+        # 2. EDGE CASES
+        # --------------------------------------------------
         for ec in edge_cases:
             fout.write(json.dumps(ec, ensure_ascii=False) + "\n")
 
-        # -----------------------
-        # MULTI TURN
-        # -----------------------
+        # --------------------------------------------------
+        # 3. MULTI-TURN (already in final format)
+        # --------------------------------------------------
         for mt in multi_turn:
             fout.write(json.dumps(mt, ensure_ascii=False) + "\n")
 
     print("✔ DONE – Clean JSONL ready.")
-
 
 
 if __name__ == "__main__":
