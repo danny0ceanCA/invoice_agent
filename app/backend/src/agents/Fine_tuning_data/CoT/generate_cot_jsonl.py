@@ -168,19 +168,22 @@ def load_nlv_md(path: Path) -> list:
 
 def load_edge_cases(path: Path) -> list:
     """
-    Parse edge_cases.md with blocks like:
+    Parse edge_cases.md of the form: (matches your file)
 
-    ## EdgeCase 0001
-    User: ...
-    Assistant:
-    {
-      "text": "...",
-      "rows": [...],
-      "html": "..."
-    }
+    ## EdgeCase 0001 – ...
+    User: "Show me the hours."
+    Assistant_Text: "I need a student name..."
+    CoT: "Reasoning..."
 
     Returns: [
-      { "messages":[{"role":"user",...},{"role":"assistant",...}] }, ...
+      {
+        "messages": [
+          {"role": "user", "content": "..."},
+          {"role": "assistant", "content": "..."}
+        ],
+        "cot_reasoning": "..."
+      },
+      ...
     ]
     """
     print(f"Loading edge cases from {path} …")
@@ -189,39 +192,48 @@ def load_edge_cases(path: Path) -> list:
         return []
 
     txt = clean_text(path.read_text(encoding="utf-8"))
-    blocks = re.split(r"^##\s+EdgeCase.*$", txt, flags=re.MULTILINE)
+
+    # Split at each EdgeCase header line
+    blocks = re.split(r"^##\s+EdgeCase[^\n]*$", txt, flags=re.MULTILINE)
     out = []
 
     for blk in blocks:
-        if "User:" not in blk or "Assistant:" not in blk:
+        blk = blk.strip()
+        if not blk:
             continue
 
         m_user = re.search(r"User:\s*(.+)", blk)
-        # capture JSON object after "Assistant:"
-        m_assistant = re.search(r"Assistant:\s*(\{[\s\S]+)$", blk)
+        m_asst = re.search(r"Assistant_Text:\s*(.+)", blk)
+        m_cot  = re.search(r"CoT:\s*(.+)", blk)
 
-        if not (m_user and m_assistant):
+        if not (m_user and m_asst):
             continue
 
-        user_text = m_user.group(1).strip()
-        json_str = m_assistant.group(1).strip()
+        raw_user = m_user.group(1).strip()
+        raw_asst = m_asst.group(1).strip()
+        raw_cot  = m_cot.group(1).strip() if m_cot else ""
 
-        try:
-            assistant_json = json.loads(json_str)
-        except Exception:
-            print("  ⚠ Invalid JSON in EdgeCase block, skipping preview:")
-            print("\n".join(json_str.splitlines()[:5]))
-            continue
+        # Try to decode quoted strings like "Show me the hours."
+        def decode_maybe_json(s: str) -> str:
+            s = s.strip()
+            if s.startswith('"'):
+                try:
+                    return json.loads(s)
+                except Exception:
+                    return s.strip('"')
+            return s
+
+        user_text = decode_maybe_json(raw_user)
+        asst_text = decode_maybe_json(raw_asst)
+        cot_text  = decode_maybe_json(raw_cot) if raw_cot else ""
 
         out.append(
             {
                 "messages": [
                     {"role": "user", "content": user_text},
-                    {
-                        "role": "assistant",
-                        "content": json.dumps(assistant_json, ensure_ascii=False),
-                    },
-                ]
+                    {"role": "assistant", "content": asst_text},
+                ],
+                "cot_reasoning": cot_text,
             }
         )
 
@@ -231,15 +243,28 @@ def load_edge_cases(path: Path) -> list:
 
 def load_multi_turn(path: Path) -> list:
     """
-    Parse multi_turn_data.md with blocks like:
+    Parse multi_turn_data.md of the form: (matches your file)
 
-    ## MultiTurn 0001
-    User: ...
-    Assistant: ...
-    User: ...
-    Assistant: ...
+    ## MultiTurn 0001 – ...
+    Turn1_User: "..."
+    Turn1_Assistant_Text: "..."
+    Turn1_CoT: "..."
 
-    Returns: [ { "messages":[...sequence...] }, ... ]
+    Turn2_User: "..."
+    Turn2_Assistant_Text: "..."
+    Turn2_CoT: "..."
+
+    Turn3_User: "..."
+    Turn3_Assistant_Output_JSON: "{\"sql\": \"...\"}"
+    Turn3_CoT: "..."
+
+    Returns: [
+      {
+        "messages":[ user, assistant, user, assistant, user, assistant ],
+        "cot_reasoning": { "1": "...", "2": "...", "3": "..." }
+      },
+      ...
+    ]
     """
     print(f"Loading multi-turn conversations from {path} …")
     if not path.exists():
@@ -247,30 +272,74 @@ def load_multi_turn(path: Path) -> list:
         return []
 
     txt = clean_text(path.read_text(encoding="utf-8"))
-    convos = re.split(r"^##\s+MultiTurn.*$", txt, flags=re.MULTILINE)
+    # Split on each MultiTurn header
+    convos = re.split(r"^##\s+MultiTurn[^\n]*$", txt, flags=re.MULTILINE)
     out = []
 
     for blk in convos:
-        if "User:" not in blk:
+        blk = blk.strip()
+        if not blk:
             continue
 
-        lines = [ln.strip() for ln in blk.strip().splitlines() if ln.strip()]
-        msgs = []
+        lines = [ln.strip() for ln in blk.splitlines() if ln.strip()]
+        if not lines:
+            continue
+
+        messages = []
+        cot_by_turn = {}
+
+        def decode_maybe_json(s: str) -> str:
+            s = s.strip()
+            if s.startswith('"'):
+                try:
+                    return json.loads(s)
+                except Exception:
+                    return s.strip('"')
+            return s
 
         for ln in lines:
-            if ln.startswith("User:"):
-                msgs.append(
-                    {
-                        "role": "user",
-                        "content": ln.replace("User:", "", 1).strip(),
-                    }
-                )
-            elif ln.startswith("Assistant:"):
-                payload = ln.replace("Assistant:", "", 1).strip()
-                msgs.append({"role": "assistant", "content": payload})
+            # TurnN_User: ...
+            m_user = re.match(r"Turn(\d+)_User:\s*(.+)", ln)
+            if m_user:
+                turn = m_user.group(1)
+                raw = m_user.group(2).strip()
+                text = decode_maybe_json(raw)
+                messages.append({"role": "user", "content": text})
+                continue
 
-        if len(msgs) >= 2:
-            out.append({"messages": msgs})
+            # TurnN_Assistant_Text: ...
+            m_ast_text = re.match(r"Turn(\d+)_Assistant_Text:\s*(.+)", ln)
+            if m_ast_text:
+                turn = m_ast_text.group(1)
+                raw = m_ast_text.group(2).strip()
+                decoded = decode_maybe_json(raw)
+                messages.append({"role": "assistant", "content": decoded})
+                continue
+
+            # TurnN_Assistant_Output_JSON: "{\"sql\": \"...\"}"
+            m_ast_json = re.match(r"Turn(\d+)_Assistant_Output_JSON:\s*(.+)", ln)
+            if m_ast_json:
+                turn = m_ast_json.group(1)
+                raw = m_ast_json.group(2).strip()
+                decoded = decode_maybe_json(raw)
+                messages.append({"role": "assistant", "content": decoded})
+                continue
+
+            # TurnN_CoT: ...
+            m_cot = re.match(r"Turn(\d+)_CoT:\s*(.+)", ln)
+            if m_cot:
+                turn = m_cot.group(1)
+                raw_cot = m_cot.group(2).strip()
+                cot_by_turn[turn] = decode_maybe_json(raw_cot)
+                continue
+
+        if len(messages) >= 2:
+            out.append(
+                {
+                    "messages": messages,
+                    "cot_reasoning": cot_by_turn,
+                }
+            )
 
     print(f"  → Loaded {len(out)} multi-turn conversations")
     return out
