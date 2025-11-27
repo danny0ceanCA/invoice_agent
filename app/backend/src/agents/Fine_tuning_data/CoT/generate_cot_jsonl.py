@@ -41,77 +41,93 @@ OUTPUT_JSONL_PATH = Path(
 )
 
 
-
+# ---- POSITIVE EXAMPLES ----
+POS_STUDENTS_PATH = Path(r"C:\Users\danie\Documents\invoice_agent\app\backend\src\agents\Fine_tuning_data\Positive Examples\positive_examples_students.md")
+POS_VENDORS_PATH = Path(r"C:\Users\danie\Documents\invoice_agent\app\backend\src\agents\Fine_tuning_data\Positive Examples\positive_examples_vendors.md")
+POS_CLINICIANS_PATH = Path( r"C:\Users\danie\Documents\invoice_agent\app\backend\src\agents\Fine_tuning_data\Positive Examples\positive_examples_clinician.md")
+POS_INV_DETAIL_PATH = Path(r"C:\Users\danie\Documents\invoice_agent\app\backend\src\agents\Fine_tuning_data\Positive Examples\positive_examples_invoice_detail.md")
+POS_AMBIG_PATH = Path(r"C:\Users\danie\Documents\invoice_agent\app\backend\src\agents\Fine_tuning_data\Positive Examples\positive_ambiguous.md")
+POS_CHARTS_PATH = Path(r"C:\Users\danie\Documents\invoice_agent\app\backend\src\agents\Fine_tuning_data\Positive Examples\positive_charts.md")
+POS_PIVOTS_PATH = Path(r"C:\Users\danie\Documents\invoice_agent\app\backend\src\agents\Fine_tuning_data\Positive Examples\positive_pivot.md")
+POS_District_Path = Path(r"C:\Users\danie\Documents\invoice_agent\app\backend\src\agents\Fine_tuning_data\Positive Examples\positive_examples_district.md")
+POS_INVOICE_PATH = Path(r"C:\Users\danie\Documents\invoice_agent\app\backend\src\agents\Fine_tuning_data\Positive Examples\positive_invoice_path.md")
 
 
 # ------------------------------------------------------
-# CLEANERS
+# CLEANING HELPERS
 # ------------------------------------------------------
 
 def clean_text(raw: str) -> str:
     if not isinstance(raw, str):
         return ""
     s = raw
-    s = re.sub(r"```(?:.|\n)*?```", "", s)
-    s = s.replace("```", "")
-    s = s.replace("\\`", "").replace("`", "")
+    s = re.sub(r"```(?:.|\n)*?```", "", s)  # remove fenced blocks
+    s = s.replace("```", "").replace("\\`", "").replace("`", "")
     return s.strip()
 
 
-
 # ------------------------------------------------------
-# LOAD CANONICAL.MD (Format B)
+# LOADERS
 # ------------------------------------------------------
 
-def load_canonical_md(path: Path):
+def normalize_col(name: str) -> str:
+    return re.sub(r"\s+", "_", name.strip()).lower()
+
+
+def load_nlv_excel(path: Path):
+    df = pd.read_excel(path)
+    df.columns = [normalize_col(c) for c in df.columns]
+
+    col_map = {}
+    for c in ("nlv_text", "text", "nvl_text"):
+        if c in df.columns:
+            col_map["nlv_text"] = c
+            break
+
+    for c in ("canonical_id", "canonical", "canonicalid"):
+        if c in df.columns:
+            col_map["canonical_id"] = c
+            break
+
+    return df, col_map
+
+
+def load_canonical_md(path: Path) -> dict:
     """
-    Expected pattern:
+    Reads canonical.md format:
 
     ## Canonical 0001
-    USER_INTENT: student_monthly_spend
-    VALID_CASE: student_missing
-
-    SQL:
-    SELECT ...
+    SQL: SELECT ...
     """
-    txt = path.read_text(encoding="utf-8")
-    blocks = re.split(r"^##\s+Canonical", txt, flags=re.MULTILINE)
-    out = {}
+    txt = clean_text(path.read_text(encoding="utf-8"))
+    blocks = re.split(r"^##\s+Canonical\s+(\d{4})", txt, flags=re.MULTILINE)
 
-    for blk in blocks:
-        blk = blk.strip()
-        if not blk:
+    mapping = {}
+    # blocks looks like: ["", "0001", "block text", "0002", "block text", ...]
+
+    for i in range(1, len(blocks), 2):
+        cid = blocks[i].strip()
+        body = blocks[i + 1]
+
+        # extract SQL after "SQL:"
+        m_sql = re.search(r"SQL:\s*(.*)", body, re.DOTALL)
+        if not m_sql:
             continue
 
-        # ID
-        m_id = re.match(r"^(\d{4})", blk)
-        if not m_id:
-            continue
-        cid = m_id.group(1)
+        sql = clean_text(m_sql.group(1))
+        mapping[cid] = sql
 
-        # VALID_CASE
-        m_case = re.search(r"VALID_CASE:\s*(.+)", blk)
-        valid_case = m_case.group(1).strip() if m_case else "student_missing"
-
-        # SQL (still needed for NLV → canonical pairing even though the assistant will NOT output SQL)
-        m_sql = re.search(r"SQL:\s*(.*)", blk, flags=re.DOTALL)
-        sql = m_sql.group(1).strip() if m_sql else ""
-
-        out[cid] = {
-            "valid_case": valid_case,
-            "sql": sql
-        }
-
-    return out
+    return mapping
 
 
 
-# ------------------------------------------------------
-# LOAD COT REASONING
-# ------------------------------------------------------
+def load_cot(path: Path) -> dict:
+    """
+    Expected markdown:
 
-def load_cot(path: Path):
-    """COT file must use same ## Canonical 0001 headers."""
+    ## Canonical 0001
+    CoT reasoning...
+    """
     text = clean_text(path.read_text(encoding="utf-8"))
     lines = text.splitlines()
     out = {}
@@ -136,77 +152,50 @@ def load_cot(path: Path):
 
 
 
-# ------------------------------------------------------
-# LOAD NLV
-# ------------------------------------------------------
-
-def normalize_col(name: str) -> str:
-    return re.sub(r"\s+", "_", name.strip()).lower()
-
-
-def load_nlv_excel(path: Path):
-    df = pd.read_excel(path)
-    df.columns = [normalize_col(c) for c in df.columns]
-
-    col_map = {}
-    for c in ("nlv_text", "text"):
-        if c in df.columns:
-            col_map["nlv_text"] = c
-            break
-
-    for c in ("canonical_id", "canonicalid"):
-        if c in df.columns:
-            col_map["canonical_id"] = c
-            break
-
-    return df, col_map
-
-
-
-# ------------------------------------------------------
-# LOAD EDGE CASES
-# ------------------------------------------------------
-
-def load_edge_cases(path: Path):
+def load_edge_cases(path: Path) -> list:
     txt = clean_text(path.read_text(encoding="utf-8"))
     blocks = re.split(r"^##\s+EdgeCase", txt, flags=re.MULTILINE)
-
     out = []
+
     for blk in blocks:
-        if "User:" not in blk:
+        if "User:" not in blk or "Assistant:" not in blk:
             continue
+
         m_user = re.search(r"User:\s*(.+)", blk)
-        m_bot = re.search(r"Assistant:\s*(\{.+\})", blk, flags=re.DOTALL)
-        if not (m_user and m_bot):
+        m_assistant = re.search(r"Assistant:\s*(\{[\s\S]+?\})", blk)
+
+        if not (m_user and m_assistant):
+            continue
+
+        try:
+            assistant_json = json.loads(m_assistant.group(1))
+        except:
+            print("⚠ Invalid JSON in EdgeCase block:")
+            print(m_assistant.group(1))
             continue
 
         out.append({
             "messages": [
-                {"role": "system", "content": load_system_prompt()},
                 {"role": "user", "content": m_user.group(1).strip()},
-                {"role": "assistant", "content": m_bot.group(1).strip()}
+                {"role": "assistant", "content": json.dumps(assistant_json, ensure_ascii=False)}
             ]
         })
+
     return out
 
 
 
-# ------------------------------------------------------
-# LOAD MULTI-TURN
-# ------------------------------------------------------
-
-def load_multi_turn(path: Path):
-    txt = clean_text(path.read_text(encoding="utf-8"))
+def load_multi_turn(path: Path) -> list:
+    txt = clean_text(path.read_text())
     convos = re.split(r"^##\s+MultiTurn", txt, flags=re.MULTILINE)
-
     out = []
-    for c in convos:
-        if "User:" not in c:
+
+    for blk in convos:
+        if "User:" not in blk:
             continue
 
-        lines = c.strip().splitlines()
+        lines = blk.strip().splitlines()
         msgs = []
-        msgs.append({"role": "system", "content": load_system_prompt()})
 
         for ln in lines:
             if ln.startswith("User:"):
@@ -223,22 +212,123 @@ def load_multi_turn(path: Path):
 
 
 # ------------------------------------------------------
-# SYSTEM PROMPT LOADER
+#  NEW: UNIVERSAL POSITIVE-EXAMPLE PARSER (robust)
 # ------------------------------------------------------
 
-def load_system_prompt():
-    return clean_text(SYSTEM_PROMPT_PATH.read_text(encoding="utf-8"))
+def load_positive_examples(path: Path, example_prefix: str):
+    """
+    Parse a markdown file containing blocks like:
 
+    ## StudentExample 0001
+    User: Show monthly spend for Jack Garcia.
+    Assistant:
+    {
+      "text": "...",
+      "rows": [...],
+      "html": "..."
+    }
+
+    or
+
+    ### VendorExample 0001
+    ...
+
+    Returns a list of dicts: {"user": <user_text>, "assistant": <assistant_json_str>}
+    """
+    print(f"Loading positive examples from {path} ({example_prefix})…")
+
+    if not path.exists():
+        print(f"  ⚠ File not found, skipping: {path}")
+        return []
+
+    text = path.read_text(encoding="utf-8")
+
+    # Match headings like: ## VendorExample 0001  OR  ### StudentExample 0003
+    header_re = re.compile(
+        rf"^#+\s+{re.escape(example_prefix)}\s+\d+\s*$",
+        re.MULTILINE,
+    )
+    header_matches = list(header_re.finditer(text))
+
+    if not header_matches:
+        print(f"  ⚠ No blocks found for {example_prefix} in {path}")
+        return []
+
+    examples = []
+
+    for i, header_match in enumerate(header_matches):
+        start = header_match.end()
+        end = header_matches[i + 1].start() if i + 1 < len(header_matches) else len(text)
+        block = text[start:end]
+
+        # --- Extract user text ---
+        m_user = re.search(r"User:\s*(.+)", block)
+        if not m_user:
+            # No user line, skip this block
+            continue
+        user_text = m_user.group(1).strip()
+
+        # --- Extract assistant JSON (brace-balanced) ---
+        m_ast = re.search(r"Assistant:\s*(\{)", block)
+        if not m_ast:
+            # No assistant JSON, skip
+            continue
+
+        # Start from the first '{' after "Assistant:"
+        json_start = m_ast.start(1)
+        tail = block[json_start:]
+
+        lines = tail.splitlines()
+        json_lines = []
+        balance = 0
+        started = False
+
+        for line in lines:
+            # Wait until we actually see the first '{'
+            if not started:
+                if "{" not in line:
+                    continue
+                started = True
+
+            balance += line.count("{")
+            balance -= line.count("}")
+            json_lines.append(line)
+
+            # When balance returns to 0, we've closed the top-level object
+            if started and balance == 0:
+                break
+
+        json_str = "\n".join(json_lines).strip()
+
+        # Validate that what we captured is valid JSON
+        try:
+            json.loads(json_str)
+        except json.JSONDecodeError:
+            print(f"⚠ Invalid JSON in {example_prefix} block:")
+            # Print only the first few lines as a preview
+            preview = "\n".join(json_str.splitlines()[:5])
+            print(preview)
+            continue
+
+        examples.append(
+            {
+                "user": user_text,
+                "assistant": json_str,
+            }
+        )
+
+    print(f"  → Loaded {len(examples)} {example_prefix} examples from {path}")
+    return examples
 
 
 # ------------------------------------------------------
-# BUILD JSONL
+# MAIN BUILDER
 # ------------------------------------------------------
 
 def build_jsonl():
 
     print("Loading system prompt…")
-    system_prompt = load_system_prompt()
+    system_prompt = clean_text(SYSTEM_PROMPT_PATH.read_text(encoding="utf-8"))
 
     print("Loading canonical.md…")
     canonical = load_canonical_md(CANONICAL_MD_PATH)
@@ -255,70 +345,64 @@ def build_jsonl():
     print("Loading multi-turn…")
     multi_turn = load_multi_turn(MULTI_TURN_MD_PATH)
 
-    print(f"Writing → {OUTPUT_JSONL_PATH}")
+    print("Loading ALL positive example files…")
+    pos_students   = load_positive_examples(POS_STUDENTS_PATH,   "StudentExample")
+    pos_vendors    = load_positive_examples(POS_VENDORS_PATH,    "VendorExample")
+    pos_clinicians = load_positive_examples(POS_CLINICIANS_PATH, "ClinicianExample")
+    pos_invoices   = load_positive_examples(POS_INVOICE_PATH,    "InvoiceDetailExample")
+
+    # Make sure output folder exists
     OUTPUT_JSONL_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    print(f"Writing → {OUTPUT_JSONL_PATH}")
 
     with OUTPUT_JSONL_PATH.open("w", encoding="utf-8") as fout:
 
-        # ----------------------------------------------------------
-        # 1. NLV-driven examples
-        # ----------------------------------------------------------
+        # ------------------------------
+        # NLV → Canonical + CoT
+        # ------------------------------
         for _, row in nlv_df.iterrows():
-            user_msg = str(row[col_map["nlv_text"]]).strip()
+            user_msg = row[col_map["nlv_text"]]
             cid = str(row[col_map["canonical_id"]]).zfill(4)
 
             if cid not in canonical:
                 continue
 
-            valid_case = canonical[cid]["valid_case"]
-
-            # Determine assistant output
-            if valid_case == "student_missing":
-                assistant_payload = {
-                    "text": "Which student should I check? Please share their full name.",
-                    "rows": None,
-                    "html": ""
-                }
-
-            elif valid_case == "vendor_missing":
-                assistant_payload = {
-                    "text": "Which vendor do you want to look at?",
-                    "rows": None,
-                    "html": ""
-                }
-
-            else:  # student_present, vendor_present, month_present, etc.
-                assistant_payload = {
-                    "text": "",
-                    "rows": None,
-                    "html": ""
-                }
+            asst_payload = {"text": "", "rows": None, "html": ""}
 
             record = {
                 "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_msg},
-                    {"role": "assistant", "content": json.dumps(assistant_payload, ensure_ascii=False)}
+                    {"role": "assistant", "content": json.dumps(asst_payload, ensure_ascii=False)}
                 ]
             }
-
             fout.write(json.dumps(record, ensure_ascii=False) + "\n")
 
-        # ----------------------------------------------------------
-        # 2. EDGE CASES
-        # ----------------------------------------------------------
+        # ------------------------------
+        # Edge cases
+        # ------------------------------
         for ec in edge_cases:
             fout.write(json.dumps(ec, ensure_ascii=False) + "\n")
 
-        # ----------------------------------------------------------
-        # 3. MULTI TURN
-        # ----------------------------------------------------------
+        # ------------------------------
+        # Multi-turn
+        # ------------------------------
         for mt in multi_turn:
             fout.write(json.dumps(mt, ensure_ascii=False) + "\n")
 
-    print("✔ DONE – Clean JSONL ready.")
+        # ------------------------------
+        # Positive examples
+        # ------------------------------
+        for block in (pos_students + pos_vendors + pos_clinicians + pos_invoices):
+            fout.write(json.dumps(block, ensure_ascii=False) + "\n")
+
+    print("✔ DONE – Clean JSONL ready!")
 
 
+# ------------------------------------------------------
+# MAIN ENTRY
+# ------------------------------------------------------
 
 if __name__ == "__main__":
     build_jsonl()
