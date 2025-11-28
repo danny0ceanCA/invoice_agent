@@ -21,7 +21,7 @@ from app.backend.src.services.s3 import get_s3_client
 
 LOGGER = structlog.get_logger(__name__)
 
-DEFAULT_MODEL = "ft:gpt-4.1-mini-2025-04-14:responsive:district-analytics-agent:CeTgDznB"
+DEFAULT_MODEL = "gpt-4.1-mini-2025-04-14"
 MAX_ITERATIONS = 8
 
 DB_SCHEMA_HINT = """
