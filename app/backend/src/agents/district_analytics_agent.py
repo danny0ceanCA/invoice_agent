@@ -394,6 +394,60 @@ class Workflow:
 
             normalized_query = query.lower()
 
+            # Special-case: invoice line item details by invoice number (e.g., "Johnson-SEP2025")
+            if "line item" in normalized_query and context.district_key:
+                match = re.search(r"\b([A-Za-z]+-[A-Za-z]{3}\d{4})\b", query)
+                if match:
+                    invoice_number = match.group(1)
+                    safe_invoice = invoice_number.replace("'", "''")
+                    sql = f"""
+                    SELECT
+                        i.invoice_number,
+                        ili.student   AS student_name,
+                        ili.clinician AS provider,
+                        ili.service_code,
+                        ili.hours,
+                        ili.cost,
+                        ili.service_date
+                    FROM invoice_line_items AS ili
+                    JOIN invoices AS i ON ili.invoice_id = i.id
+                    WHERE i.district_key = :district_key
+                      AND i.invoice_number = '{safe_invoice}'
+                    ORDER BY ili.service_date, ili.clinician;
+                    """
+
+                    try:
+                        run_sql_tool = agent.lookup_tool("run_sql")
+                    except RuntimeError:
+                        context.last_error = "run_sql tool unavailable"
+                        payload = {
+                            "text": "I was unable to complete that invoice line item query: run_sql tool unavailable",
+                            "rows": None,
+                            "html": None,
+                        }
+                    else:
+                        try:
+                            rows = run_sql_tool.invoke(context, {"query": sql})
+                        except Exception as exc:  # pragma: no cover - defensive
+                            context.last_error = str(exc)
+                            payload = {
+                                "text": f"I was unable to complete that invoice line item query: {exc}",
+                                "rows": None,
+                                "html": None,
+                            }
+                        else:
+                            context.last_rows = rows
+                            payload = {
+                                "text": (
+                                    "Here are the invoice line item details for invoice "
+                                    f"{invoice_number} in your district."
+                                ),
+                                "rows": rows,
+                                "html": None,
+                            }
+
+                    return _finalise_response(payload, context)
+
             # Special-case: include provider information based on the last result set
             if (
                 "includ" in normalized_query  # catches 'include', 'including'
@@ -534,7 +588,6 @@ class Workflow:
                 "list of students",
                 "student list",
                 "students ytd",
-                "all students",
                 "students in our system",
                 "students by year",
             ]
@@ -574,75 +627,6 @@ class Workflow:
                         payload = {"text": text, "rows": rows}
 
                     return _finalise_response(payload, context)
-
-            student_name = _extract_student_name(query)
-            if student_name and context.district_key:
-                # STUDENT-ONLY SHORTCUT:
-                # This shortcut is safe when the query is essentially just the student's
-                # name (e.g., "Avery Smith") and does NOT mention months or other filters.
-                # If the query mentions a month (e.g., "July") or the word "month", we
-                # skip the shortcut so the model can construct a full student+month query.
-                q_lower = query.lower()
-                month_words = [
-                    "january",
-                    "february",
-                    "march",
-                    "april",
-                    "may",
-                    "june",
-                    "july",
-                    "august",
-                    "september",
-                    "october",
-                    "november",
-                    "december",
-                ]
-                mentions_month = "month" in q_lower or any(m in q_lower for m in month_words)
-
-                if mentions_month:
-                    # Example: "Jayden Ramsey and the month is for July"
-                    # -> let the model + tools build:
-                    #    WHERE student_name LIKE '%jayden ramsey%'
-                    #      AND LOWER(service_month) = LOWER('july')
-                    # instead of returning all months.
-                    pass
-                else:
-                    safe_name = student_name.replace("'", "''")
-                    sql = (
-                        "SELECT invoice_number, student_name, total_cost, "
-                        "service_month, status "
-                        "FROM invoices "
-                        "WHERE invoices.district_key = :district_key "
-                        "AND LOWER(invoices.student_name) LIKE LOWER('%{name}%') "
-                        "ORDER BY invoice_date DESC, total_cost DESC;"
-                    ).format(name=safe_name)
-
-                    try:
-                        run_sql_tool = agent.lookup_tool("run_sql")
-                    except RuntimeError:
-                        LOGGER.warning("run_sql_tool_unavailable_for_student", query=query)
-                    else:
-                        try:
-                            rows = run_sql_tool.invoke(context, {"query": sql})
-                        except Exception as exc:  # pragma: no cover - defensive
-                            context.last_error = str(exc)
-                            payload = {
-                                "text": f"Failed to fetch invoices for {student_name}: {exc}",
-                                "rows": None,
-                                "html": None,
-                            }
-                        else:
-                            context.last_rows = rows
-                            if rows:
-                                text = (
-                                    f"Fetched {len(rows)} invoice"
-                                    f"{'s' if len(rows) != 1 else ''} for {student_name}."
-                                )
-                            else:
-                                text = f"No invoices found for {student_name}."
-                            payload = {"text": text, "rows": rows}
-
-                        return _finalise_response(payload, context)
 
             completion = agent.client.chat.completions.create(
                 model=agent.model,
@@ -996,6 +980,41 @@ def _should_pivot_student_month(
     return True
 
 
+def _is_invoice_line_item_rows(
+    rows: Sequence[Mapping[str, Any]]
+) -> bool:
+    """
+    Return True if rows look like invoice line-item details:
+    - Must have: invoice_number, student_name, provider, service_code, hours, cost, service_date
+    - Must NOT have obvious invoice-level summary columns like total_cost, invoice_date, status, vendor_name, district_key.
+    """
+    if not rows:
+        return False
+    first = rows[0]
+    cols = {str(k) for k in first.keys()}
+    must_have = {
+        "invoice_number",
+        "student_name",
+        "provider",
+        "service_code",
+        "hours",
+        "cost",
+        "service_date",
+    }
+    forbidden = {
+        "total_cost",
+        "invoice_date",
+        "status",
+        "vendor_name",
+        "district_key",
+    }
+    if not must_have.issubset(cols):
+        return False
+    if any(c in cols for c in forbidden):
+        return False
+    return True
+
+
 def _render_student_month_pivot(rows: Sequence[Mapping[str, Any]]) -> str:
     """
     Render a pivot table of student vs month from long-format rows.
@@ -1298,6 +1317,9 @@ def _finalise_response(payload: Mapping[str, Any], context: AgentContext) -> Age
         # the model provided its own HTML.
         if _should_pivot_student_month(rows, context.query):
             html = _render_student_month_pivot(rows)
+        elif _is_invoice_line_item_rows(rows):
+            # Force a simple table for invoice-detail queries; no summary cards/charts.
+            html = _render_html_table(rows)
         else:
             # In all other cases, respect any HTML provided by the model,
             # or fall back to the generic table renderer.
