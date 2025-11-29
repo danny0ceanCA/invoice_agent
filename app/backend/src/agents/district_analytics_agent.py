@@ -1303,10 +1303,23 @@ def _finalise_response(payload: Mapping[str, Any], context: AgentContext) -> Age
     else:
         rows = context.last_rows
 
+    zero_result_set = isinstance(rows, list) and len(rows) == 0
+
     if rows:
         # Strip sensitive columns like 'rate' so they never appear in tables or memory.
         rows = _strip_sensitive_columns(rows)
         context.last_rows = rows
+    elif zero_result_set:
+        context.last_rows = []
+
+    if zero_result_set:
+        message = "I couldn't find any matching records for that request in this district."
+        if text_value:
+            lowered = text_value.lower()
+            if "no matching" not in lowered and "no invoice" not in lowered and "no data" not in lowered:
+                text_value = f"{text_value} {message}".strip()
+        else:
+            text_value = message
 
     if not text_value and rows:
         text_value = "See the table below for details."
@@ -1701,6 +1714,29 @@ def _build_system_prompt() -> str:
         "-     JOIN invoices i ON ili.invoice_id = i.id\n"
         "-     WHERE LOWER(i.student_name) LIKE LOWER(:student_name)\n"
         "-     GROUP BY ili.clinician;\n\n"
+        "- CRITICAL service_month column rule (STRICT):\n"
+        "- • The column service_month ONLY exists on invoices (alias i). invoice_line_items has NO service_month column.\n"
+        "- • NEVER reference invoice_line_items.service_month or ili.service_month in SQL.\n"
+        "- • For monthly rollups that need hours or cost by month, JOIN invoices i to invoice_line_items ili ON ili.invoice_id = i.id and GROUP BY i.service_month.\n"
+        "-   Canonical monthly hours by student example:\n"
+        "      SELECT\n"
+        "        LOWER(i.service_month) AS service_month,\n"
+        "        SUM(ili.hours)        AS total_hours\n"
+        "      FROM invoices i\n"
+        "      JOIN invoice_line_items ili ON ili.invoice_id = i.id\n"
+        "      WHERE i.district_key = :district_key\n"
+        "        AND LOWER(i.student_name) LIKE LOWER(:student_pattern)\n"
+        "      GROUP BY LOWER(i.service_month)\n"
+        "      ORDER BY MIN(i.invoice_date);\n"
+        "-   Canonical monthly spend by student example:\n"
+        "      SELECT\n"
+        "        LOWER(i.service_month) AS service_month,\n"
+        "        SUM(i.total_cost)      AS total_cost\n"
+        "      FROM invoices i\n"
+        "      WHERE i.district_key = :district_key\n"
+        "        AND LOWER(i.student_name) LIKE LOWER(:student_pattern)\n"
+        "      GROUP BY LOWER(i.service_month)\n"
+        "      ORDER BY MIN(i.invoice_date);\n\n"
         "- For ANY question that mentions a month together with invoices or spend (e.g., 'invoices for July', 'highest invoices in August', 'total spend in September'), you MUST interpret the month as **month of service** and filter using service_month/service_year or service_month_num.\n"
         "- Example filter: WHERE LOWER(service_month) = LOWER('July').\n"
         "- You MUST NOT filter by invoice_date when answering generic month questions unless the user explicitly mentions 'invoice date', 'submitted', 'processed', or 'uploaded'.\n"
@@ -2112,6 +2148,11 @@ def _build_system_prompt() -> str:
         "- Avoid grouping by unnecessary fields; match the granularity of the question exactly.\n"
         "- Restrict output to only the columns necessary for the user’s requested view.\n"
         "- If the SQL returns zero rows, explicitly state that no matching records were found; do NOT imply results exist (avoid phrases like 'here are the students' when the table is empty).\n"
+        "- When a SQL query returns zero rows, set rows to an empty list [] and keep HTML minimal (short message or empty table) while clearly stating that no matching records were found.\n"
+        "- Never fabricate or guess values when rows are empty.\n"
+        "- Use rows = null ONLY when you have not run SQL yet or when a tool/query error occurs.\n"
+        "- If a tool call fails (e.g., SQL syntax error, missing column), acknowledge the failure in 'text', set rows to null, and return minimal HTML with the same message.\n"
+        "- Avoid repeating invalid patterns (for example, never reference invoice_line_items.service_month).\n"
         "\n"
         "- If the user explicitly asks to see the SQL, include it in the 'text' field or as an HTML comment. Otherwise hide it.\n"
 
