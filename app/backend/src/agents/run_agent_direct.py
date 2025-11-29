@@ -6,10 +6,9 @@ INPUT_FILE = "01_district_eval_questions.jsonl"
 OUTPUT_FILE = f"agent_direct_eval_output_{datetime.date.today()}.jsonl"
 
 # This must match your real district_key
-USER_CONTEXT = {
+BASE_USER_CONTEXT = {
     "district_key": "I51P-DA8D-HJQ0",
     "district_id": 1,              # optional
-    "user_id": "local-test-user"   # optional
 }
 
 def run_direct_eval():
@@ -23,7 +22,9 @@ def run_direct_eval():
 
             try:
                 # DIRECT AGENT CALL (no http, no auth0)
-                result = run_analytics_agent(question, USER_CONTEXT)
+                user_context = dict(BASE_USER_CONTEXT)
+                user_context["user_id"] = f"eval-{qid}"
+                result = run_analytics_agent(question, user_context)
 
                 out.write(json.dumps({
                     "id": qid,
