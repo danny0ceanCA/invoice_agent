@@ -21,7 +21,7 @@ from app.backend.src.services.s3 import get_s3_client
 
 LOGGER = structlog.get_logger(__name__)
 
-DEFAULT_MODEL = "ft:gpt-4.1-mini-2025-04-14:responsive:district-analytics-agent:CeTgDznB"
+DEFAULT_MODEL = "gpt-5.1"
 MAX_ITERATIONS = 8
 
 DB_SCHEMA_HINT = """
@@ -394,6 +394,60 @@ class Workflow:
 
             normalized_query = query.lower()
 
+            # Special-case: invoice line item details by invoice number (e.g., "Johnson-SEP2025")
+            if "line item" in normalized_query and context.district_key:
+                match = re.search(r"\b([A-Za-z]+-[A-Za-z]{3}\d{4})\b", query)
+                if match:
+                    invoice_number = match.group(1)
+                    safe_invoice = invoice_number.replace("'", "''")
+                    sql = f"""
+                    SELECT
+                        i.invoice_number,
+                        ili.student   AS student_name,
+                        ili.clinician AS provider,
+                        ili.service_code,
+                        ili.hours,
+                        ili.cost,
+                        ili.service_date
+                    FROM invoice_line_items AS ili
+                    JOIN invoices AS i ON ili.invoice_id = i.id
+                    WHERE i.district_key = :district_key
+                      AND i.invoice_number = '{safe_invoice}'
+                    ORDER BY ili.service_date, ili.clinician;
+                    """
+
+                    try:
+                        run_sql_tool = agent.lookup_tool("run_sql")
+                    except RuntimeError:
+                        context.last_error = "run_sql tool unavailable"
+                        payload = {
+                            "text": "I was unable to complete that invoice line item query: run_sql tool unavailable",
+                            "rows": None,
+                            "html": None,
+                        }
+                    else:
+                        try:
+                            rows = run_sql_tool.invoke(context, {"query": sql})
+                        except Exception as exc:  # pragma: no cover - defensive
+                            context.last_error = str(exc)
+                            payload = {
+                                "text": f"I was unable to complete that invoice line item query: {exc}",
+                                "rows": None,
+                                "html": None,
+                            }
+                        else:
+                            context.last_rows = rows
+                            payload = {
+                                "text": (
+                                    "Here are the invoice line item details for invoice "
+                                    f"{invoice_number} in your district."
+                                ),
+                                "rows": rows,
+                                "html": None,
+                            }
+
+                    return _finalise_response(payload, context)
+
             # Special-case: include provider information based on the last result set
             if (
                 "includ" in normalized_query  # catches 'include', 'including'
@@ -534,7 +588,6 @@ class Workflow:
                 "list of students",
                 "student list",
                 "students ytd",
-                "all students",
                 "students in our system",
                 "students by year",
             ]
@@ -574,75 +627,6 @@ class Workflow:
                         payload = {"text": text, "rows": rows}
 
                     return _finalise_response(payload, context)
-
-            student_name = _extract_student_name(query)
-            if student_name and context.district_key:
-                # STUDENT-ONLY SHORTCUT:
-                # This shortcut is safe when the query is essentially just the student's
-                # name (e.g., "Avery Smith") and does NOT mention months or other filters.
-                # If the query mentions a month (e.g., "July") or the word "month", we
-                # skip the shortcut so the model can construct a full student+month query.
-                q_lower = query.lower()
-                month_words = [
-                    "january",
-                    "february",
-                    "march",
-                    "april",
-                    "may",
-                    "june",
-                    "july",
-                    "august",
-                    "september",
-                    "october",
-                    "november",
-                    "december",
-                ]
-                mentions_month = "month" in q_lower or any(m in q_lower for m in month_words)
-
-                if mentions_month:
-                    # Example: "Jayden Ramsey and the month is for July"
-                    # -> let the model + tools build:
-                    #    WHERE student_name LIKE '%jayden ramsey%'
-                    #      AND LOWER(service_month) = LOWER('july')
-                    # instead of returning all months.
-                    pass
-                else:
-                    safe_name = student_name.replace("'", "''")
-                    sql = (
-                        "SELECT invoice_number, student_name, total_cost, "
-                        "service_month, status "
-                        "FROM invoices "
-                        "WHERE invoices.district_key = :district_key "
-                        "AND LOWER(invoices.student_name) LIKE LOWER('%{name}%') "
-                        "ORDER BY invoice_date DESC, total_cost DESC;"
-                    ).format(name=safe_name)
-
-                    try:
-                        run_sql_tool = agent.lookup_tool("run_sql")
-                    except RuntimeError:
-                        LOGGER.warning("run_sql_tool_unavailable_for_student", query=query)
-                    else:
-                        try:
-                            rows = run_sql_tool.invoke(context, {"query": sql})
-                        except Exception as exc:  # pragma: no cover - defensive
-                            context.last_error = str(exc)
-                            payload = {
-                                "text": f"Failed to fetch invoices for {student_name}: {exc}",
-                                "rows": None,
-                                "html": None,
-                            }
-                        else:
-                            context.last_rows = rows
-                            if rows:
-                                text = (
-                                    f"Fetched {len(rows)} invoice"
-                                    f"{'s' if len(rows) != 1 else ''} for {student_name}."
-                                )
-                            else:
-                                text = f"No invoices found for {student_name}."
-                            payload = {"text": text, "rows": rows}
-
-                        return _finalise_response(payload, context)
 
             completion = agent.client.chat.completions.create(
                 model=agent.model,
@@ -996,6 +980,41 @@ def _should_pivot_student_month(
     return True
 
 
+def _is_invoice_line_item_rows(
+    rows: Sequence[Mapping[str, Any]]
+) -> bool:
+    """
+    Return True if rows look like invoice line-item details:
+    - Must have: invoice_number, student_name, provider, service_code, hours, cost, service_date
+    - Must NOT have obvious invoice-level summary columns like total_cost, invoice_date, status, vendor_name, district_key.
+    """
+    if not rows:
+        return False
+    first = rows[0]
+    cols = {str(k) for k in first.keys()}
+    must_have = {
+        "invoice_number",
+        "student_name",
+        "provider",
+        "service_code",
+        "hours",
+        "cost",
+        "service_date",
+    }
+    forbidden = {
+        "total_cost",
+        "invoice_date",
+        "status",
+        "vendor_name",
+        "district_key",
+    }
+    if not must_have.issubset(cols):
+        return False
+    if any(c in cols for c in forbidden):
+        return False
+    return True
+
+
 def _render_student_month_pivot(rows: Sequence[Mapping[str, Any]]) -> str:
     """
     Render a pivot table of student vs month from long-format rows.
@@ -1298,6 +1317,9 @@ def _finalise_response(payload: Mapping[str, Any], context: AgentContext) -> Age
         # the model provided its own HTML.
         if _should_pivot_student_month(rows, context.query):
             html = _render_student_month_pivot(rows)
+        elif _is_invoice_line_item_rows(rows):
+            # Force a simple table for invoice-detail queries; no summary cards/charts.
+            html = _render_html_table(rows)
         else:
             # In all other cases, respect any HTML provided by the model,
             # or fall back to the generic table renderer.
@@ -1664,6 +1686,7 @@ def _build_system_prompt() -> str:
         "- Do NOT search for clinician names in invoices.student_name; clinician names are only in invoice_line_items.clinician.\n\n"
         "SQL RULES:\n"
         "- Only use columns that exist in the schema.\n"
+        "- NEVER use SELECT *. Always enumerate only the columns required to answer the question so the query can be safely wrapped with district_key and to avoid alias errors.\n"
         "- Money totals rules:\n"
         "- • Use invoices.total_cost ONLY for overall invoice-level totals (no clinician/service breakdown), e.g. 'total invoice cost for August'.\n"
         "- • When you are grouping by clinician, service_code, or other line-item fields, you MUST aggregate invoice_line_items.cost instead of invoices.total_cost.\n"
@@ -1849,6 +1872,12 @@ def _build_system_prompt() -> str:
         "         </div>\n"
         "       </div>\n"
         "-    - Do NOT use pie charts; use bar-style visuals only.\n\n"
+        "TREND ANALYTICS (INCREASING/DECREASING HOURS OR SPEND):\n"
+        "- For clinician, vendor, or student trend questions (e.g., 'increasing hours over the last three months', 'vendors with decreasing spend'), group by time period (month) and compute SUM of the relevant metric.\n"
+        "- Prefer strict monotonic detection: show entities whose totals move consistently up (increasing) or down (decreasing) over the window. Require at least 3 periods when possible.\n"
+        "- If no entity meets strict monotonic criteria, gracefully fall back to 'biggest movers': compute the change between the most recent period and the earliest period in the window, sort by that delta, and return the largest positive (for increasing) or most negative (for decreasing) changes.\n"
+        "- Always order the output by the change magnitude and include both the starting and ending values (and optionally percent change) so the movement is clear.\n"
+        "- Use month filters that match the user's timeframe (e.g., last 3 months) and avoid SELECT * when building these queries.\n\n"
         "- When NOT to show charts:\n"
         "-    - Do NOT include any chart if there is only a single time period or a single row.\n"
         "-    - Do NOT include a chart for very small, highly specific lists (e.g., 'all invoices for this one student on a single date').\n"
@@ -2068,6 +2097,60 @@ def _build_system_prompt() -> str:
         "\n"
         "Under no circumstances should invoice summaries overwrite invoice-detail results.\n"
         "\n"
+
+        "####################################################################\n"
+        "OUTPUT SCHEMA RELEVANCE – MUST MATCH THE QUERY’S INTENT\n"
+        "####################################################################\n"
+        "- Select only the columns needed to answer the user’s question and avoid returning unrelated fields.\n"
+        "- Map natural language to schema fields carefully: “amount due/balance” → invoices.total_cost; “number of invoices” → COUNT(*), “total spend” → SUM(total_cost).\n"
+        "- Never invent new column names. Use aliases only when needed to match the user’s phrasing (e.g., invoice_count, total_spend).\n"
+        "- Only use GROUP BY if the question implies multiple rows (e.g., “by student”, “by month”).\n"
+        "- If the user wants a single number (count, total, or max/min), return only that.\n"
+        "- Maintain identifier columns ONLY when needed for user context (e.g., student_name when listing students). Otherwise, omit ids/dates/status.\n"
+        "- Clarify ambiguous schema intent before running SQL if it’s unclear which fields or level of detail they want.\n"
+        "- For trend detection (e.g., increasing/decreasing spend), return one row per time period with total_spend and ensure ordering by calendar month.\n"
+        "- Avoid grouping by unnecessary fields; match the granularity of the question exactly.\n"
+        "- Restrict output to only the columns necessary for the user’s requested view.\n"
+        "- If the SQL returns zero rows, explicitly state that no matching records were found; do NOT imply results exist (avoid phrases like 'here are the students' when the table is empty).\n"
+        "\n"
+        "- If the user explicitly asks to see the SQL, include it in the 'text' field or as an HTML comment. Otherwise hide it.\n"
+
+        "####################################################################\\n"
+        "TIME-SERIES & TREND SQL TEMPLATE – STANDARDIZED 3-MONTH LOGIC\\n"
+        "####################################################################\\n"
+        "- When constructing any 2-month or 3-month trend query, you MUST use the following canonical pattern to avoid SQL errors:\\n"
+        "  WITH months AS (\\n"
+        "    SELECT LOWER(service_month) AS service_month,\\n"
+        "           MIN(invoice_date)   AS any_date\\n"
+        "    FROM invoices\\n"
+        "    WHERE invoices.district_key = :district_key\\n"
+        "    GROUP BY LOWER(service_month)\\n"
+        "  ), ordered_months AS (\\n"
+        "    SELECT service_month, any_date,\\n"
+        "           ROW_NUMBER() OVER (ORDER BY any_date) AS rn\\n"
+        "    FROM months\\n"
+        "  ), last_three AS (\\n"
+        "    SELECT service_month\\n"
+        "    FROM ordered_months\\n"
+        "    ORDER BY any_date DESC\\n"
+        "    LIMIT 3\\n"
+        "  )\\n"
+        "- You MUST reference only columns selected in earlier CTEs. NEVER reference invoice_date directly in later CTEs if it was not selected.\\n"
+        "- For 2-month comparisons, replace LIMIT 3 with LIMIT 2 and adjust logic accordingly.\\n"
+
+        "####################################################################\\n"
+        "TREND ANALYTICS – REQUIRED FALLBACK BEHAVIOR\\n"
+        "####################################################################\\n"
+        "- For ANY question asking for increasing or decreasing spend/hours (vendor or clinician):\\n"
+        "  1) First attempt strict monotonic patterns:\\n"
+        "       increasing = oldest <= middle <= latest AND at least one strictly lower->higher step\\n"
+        "       decreasing = oldest >= middle >= latest AND at least one strictly higher->lower step\\n"
+        "  2) If ZERO entities satisfy strict patterns, you MUST NOT return an empty table.\\n"
+        "     Instead, compute net_change = (latest - oldest) and return at least the top 5 entities by net_change (positive for increasing queries, negative for decreasing queries).\\n"
+        "     Your 'text' MUST say that no strict pattern was found and that you are showing the largest movers instead.\\n"
+        "  3) Trend tables MUST include only: entity identifier, 2–3 month values, net_change. No extra fields.\\n"
+        "- Vendor trend queries MUST include invoices.district_key = :district_key in every CTE and WHERE clause to avoid wrapping errors.\\n"
+
         "FINAL OUTPUT FORMAT:\n"
         "- You MUST respond with a single JSON object: {\"text\": str, \"rows\": list|None, \"html\": str}.\n"
         "- text: a concise human-readable summary in plain English.\n"
@@ -2075,6 +2158,86 @@ def _build_system_prompt() -> str:
         "- html: an HTML fragment that may include summary cards, insight bullets, optional simple bar charts, and a data table.\n"
         "- Do NOT output plain text outside this JSON structure.\n"
         "OUTPUT FORMAT DISCIPLINE RULES:\n"
+
+        "ROWS/TEXT CONSISTENCY RULES – STRICT ENFORCEMENT:\\n"
+        "- Your 'text' MUST accurately reflect whether any 'rows' exist.\\n"
+        "- If 'rows' is null or empty, DO NOT say 'here are...', 'below are...', or imply a table exists.\\n"
+        "- Instead, explain clearly: 'No matching records were found for this query.'\\n"
+
+        "FULL-NAME OVERRIDES MEMORY – STUDENT FILTER RULE:\\n"
+        "- When the CURRENT query explicitly includes a full student name (first + last), you MUST treat that as the authoritative filter.\\n"
+        "- In this case, IGNORE any prior ACTIVE_STUDENT_FILTER or sticky-memory filters.\\n"
+        "- DO NOT ask the user to clarify which student they mean if the current query already contains a full student name.\\n"
+        "- Only ask for clarification when the CURRENT query itself is ambiguous (e.g., 'Jack', 'they', or 'the student').\\n"
+        "####################################################################\n"
+        "MONTH FILTER OVERRIDES MEMORY\n"
+        "####################################################################\n"
+        "- When the CURRENT query contains an explicit month filter (e.g., 'in July', 'for August', 'September only'):\n"
+        "-   • You MUST use THAT month exclusively.\n"
+        "-   • DO NOT re-use or carry over any months from previous queries.\n"
+        "-   • DO NOT apply sticky-month logic or multi-month expansions unless the user explicitly asks for multiple months.\n"
+        "- Example: If the previous query was 'July and August', and the new query is 'total hours for Hannah Wood in September', you MUST ONLY return September.\n"
+
+        "####################################################################\n"
+        "CLINICIAN SUMMARY QUERIES – REQUIRED CANONICAL PATTERNS\n"
+        "####################################################################\n"
+        "- When the user asks for clinicians and their total hours (or spend), you MUST use one of these canonical forms:\n"
+        "  1) Clinician summary for district:\n"
+        "     SELECT LOWER(ili.clinician) AS clinician,\n"
+        "            SUM(ili.hours) AS total_hours\n"
+        "     FROM invoice_line_items ili\n"
+        "     JOIN invoices i ON i.id = ili.invoice_id\n"
+        "     WHERE i.district_key = :district_key\n"
+        "     GROUP BY LOWER(ili.clinician)\n"
+        "     ORDER BY total_hours DESC;\n"
+
+        "  2) Clinician summary filtered to a specific month:\n"
+        "     SELECT LOWER(ili.clinician) AS clinician,\n"
+        "            SUM(ili.hours) AS total_hours\n"
+        "     FROM invoice_line_items ili\n"
+        "     JOIN invoices i ON i.id = ili.invoice_id\n"
+        "     WHERE i.district_key = :district_key\n"
+        "       AND LOWER(i.service_month) = LOWER(:month)\n"
+        "     GROUP BY LOWER(ili.clinician)\n"
+        "     ORDER BY total_hours DESC;\n"
+
+        "- These patterns MUST be used for questions like:\n"
+        "     'List all clinicians and their total hours',\n"
+        "     'List clinicians and total hours for October',\n"
+        "     'Show each clinician and the spend they billed by month'.\n"
+        "- NEVER return a student list for a clinician summary question.\n"
+
+        "####################################################################\n"
+        "NATURAL LANGUAGE HOURS INTERPRETATION (FOLLOW-UP QUESTIONS)\n"
+        "####################################################################\n"
+        "- When the user says: 'the hours', 'hours billed', 'how many hours has <name> received',\n"
+        "  OR when they ask for 'hours' immediately after a student-scoped query:\n"
+        "-   • You MUST interpret this as HOURS FOR THE ACTIVE STUDENT, not district totals.\n"
+        "-   • Use invoice_line_items.hours grouped by student and/or month.\n"
+        "- Example canonical form for hours for a student:\n"
+        "     SELECT LOWER(ili.service_date) AS service_date,\n"
+        "            SUM(ili.hours) AS total_hours\n"
+        "     FROM invoice_line_items ili\n"
+        "     JOIN invoices i ON i.id = ili.invoice_id\n"
+        "     WHERE i.district_key = :district_key\n"
+        "       AND LOWER(ili.student) LIKE LOWER(:student_pattern)\n"
+        "     GROUP BY LOWER(ili.service_date)\n"
+        "     ORDER BY LOWER(ili.service_date);\n"
+
+        "####################################################################\n"
+        "INVOICE LINE-ITEM QUERIES – DO NOT ASK FOR CLARIFICATION WHEN QUERY IS FULLY SPECIFIC\n"
+        "####################################################################\n"
+        "- If the user specifies ALL THREE of the following:\n"
+        "    • a student OR a clinician,\n"
+        "    • a specific month,\n"
+        "    • a request for 'invoice line item details', 'line items', or a named invoice_number,\n"
+        "- THEN you MUST NOT ask clarifying questions.\n"
+        "- You MUST immediately run the invoice_line_items query.\n"
+        "- DO NOT respond with: 'please clarify student or clinician'.\n"
+        "- Correct examples:\n"
+        "     'For Hannah Wood in July, show invoice line item details' -> run SQL immediately.\n"
+        "     'For clinician Lisa Rodriguez in September, show line-item details' -> run SQL immediately.\n"
+
         "- The 'text' field MUST contain ONLY plain English. NO HTML. NO <tags>. NO table or chart markup.\n"
         "- The 'html' field MUST contain ALL visual HTML (summary-cards, insights list, tables, charts, etc.).\n"
         "- NEVER duplicate information. Whatever appears in 'html' MUST NOT also appear in 'text'.\n"
