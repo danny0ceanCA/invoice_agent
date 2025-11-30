@@ -18,6 +18,7 @@ from app.backend.src.core.config import get_settings
 from app.backend.src.core.memory import ConversationMemory, RedisConversationMemory
 from app.backend.src.db import get_engine
 from app.backend.src.services.s3 import get_s3_client
+from multi_turn_model import MultiTurnConversationManager
 from .business_rule_model import build_business_rule_system_prompt, run_business_rule_model
 from .entity_resolution_model import (
     build_entity_resolution_system_prompt,
@@ -383,6 +384,18 @@ class Workflow:
                 history = self.memory.load_messages(session_id)
             except Exception as exc:  # pragma: no cover - defensive
                 LOGGER.warning("analytics_memory_load_failed", error=str(exc))
+
+        fused_query = query
+        if agent.multi_turn_manager and session_id:
+            try:
+                fusion_result = agent.multi_turn_manager.process_user_message(session_id, query)
+                candidate = fusion_result.get("fused_query")
+                if isinstance(candidate, str) and candidate.strip():
+                    fused_query = candidate.strip()
+            except Exception as exc:  # pragma: no cover - defensive
+                LOGGER.warning("multi_turn_fusion_failed", error=str(exc))
+
+        query = fused_query
 
         # Apply sticky student filter by inspecting history and, if we find an
         # ACTIVE_STUDENT_FILTER tag, rewriting the incoming query so the model
@@ -1087,6 +1100,13 @@ class Agent:
         self.workflow = workflow
         self.tools = list(tools)
         self._tool_lookup = {tool.name: tool for tool in self.tools}
+        self.multi_turn_manager: MultiTurnConversationManager | None = None
+        try:
+            redis_client = getattr(self.workflow.memory, "client", None)
+            if redis_client:
+                self.multi_turn_manager = MultiTurnConversationManager(redis_client)
+        except Exception as exc:  # pragma: no cover - defensive
+            LOGGER.warning("multi_turn_manager_init_failed", error=str(exc))
 
     def lookup_tool(self, name: str) -> Tool:
         if name not in self._tool_lookup:
