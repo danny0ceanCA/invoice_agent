@@ -3,6 +3,7 @@ Multi-turn conversation fusion model.
 """
 from __future__ import annotations
 
+import re
 import json
 from dataclasses import dataclass, field, asdict
 from typing import Any, Dict, List, Optional
@@ -92,6 +93,30 @@ class MultiTurnConversationManager:
         state = self.get_state(session_id)
         is_first_turn = state.original_query is None
 
+        # --------------------------------------------------------------
+        # NEW: If this message is a LIST INTENT, reset multi-turn state.
+        # This prevents "student list" from contaminating follow-up queries.
+        # --------------------------------------------------------------
+        if self._is_list_intent(user_message):
+            # FULL RESET
+            state = ConversationState(
+                original_query=user_message,
+                latest_user_message=user_message,
+                pending_intent=None,
+                missing_slots=[],
+                resolved_slots={},
+                history=[{"role": "user", "content": user_message}]
+            )
+            # Persist reset state and return a clean fused query
+            self.save_state(state, session_id=session_id)
+            return {
+                "session_id": session_id,
+                "needs_clarification": False,
+                "clarification_prompt": None,
+                "fused_query": user_message,
+                "state": state.to_dict(),
+            }
+
         if is_first_turn:
             state.original_query = user_message
         else:
@@ -125,6 +150,33 @@ class MultiTurnConversationManager:
             "fused_query": fused_query,
             "state": state.to_dict(),
         }
+
+    # --------------------------------------------------------------
+    # NEW: List Intent Detection (same logic as analytics agent)
+    # --------------------------------------------------------------
+    def _is_list_intent(self, query: str) -> bool:
+        if not query:
+            return False
+        text = query.lower().strip()
+        direct = [
+            "student list",
+            "list students",
+            "list of students",
+            "show students",
+            "show me the student list",
+            "give me the student list",
+            "students list",
+            "list all students",
+            "show all students",
+        ]
+        if any(p in text for p in direct):
+            return True
+
+        # Regex fallback
+        if re.search(r"list\s+of\s+students|students?\s+list", text):
+            return True
+
+        return False
 
     def _attempt_slot_fill(
         self, state: ConversationState, user_message: str, *, allow_fallback_value: bool = True
