@@ -49,6 +49,7 @@ CHECKS (REQUIRED):
 - 'entities' (if present) must be an object. For any present key in:
     * 'students', 'providers', 'vendors', 'invoices'
   that field must be a list of strings.
+- If time_period includes school_year/start_date/end_date, ensure start_date/end_date are ISO date strings and start_date <= end_date. If a school_year reference is present but these fields are missing, set valid=false.
 - There must be NO top-level keys that are obviously wrong or dangerous such as:
     * 'prompt', 'system_prompt', 'sql', 'sql_text', 'tool_plan'.
 
