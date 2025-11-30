@@ -155,6 +155,18 @@ def _extract_active_filters_from_history(history: list[dict[str, str]]) -> dict[
     if not history:
         return active
 
+    # If the last user message was a list-intent query, do not surface an active filter.
+    for message in reversed(history):
+        if not isinstance(message, dict):
+            continue
+        if message.get("role") != "user":
+            continue
+        content = (message.get("content") or "").strip()
+        if content and _is_list_intent(content):
+            return {}
+        # Only consider the most recent user message for list intent
+        break
+
     # Walk history from newest to oldest, looking for assistant messages
     # with an ACTIVE_STUDENT_FILTER tag.
     for message in reversed(history):
@@ -217,27 +229,43 @@ def _maybe_apply_active_student_filter(raw_query: str, active_filters: dict[str,
 
     q_lower = raw_query.lower()
 
+    # Do not apply sticky filters to list-intent queries.
+    if _is_list_intent(raw_query):
+        return raw_query
+
     # If the user explicitly asks for "all students" / "entire district" / similar,
     # do NOT apply the sticky filter.
-    if "all students" in q_lower or "entire district" in q_lower or "district" in q_lower:
+    district_scope_terms = ["all students", "entire district", "district", "district-wide"]
+    if any(term in q_lower for term in district_scope_terms):
         return raw_query
 
-    # If the query already explicitly mentions this student, don't modify it.
-    if active_student.lower() in q_lower:
+    # If the query is focused on vendors/clinicians/providers, do not force student scope.
+    provider_terms = ["vendor", "vendors", "clinician", "clinicians", "provider", "providers"]
+    if any(term in q_lower for term in provider_terms):
         return raw_query
 
-    # Only apply the sticky filter for queries that look like detail/summary follow-ups.
-    trigger_phrases = [
-        "invoice detail",
-        "invoice details",
-        "monthly spend",
-        "monthly summary",
-        "invoice totals",
-        "invoice summary",
-        "details for",
-        "invoice info",
-        "only show me",
-        "only for",
+    # If the query already explicitly mentions a student (including a different one),
+    # do not override it.
+    explicit_name_match = re.search(
+        r"\bfor\s+([A-Za-z]+(?:\s+[A-Za-z]+)*)", q_lower, flags=re.IGNORECASE
+    )
+    if explicit_name_match:
+        return raw_query
+    if "for student" in q_lower or "student " in q_lower:
+        return raw_query
+
+    # Only apply the sticky filter for analytics-style follow-ups that omit a student.
+    analytics_keywords = [
+        "invoice",
+        "spend",
+        "summary",
+        "total",
+        "totals",
+        "hours",
+        "billed",
+        "billing",
+        "cost",
+        "charges",
     ]
     month_words = [
         "january",
@@ -253,18 +281,19 @@ def _maybe_apply_active_student_filter(raw_query: str, active_filters: dict[str,
         "november",
         "december",
     ]
-    has_month = any(m in q_lower for m in month_words)
 
-    if not any(p in q_lower for p in trigger_phrases) and not has_month:
+    has_analytics_signal = any(k in q_lower for k in analytics_keywords) or any(
+        m in q_lower for m in month_words
+    )
+
+    # If the query does not look like an analytics follow-up, avoid rewriting it.
+    if not has_analytics_signal:
         return raw_query
 
-    # If the user already wrote a "for student ..." pattern, don't overwrite it.
-    if "for student" in q_lower:
+    # Avoid narrowing queries that reference multiple students.
+    if "students" in q_lower:
         return raw_query
 
-    # Rewrite by appending an explicit student clause in natural language.
-    # Example: "give me invoice details for September"
-    # becomes: "give me invoice details for September for student Chloe Taylor"
     rewritten_query = raw_query.rstrip() + f" for student {active_student}"
     LOGGER.debug(
         "sticky_student_filter_applied",
@@ -273,6 +302,31 @@ def _maybe_apply_active_student_filter(raw_query: str, active_filters: dict[str,
         rewritten=rewritten_query,
     )
     return rewritten_query
+
+
+def _is_list_intent(query: str) -> bool:
+    """Heuristically detect user requests asking for a student list."""
+
+    normalized = query.lower().strip()
+    if not normalized:
+        return False
+
+    direct_matches = [
+        "student list",
+        "list students",
+        "list of students",
+        "list the students",
+        "show students",
+        "show me the student list",
+        "give me the student list",
+        "give me list of students",
+        "students list",
+    ]
+    if any(phrase in normalized for phrase in direct_matches):
+        return True
+
+    # Fallback regex to catch variations like "can I have the list of students"
+    return bool(re.search(r"list\s+of\s+students|students?\s+list", normalized))
 
 
 def _load_district_entities(engine: Engine, district_key: str | None) -> dict[str, list[str]]:
