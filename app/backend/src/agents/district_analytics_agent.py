@@ -27,7 +27,7 @@ from .insight_model import build_insight_system_prompt, run_insight_model
 
 LOGGER = structlog.get_logger(__name__)
 
-DEFAULT_MODEL = "ft:gpt-4.1-mini-2025-04-14:responsive:carespend-analytics:CgLfCiA5"
+DEFAULT_MODEL = "gpt-4.1-mini"
 MAX_ITERATIONS = 8
 
 class AgentResponse(BaseModel):
