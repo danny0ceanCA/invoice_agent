@@ -18,12 +18,18 @@ from app.backend.src.core.config import get_settings
 from app.backend.src.core.memory import ConversationMemory, RedisConversationMemory
 from app.backend.src.db import get_engine
 from app.backend.src.services.s3 import get_s3_client
+from .business_rule_model import build_business_rule_system_prompt, run_business_rule_model
+from .entity_resolution_model import (
+    build_entity_resolution_system_prompt,
+    run_entity_resolution_model,
+)
+from .insight_model import build_insight_system_prompt, run_insight_model
 from .ir import AnalyticsEntities, AnalyticsIR, _coerce_rows, _payload_to_ir
 from .logic_model import build_logic_system_prompt, run_logic_model
 from .nlv_model import build_nlv_system_prompt, run_nlv_model
 from .rendering_model import build_rendering_system_prompt, run_rendering_model
+from .sql_planner_model import build_sql_planner_system_prompt, run_sql_planner_model
 from .validator_model import build_validator_system_prompt, run_validator_model
-from .insight_model import build_insight_system_prompt, run_insight_model
 
 LOGGER = structlog.get_logger(__name__)
 
@@ -275,18 +281,24 @@ class Workflow:
         self,
         *,
         nlv_system_prompt: str,
+        entity_resolution_system_prompt: str,
+        sql_planner_system_prompt: str,
         logic_system_prompt: str,
         rendering_system_prompt: str,
         validator_system_prompt: str,
         insight_system_prompt: str,
+        business_rule_system_prompt: str,
         max_iterations: int = MAX_ITERATIONS,
         memory: ConversationMemory | None = None,
     ) -> None:
         self.nlv_system_prompt = nlv_system_prompt
+        self.entity_resolution_system_prompt = entity_resolution_system_prompt
+        self.sql_planner_system_prompt = sql_planner_system_prompt
         self.logic_system_prompt = logic_system_prompt
         self.rendering_system_prompt = rendering_system_prompt
         self.validator_system_prompt = validator_system_prompt
         self.insight_system_prompt = insight_system_prompt
+        self.business_rule_system_prompt = business_rule_system_prompt
         self.max_iterations = max_iterations
         self.memory = memory
 
@@ -318,21 +330,54 @@ class Workflow:
             temperature=agent.nlv_temperature,
         )
 
-        if normalized_intent.get("requires_clarification"):
-            missing = normalized_intent.get("clarification_needed") or []
+        entity_result = run_entity_resolution_model(
+            user_query=query,
+            normalized_intent=normalized_intent,
+            user_context=context.user_context,
+            client=agent.client,
+            model=agent.entity_model,
+            system_prompt=self.entity_resolution_system_prompt,
+            temperature=agent.entity_temperature,
+        )
+
+        resolved_intent = entity_result.get("normalized_intent") or normalized_intent
+        resolved_entities = entity_result.get("entities") or {}
+
+        combined_requires_clarification = bool(
+            normalized_intent.get("requires_clarification")
+            or entity_result.get("requires_clarification")
+        )
+        combined_clarification = (
+            (normalized_intent.get("clarification_needed") or [])
+            + (entity_result.get("clarification_needed") or [])
+        )
+
+        if combined_requires_clarification:
+            missing = combined_clarification
             note = (
                 "Missing info: " + ", ".join(missing)
                 if missing
                 else "Clarification required."
             )
             payload: dict[str, Any] = {"text": note, "rows": None}
-            entities = normalized_intent.get("entities")
-            if isinstance(entities, Mapping):
-                payload["entities"] = entities
+            if isinstance(resolved_entities, Mapping):
+                payload["entities"] = resolved_entities
             logic_ir = _payload_to_ir(payload, context.last_rows)
 
-            validator_result = run_validator_model(
+            br_result = run_business_rule_model(
                 ir=logic_ir,
+                entities=resolved_entities,
+                plan=None,
+                client=agent.client,
+                model=agent.business_rule_model,
+                system_prompt=self.business_rule_system_prompt,
+                temperature=agent.business_rule_temperature,
+            )
+            br_ir_dict = br_result.get("ir") if isinstance(br_result.get("ir"), dict) else None
+            effective_ir = _payload_to_ir(br_ir_dict, context.last_rows) if br_ir_dict else logic_ir
+
+            validator_result = run_validator_model(
+                ir=effective_ir,
                 client=agent.client,
                 model=agent.validator_model,
                 system_prompt=self.validator_system_prompt,
@@ -342,7 +387,8 @@ class Workflow:
 
             if not is_valid:
                 fallback_text = (
-                    "I’m having trouble safely interpreting this analytics request. Please rephrase or narrow your question."
+                    "I’m having trouble safely interpreting this analytics request. "
+                    "Please rephrase or narrow your question."
                 )
                 safe_ir = AnalyticsIR(
                     text=fallback_text,
@@ -362,7 +408,7 @@ class Workflow:
                 return _finalise_response(render_payload, context)
 
             insight_result = run_insight_model(
-                ir=logic_ir,
+                ir=effective_ir,
                 client=agent.client,
                 model=agent.insight_model,
                 system_prompt=self.insight_system_prompt,
@@ -372,7 +418,97 @@ class Workflow:
 
             render_payload = run_rendering_model(
                 user_query=context.query,
+                ir=effective_ir,
+                insights=insights,
+                client=agent.client,
+                model=agent.render_model,
+                system_prompt=self.rendering_system_prompt,
+                temperature=agent.render_temperature,
+            )
+            return _finalise_response(render_payload, context)
+
+        sql_plan_result = run_sql_planner_model(
+            user_query=query,
+            normalized_intent=resolved_intent,
+            entities=resolved_entities,
+            user_context=context.user_context,
+            client=agent.client,
+            model=agent.sql_planner_model,
+            system_prompt=self.sql_planner_system_prompt,
+            temperature=agent.sql_planner_temperature,
+        )
+
+        plan = sql_plan_result.get("plan")
+        plan_requires_clarification = bool(sql_plan_result.get("requires_clarification"))
+        plan_clarification_needed = sql_plan_result.get("clarification_needed") or []
+
+        if plan_requires_clarification:
+            missing = plan_clarification_needed
+            note = (
+                "Missing info: " + ", ".join(missing)
+                if missing
+                else "Clarification required."
+            )
+            payload = {"text": note, "rows": None}
+            if isinstance(resolved_entities, Mapping):
+                payload["entities"] = resolved_entities
+            logic_ir = _payload_to_ir(payload, context.last_rows)
+
+            br_result = run_business_rule_model(
                 ir=logic_ir,
+                entities=resolved_entities,
+                plan=plan,
+                client=agent.client,
+                model=agent.business_rule_model,
+                system_prompt=self.business_rule_system_prompt,
+                temperature=agent.business_rule_temperature,
+            )
+            br_ir_dict = br_result.get("ir") if isinstance(br_result.get("ir"), dict) else None
+            effective_ir = _payload_to_ir(br_ir_dict, context.last_rows) if br_ir_dict else logic_ir
+
+            validator_result = run_validator_model(
+                ir=effective_ir,
+                client=agent.client,
+                model=agent.validator_model,
+                system_prompt=self.validator_system_prompt,
+                temperature=agent.validator_temperature,
+            )
+            is_valid = bool(validator_result.get("valid", True))
+
+            if not is_valid:
+                fallback_text = (
+                    "I’m having trouble safely interpreting this analytics request. "
+                    "Please rephrase or narrow your question."
+                )
+                safe_ir = AnalyticsIR(
+                    text=fallback_text,
+                    rows=None,
+                    html=None,
+                    entities=None,
+                )
+                render_payload = run_rendering_model(
+                    user_query=context.query,
+                    ir=safe_ir,
+                    insights=[],
+                    client=agent.client,
+                    model=agent.render_model,
+                    system_prompt=self.rendering_system_prompt,
+                    temperature=agent.render_temperature,
+                )
+                return _finalise_response(render_payload, context)
+
+            insight_result = run_insight_model(
+                ir=effective_ir,
+                client=agent.client,
+                model=agent.insight_model,
+                system_prompt=self.insight_system_prompt,
+                temperature=agent.insight_temperature,
+            )
+            insights = insight_result.get("insights") or []
+
+            render_payload = run_rendering_model(
+                user_query=context.query,
+                ir=effective_ir,
                 insights=insights,
                 client=agent.client,
                 model=agent.render_model,
@@ -394,7 +530,9 @@ class Workflow:
                 "content": json.dumps(
                     {
                         "query": query,
-                        "normalized_intent": normalized_intent,
+                        "normalized_intent": resolved_intent,
+                        "entities": resolved_entities,
+                        "sql_plan": plan,
                         "context": context.user_context,
                     }
                 ),
@@ -764,8 +902,20 @@ class Workflow:
 
             logic_ir = _payload_to_ir(payload, context.last_rows)
 
-            validator_result = run_validator_model(
+            br_result = run_business_rule_model(
                 ir=logic_ir,
+                entities=resolved_entities,
+                plan=plan,
+                client=agent.client,
+                model=agent.business_rule_model,
+                system_prompt=self.business_rule_system_prompt,
+                temperature=agent.business_rule_temperature,
+            )
+            br_ir_dict = br_result.get("ir") if isinstance(br_result.get("ir"), dict) else None
+            effective_ir = _payload_to_ir(br_ir_dict, context.last_rows) if br_ir_dict else logic_ir
+
+            validator_result = run_validator_model(
+                ir=effective_ir,
                 client=agent.client,
                 model=agent.validator_model,
                 system_prompt=self.validator_system_prompt,
@@ -775,7 +925,8 @@ class Workflow:
 
             if not is_valid:
                 fallback_text = (
-                    "I’m having trouble safely interpreting this analytics request. Please rephrase or narrow your question."
+                    "I’m having trouble safely applying district rules to this analysis. "
+                    "Please rephrase or narrow your question."
                 )
                 safe_ir = AnalyticsIR(
                     text=fallback_text,
@@ -795,7 +946,7 @@ class Workflow:
                 return _finalise_response(render_payload, context)
 
             insight_result = run_insight_model(
-                ir=logic_ir,
+                ir=effective_ir,
                 client=agent.client,
                 model=agent.insight_model,
                 system_prompt=self.insight_system_prompt,
@@ -805,7 +956,7 @@ class Workflow:
 
             render_payload = run_rendering_model(
                 user_query=context.query,
-                ir=logic_ir,
+                ir=effective_ir,
                 insights=insights,
                 client=agent.client,
                 model=agent.render_model,
@@ -825,29 +976,41 @@ class Agent:
         *,
         client: OpenAI,
         nlv_model: str,
+        entity_model: str,
+        sql_planner_model: str,
         logic_model: str,
         render_model: str,
         validator_model: str,
         insight_model: str,
+        business_rule_model: str,
         workflow: Workflow,
         tools: Sequence[Tool],
         nlv_temperature: float = 0.1,
+        entity_temperature: float = 0.1,
+        sql_planner_temperature: float = 0.1,
         logic_temperature: float = 0.1,
         render_temperature: float = 0.1,
         validator_temperature: float = 0.1,
         insight_temperature: float = 0.1,
+        business_rule_temperature: float = 0.1,
     ) -> None:
         self.client = client
         self.nlv_model = nlv_model
+        self.entity_model = entity_model
+        self.sql_planner_model = sql_planner_model
         self.logic_model = logic_model
         self.render_model = render_model
         self.validator_model = validator_model
         self.insight_model = insight_model
+        self.business_rule_model = business_rule_model
         self.nlv_temperature = nlv_temperature
+        self.entity_temperature = entity_temperature
+        self.sql_planner_temperature = sql_planner_temperature
         self.logic_temperature = logic_temperature
         self.render_temperature = render_temperature
         self.validator_temperature = validator_temperature
         self.insight_temperature = insight_temperature
+        self.business_rule_temperature = business_rule_temperature
         self.workflow = workflow
         self.tools = list(tools)
         self._tool_lookup = {tool.name: tool for tool in self.tools}
@@ -1628,12 +1791,24 @@ def _build_agent() -> Agent:
     client = OpenAI(api_key=settings.openai_api_key)
     engine = get_engine()
     memory = _build_memory_store(settings)
+    nlv_system_prompt = build_nlv_system_prompt()
+    entity_resolution_system_prompt = build_entity_resolution_system_prompt()
+    sql_planner_system_prompt = build_sql_planner_system_prompt()
+    logic_system_prompt = build_logic_system_prompt()
+    rendering_system_prompt = build_rendering_system_prompt()
+    validator_system_prompt = build_validator_system_prompt()
+    insight_system_prompt = build_insight_system_prompt()
+    business_rule_system_prompt = build_business_rule_system_prompt()
+
     workflow = Workflow(
-        nlv_system_prompt=build_nlv_system_prompt(),
-        logic_system_prompt=build_logic_system_prompt(),
-        rendering_system_prompt=build_rendering_system_prompt(),
-        validator_system_prompt=build_validator_system_prompt(),
-        insight_system_prompt=build_insight_system_prompt(),
+        nlv_system_prompt=nlv_system_prompt,
+        entity_resolution_system_prompt=entity_resolution_system_prompt,
+        sql_planner_system_prompt=sql_planner_system_prompt,
+        logic_system_prompt=logic_system_prompt,
+        rendering_system_prompt=rendering_system_prompt,
+        validator_system_prompt=validator_system_prompt,
+        insight_system_prompt=insight_system_prompt,
+        business_rule_system_prompt=business_rule_system_prompt,
         max_iterations=MAX_ITERATIONS,
         memory=memory,
     )
@@ -1641,10 +1816,13 @@ def _build_agent() -> Agent:
     return Agent(
         client=client,
         nlv_model=DEFAULT_MODEL,
+        entity_model=DEFAULT_MODEL,
+        sql_planner_model=DEFAULT_MODEL,
         logic_model=DEFAULT_MODEL,
         render_model=DEFAULT_MODEL,
         validator_model=DEFAULT_MODEL,
         insight_model=DEFAULT_MODEL,
+        business_rule_model=DEFAULT_MODEL,
         workflow=workflow,
         tools=tools,
     )
