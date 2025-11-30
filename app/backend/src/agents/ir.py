@@ -24,6 +24,7 @@ class AnalyticsIR(BaseModel):
     """Logic-stage output capturing structured analytics intent and results."""
 
     text: str = ""
+    select: list[Any] | None = None
     rows: list[dict[str, Any]] | None = None
     html: str | None = None
     entities: AnalyticsEntities | None = None
@@ -33,6 +34,8 @@ class AnalyticsIR(BaseModel):
         """Return a mapping compatible with the existing rendering pipeline."""
 
         payload: dict[str, Any] = {"text": self.text, "html": self.html}
+        if self.select is not None:
+            payload["select"] = self.select
         if self.rows_field_present:
             payload["rows"] = self.rows
         if self.entities is not None:
@@ -64,6 +67,7 @@ def _payload_to_ir(payload: Any, last_rows: list[dict[str, Any]] | None = None) 
         rows_value = _coerce_rows(payload.get("rows"))
         return AnalyticsIR(
             text=text_value,
+            select=payload.get("select") if isinstance(payload.get("select"), list) else None,
             rows=rows_value,
             html=html_value,
             entities=entities_obj,

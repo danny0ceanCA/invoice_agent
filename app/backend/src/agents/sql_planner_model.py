@@ -278,6 +278,28 @@ def run_sql_planner_model(
     vendor_filter_allowed = normalized_vendor_scope and bool(vendor_entities)
 
     if isinstance(plan, dict):
+        time_range = (
+            normalized_intent.get("time_range")
+            if isinstance(normalized_intent, dict)
+            else None
+        )
+
+        if isinstance(time_range, dict):
+            start_date = time_range.get("start_date")
+            end_date = time_range.get("end_date")
+            has_dates = isinstance(start_date, str) and isinstance(end_date, str)
+            plan_date_range = plan.get("date_range")
+            existing_date_range = plan_date_range if isinstance(plan_date_range, dict) else {}
+
+            if has_dates and not (
+                isinstance(existing_date_range.get("start_date"), str)
+                and isinstance(existing_date_range.get("end_date"), str)
+            ):
+                plan["date_range"] = {
+                    "start_date": start_date,
+                    "end_date": end_date,
+                }
+
         primary_entity_type = plan.get("primary_entity_type")
 
         if vendor_filter_allowed:

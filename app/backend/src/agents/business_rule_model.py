@@ -109,6 +109,43 @@ def run_business_rule_model(
                 entities_payload["vendors"] = []
                 ir_payload["entities"] = entities_payload
 
+    def _collect_select_aliases(select_value: Any) -> set[str]:
+        aliases: set[str] = set()
+        if not isinstance(select_value, list):
+            return aliases
+
+        for entry in select_value:
+            if isinstance(entry, str):
+                lowered = entry.lower()
+                if " as " in lowered:
+                    alias = entry.rsplit(" as ", 1)[-1]
+                elif " AS " in entry:
+                    alias = entry.rsplit(" AS ", 1)[-1]
+                else:
+                    alias = entry
+                alias = alias.strip()
+                if alias:
+                    aliases.add(alias)
+            elif isinstance(entry, dict):
+                alias_value = entry.get("alias") or entry.get("field") or entry.get("column")
+                if isinstance(alias_value, str) and alias_value.strip():
+                    aliases.add(alias_value.strip())
+        return aliases
+
+    if isinstance(ir_payload, dict):
+        approved_fields = _collect_select_aliases(ir_payload.get("select"))
+        if approved_fields:
+            rows_value = ir_payload.get("rows")
+            if isinstance(rows_value, list):
+                sanitized_rows: list[dict[str, Any]] = []
+                for row in rows_value:
+                    if isinstance(row, dict):
+                        clean_row = {
+                            key: value for key, value in row.items() if key in approved_fields
+                        }
+                        sanitized_rows.append(clean_row)
+                ir_payload["rows"] = sanitized_rows
+
     result = {
         "ok": bool(parsed.get("ok", True)),
         "issues": parsed.get("issues", []),
