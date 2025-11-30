@@ -34,9 +34,10 @@ Return one JSON object capturing the normalized intent. Suggested shape:
   "time_period": {
     "month": "August",
     "year": "2025",
-    "start_date": "2025-07-01",
-    "end_date": "2025-07-31",
-    "relative": "last_month" | "this_year" | null
+    "school_year": 2025 | null,
+    "start_date": "2024-07-01",
+    "end_date": "2025-06-30",
+    "relative": "last_month" | "this_year" | "this_school_year" | null
   },
   "scope": "district" | "single_student" | "provider" | null,
   "requires_clarification": false,
@@ -52,8 +53,13 @@ NATURAL LANGUAGE NORMALIZATION
   • Provider/clinician: provider, clinician, nurse, LVN, health aide, aide, therapist, care staff.
   • Support staff synonyms map to provider/clinician.
 - Normalize time phrases: "last month", "this month", "YTD", "October services", "when uploaded" → fill month/year or start/end ranges.
+- Normalize school-year phrases and always emit school_year, start_date, and end_date when any school-year language appears. The SCUSD school year N runs from July 1 (N-1) through June 30 (N). Examples: "2025 school year" → school_year=2025, start_date=2024-07-01, end_date=2025-06-30; "the 2024–2025 school year" → school_year=2025 with the same start/end; "SY2025" → school_year=2025.
+- "this school year" or "current school year" or "this SY" or "services this SY" must compute dynamically: if today's date is between July 1 and Dec 31, set school_year to current_year + 1; if today's date is between Jan 1 and June 30, set school_year to current_year. Fill start_date/end_date accordingly. Mark relative="this_school_year".
+- Semester mapping: "fall semester" → Aug 1 to Dec 31 of the identified school year; "spring semester" → Jan 1 to Jun 30 of the identified school year.
 - Normalize scope cues: "district-wide" → district; "all students" → district; named students → single_student.
 - Extract entities: student_name, provider_name, vendor_name, invoice_number, service months, invoice dates.
+- If the user mentions "school year" without specifying which one (and it is not a "this school year" style phrase), set requires_clarification=true and add "school_year" to clarification_needed.
+- STRICT OUTPUT: whenever a school-year phrase is present, always populate time_period.school_year, start_date, end_date (ISO yyyy-mm-dd).
 
 AMBIGUITY HANDLING
 - If any required entity is missing or ambiguous, set requires_clarification=true and list the missing keys in clarification_needed.
