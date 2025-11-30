@@ -7,11 +7,12 @@ without changing the existing user-facing output behavior.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from openai import OpenAI
 
-from .ir import AnalyticsIR
+from .ir import AnalyticsEntities, AnalyticsIR
 
 
 # Rationale: The rendering stage now calls a real OpenAI model while keeping the
@@ -77,6 +78,40 @@ def run_rendering_model(
 
     insights = insights or []
 
+    def _looks_like_list_intent(query: str) -> bool:
+        lowered = query.lower()
+        list_phrases = [
+            r"\blist (students|vendors|clinicians)\b",
+            r"\bshow (who|list)\b",
+            r"\bgive me the list\b",
+        ]
+        return any(re.search(pattern, lowered) for pattern in list_phrases)
+
+    def _has_ambiguous_entities(entities: AnalyticsEntities | None) -> bool:
+        if entities is None:
+            return False
+        return any(
+            len(bucket) > 1
+            for bucket in [entities.students, entities.providers, entities.vendors]
+        )
+
+    def _has_single_target(entities: AnalyticsEntities | None) -> bool:
+        if entities is None:
+            return False
+        return any(
+            len(bucket) == 1
+            for bucket in [entities.students, entities.providers, entities.vendors]
+        )
+
+    def _should_skip_entity_list_fallback() -> bool:
+        list_like = _looks_like_list_intent(user_query)
+        entities = ir.entities
+        ambiguous = _has_ambiguous_entities(entities)
+        has_rows = bool(ir.rows)
+        single_target = _has_single_target(entities)
+        has_analysis_hint = has_rows or single_target or bool(ir.select)
+        return (not list_like) and has_analysis_hint and (not ambiguous)
+
     messages = [
         {"role": "system", "content": system_prompt},
         {
@@ -93,6 +128,18 @@ def run_rendering_model(
             ),
         },
     ]
+
+    if _should_skip_entity_list_fallback():
+        messages[1]["content"] += (
+            "\n\nRendering guidance: This is a targeted analytics request; "
+            "do not fall back to listing all entities. If data is missing, politely "
+            "note the gap for the specific target instead of showing a full roster."
+        )
+    elif _looks_like_list_intent(user_query) or _has_ambiguous_entities(ir.entities):
+        messages[1]["content"] += (
+            "\n\nRendering guidance: The user asked for a list or entity resolution "
+            "is ambiguous; listing entities is acceptable here."
+        )
 
     try:
         response = client.chat.completions.create(
