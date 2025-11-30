@@ -64,12 +64,6 @@ If any required element is missing → requires_clarification=true.
 ===============================================================
 SCHOOL YEAR / DATE NORMALIZATION
 
-Define SCUSD school year as:
-
-school_year:
-start_date = July 1 of the school year
-end_date = June 30 of the following year
-
 Normalize phrases:
 "this school year" → time_window="school_year"
 "school year" → time_window="school_year"
@@ -77,6 +71,12 @@ Normalize phrases:
 "YTD" → time_window="ytd"
 "last three months" → time_window="last_3_months"
 "name a month (July…December)" → month_names=[...]
+
+Date-range guidance:
+- For time_window = "school_year" or "this_school_year", leave date_range.start_date and date_range.end_date as null unless the user provided explicit calendar dates. Treat time_window as semantic metadata only.
+- Only populate date_range when the user supplied explicit dates (e.g., "between August 1 and October 31") or explicit calendar years (e.g., "in 2025").
+- Do NOT invent default calendar years; never assume a July 1..June 30 window without user-provided dates.
+- The logic model will convert time_window and (optional) date_range into actual SQL predicates. When date_range is null, the logic model may omit invoice_date filters entirely.
 
 ===============================================================
 METRIC NORMALIZATION

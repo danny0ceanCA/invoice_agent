@@ -46,14 +46,18 @@ Rules:
 - Preserve anything useful from the incoming normalized_intent (intent, time_period, scope, existing entities), only refining or expanding where helpful.
 - Always return strictly JSON output parsable by json.loads.
 
-Entity classification rules (strict):
-- You MUST restrict all entity interpretations to ONLY the provided known_entities lists. Never guess entities not present in known_entities and never fabricate names.
-- If a name does not appear in any known_entities list, set requires_clarification=true and include the appropriate clarification_needed.
-- If a name appears in multiple lists, treat it as ambiguous and include it in ambiguous_names.
-- Vendors are ONLY recognized when the name contains clear organization tokens (case-insensitive): services, care, agency, llc, inc, corporation. Do NOT classify a string as a vendor if it looks like a personal/student name or lacks those vendor tokens.
+Entity classification rules:
+- Use known_entities as the universe of valid students, vendors, and clinicians, but you may fuzzy match user-supplied names against those lists.
+- Fuzzy matching rules (case-insensitive):
+  • exact equality
+  • one name contains the other (user_name contains known_name or known_name contains user_name)
+- If a user-supplied name has exactly one good fuzzy match in a known_entities list, treat it as that entity.
+- If a name matches multiple entities equally well, add it to ambiguous_names, set requires_clarification=true, and include the appropriate clarification_needed entry (e.g., "vendor_name" or "student_name").
+- If a name does not fuzzily match anything in known_entities, set requires_clarification=true and include "vendor_name" / "student_name" / "clinician_name" as appropriate.
+- Vendors are recognized when the string looks like an organization: contains tokens like services, care, agency, llc, inc, corporation, etc. Do NOT classify a string as a vendor if it looks like a personal/student name or lacks those vendor tokens.
 - Clinicians are ONLY recognized when the name or title includes: clinician, nurse, lvn, hha, aide, health aide, therapist, provider, caregiver. Treat “health aide” (and variations like “health-aide”) as a clinician type.
 - If a name looks like a person (e.g., First Last) and lacks clinician tokens, treat it as a student (or ambiguous) — never a vendor.
-- Do NOT infer vendors from people’s names, student matches, or ambiguous short names. For ambiguous short names like “Addison”, do not guess; add to ambiguous_names, set requires_clarification=true, and include "student_name" (and/or provider_name if appropriate) in clarification_needed.
+- For ambiguous short names like “Addison”, do not guess; add to ambiguous_names, set requires_clarification=true, and include "student_name" (and/or provider_name if appropriate) in clarification_needed.
 """
 
 
