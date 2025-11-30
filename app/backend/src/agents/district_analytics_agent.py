@@ -20,6 +20,7 @@ from app.backend.src.db import get_engine
 from app.backend.src.services.s3 import get_s3_client
 from .ir import AnalyticsEntities, AnalyticsIR, _coerce_rows, _payload_to_ir
 from .logic_model import build_logic_system_prompt, run_logic_model
+from .nlv_model import build_nlv_system_prompt, run_nlv_model
 from .rendering_model import build_rendering_system_prompt, run_rendering_model
 
 LOGGER = structlog.get_logger(__name__)
@@ -270,11 +271,13 @@ class Workflow:
     def __init__(
         self,
         *,
+        nlv_system_prompt: str,
         logic_system_prompt: str,
         rendering_system_prompt: str,
         max_iterations: int = MAX_ITERATIONS,
         memory: ConversationMemory | None = None,
     ) -> None:
+        self.nlv_system_prompt = nlv_system_prompt
         self.logic_system_prompt = logic_system_prompt
         self.rendering_system_prompt = rendering_system_prompt
         self.max_iterations = max_iterations
@@ -299,6 +302,37 @@ class Workflow:
         if active_filters:
             query = _maybe_apply_active_student_filter(query, active_filters)
 
+        normalized_intent = run_nlv_model(
+            user_query=query,
+            user_context=context.user_context,
+            client=agent.client,
+            model=agent.nlv_model,
+            system_prompt=self.nlv_system_prompt,
+            temperature=agent.nlv_temperature,
+        )
+
+        if normalized_intent.get("requires_clarification"):
+            missing = normalized_intent.get("clarification_needed") or []
+            note = (
+                "Missing info: " + ", ".join(missing)
+                if missing
+                else "Clarification required."
+            )
+            payload: dict[str, Any] = {"text": note, "rows": None}
+            entities = normalized_intent.get("entities")
+            if isinstance(entities, Mapping):
+                payload["entities"] = entities
+            logic_ir = _payload_to_ir(payload, context.last_rows)
+            render_payload = run_rendering_model(
+                user_query=context.query,
+                ir=logic_ir,
+                client=agent.client,
+                model=agent.render_model,
+                system_prompt=self.rendering_system_prompt,
+                temperature=agent.render_temperature,
+            )
+            return _finalise_response(render_payload, context)
+
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": self.logic_system_prompt}
         ]
@@ -312,6 +346,7 @@ class Workflow:
                 "content": json.dumps(
                     {
                         "query": query,
+                        "normalized_intent": normalized_intent,
                         "context": context.user_context,
                     }
                 ),
@@ -700,16 +735,20 @@ class Agent:
         self,
         *,
         client: OpenAI,
+        nlv_model: str,
         logic_model: str,
         render_model: str,
         workflow: Workflow,
         tools: Sequence[Tool],
+        nlv_temperature: float = 0.1,
         logic_temperature: float = 0.1,
         render_temperature: float = 0.1,
     ) -> None:
         self.client = client
+        self.nlv_model = nlv_model
         self.logic_model = logic_model
         self.render_model = render_model
+        self.nlv_temperature = nlv_temperature
         self.logic_temperature = logic_temperature
         self.render_temperature = render_temperature
         self.workflow = workflow
@@ -1493,6 +1532,7 @@ def _build_agent() -> Agent:
     engine = get_engine()
     memory = _build_memory_store(settings)
     workflow = Workflow(
+        nlv_system_prompt=build_nlv_system_prompt(),
         logic_system_prompt=build_logic_system_prompt(),
         rendering_system_prompt=build_rendering_system_prompt(),
         max_iterations=MAX_ITERATIONS,
@@ -1501,6 +1541,7 @@ def _build_agent() -> Agent:
     tools = [_build_run_sql_tool(engine), _build_list_s3_tool()]
     return Agent(
         client=client,
+        nlv_model=DEFAULT_MODEL,
         logic_model=DEFAULT_MODEL,
         render_model=DEFAULT_MODEL,
         workflow=workflow,
