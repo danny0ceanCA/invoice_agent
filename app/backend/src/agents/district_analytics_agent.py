@@ -155,17 +155,28 @@ def _extract_active_filters_from_history(history: list[dict[str, str]]) -> dict[
     if not history:
         return active
 
-    # If the last user message was a list-intent query, do not surface an active filter.
+    # If the last user message was a list-intent query, vendor-level, or
+    # district-level analytic, do not surface an active filter.
+    last_user_content: str | None = None
     for message in reversed(history):
         if not isinstance(message, dict):
             continue
         if message.get("role") != "user":
             continue
-        content = (message.get("content") or "").strip()
-        if content and _is_list_intent(content):
-            return {}
-        # Only consider the most recent user message for list intent
+        last_user_content = (message.get("content") or "").strip()
         break
+
+    if last_user_content:
+        if _is_list_intent(last_user_content):
+            return {}
+
+        lowered_last = last_user_content.lower()
+        district_scope_terms = ["district", "district-wide", "all students", "entire district"]
+        provider_terms = ["vendor", "vendors", "clinician", "clinicians", "provider", "providers"]
+        if any(term in lowered_last for term in district_scope_terms) or any(
+            term in lowered_last for term in provider_terms
+        ):
+            return {}
 
     # Walk history from newest to oldest, looking for assistant messages
     # with an ACTIVE_STUDENT_FILTER tag.
@@ -227,34 +238,30 @@ def _maybe_apply_active_student_filter(raw_query: str, active_filters: dict[str,
     if not active_student:
         return raw_query
 
-    q_lower = raw_query.lower()
-
-    # Do not apply sticky filters to list-intent queries.
     if _is_list_intent(raw_query):
         return raw_query
 
-    # If the user explicitly asks for "all students" / "entire district" / similar,
-    # do NOT apply the sticky filter.
+    q_lower = raw_query.lower()
+
     district_scope_terms = ["all students", "entire district", "district", "district-wide"]
-    if any(term in q_lower for term in district_scope_terms):
-        return raw_query
-
-    # If the query is focused on vendors/clinicians/providers, do not force student scope.
     provider_terms = ["vendor", "vendors", "clinician", "clinicians", "provider", "providers"]
-    if any(term in q_lower for term in provider_terms):
-        return raw_query
 
-    # If the query already explicitly mentions a student (including a different one),
-    # do not override it.
+    # Detect explicit student references; never override them (and treat them as clearing
+    # the sticky filter for this turn).
     explicit_name_match = re.search(
-        r"\bfor\s+([A-Za-z]+(?:\s+[A-Za-z]+)*)", q_lower, flags=re.IGNORECASE
+        r"\bfor\s+([A-Za-z]+(?:\s+[A-Za-z]+)+)", raw_query, flags=re.IGNORECASE
     )
     if explicit_name_match:
         return raw_query
     if "for student" in q_lower or "student " in q_lower:
         return raw_query
 
-    # Only apply the sticky filter for analytics-style follow-ups that omit a student.
+    # District/vendor scoped analytics should not inherit a student filter.
+    if any(term in q_lower for term in district_scope_terms):
+        return raw_query
+    if any(term in q_lower for term in provider_terms):
+        return raw_query
+
     analytics_keywords = [
         "invoice",
         "spend",
@@ -288,6 +295,22 @@ def _maybe_apply_active_student_filter(raw_query: str, active_filters: dict[str,
 
     # If the query does not look like an analytics follow-up, avoid rewriting it.
     if not has_analytics_signal:
+        return raw_query
+
+    follow_up_markers = [
+        "now",
+        "also",
+        "again",
+        "too",
+        "as well",
+        "another",
+        "next",
+        "what about",
+        "how about",
+        "then",
+    ]
+    has_follow_up_marker = any(marker in q_lower for marker in follow_up_markers)
+    if not has_follow_up_marker:
         return raw_query
 
     # Avoid narrowing queries that reference multiple students.
