@@ -17,7 +17,12 @@ Input: a JSON object shaped like:
 {
   "query": "...raw user query...",
   "normalized_intent": { ... from NLV model ... },
-  "context": { ... user_context ... }
+  "context": { ... user_context ... },
+  "known_entities": {
+    "students": [list of district students],
+    "vendors": [list of district vendors],
+    "clinicians": [list of district clinicians]
+  }
 }
 
 Output: machine-readable JSON ONLY. No prose. No SQL. No HTML.
@@ -42,6 +47,9 @@ Rules:
 - Always return strictly JSON output parsable by json.loads.
 
 Entity classification rules (strict):
+- You MUST restrict all entity interpretations to ONLY the provided known_entities lists. Never guess entities not present in known_entities and never fabricate names.
+- If a name does not appear in any known_entities list, set requires_clarification=true and include the appropriate clarification_needed.
+- If a name appears in multiple lists, treat it as ambiguous and include it in ambiguous_names.
 - Vendors are ONLY recognized when the name contains clear organization tokens (case-insensitive): services, care, agency, llc, inc, corporation. Do NOT classify a string as a vendor if it looks like a personal/student name or lacks those vendor tokens.
 - Clinicians are ONLY recognized when the name or title includes: clinician, nurse, lvn, hha, aide, health aide, therapist, provider, caregiver. Treat “health aide” (and variations like “health-aide”) as a clinician type.
 - If a name looks like a person (e.g., First Last) and lacks clinician tokens, treat it as a student (or ambiguous) — never a vendor.
@@ -64,6 +72,7 @@ def run_entity_resolution_model(
     user_query: str,
     normalized_intent: dict[str, Any],
     user_context: dict[str, Any],
+    known_entities: dict[str, list[str]] | None,
     client: OpenAI,
     model: str,
     system_prompt: str,
@@ -80,6 +89,7 @@ def run_entity_resolution_model(
                     "query": user_query,
                     "normalized_intent": normalized_intent or {},
                     "context": user_context or {},
+                    "known_entities": known_entities or {},
                 }
             ),
         },

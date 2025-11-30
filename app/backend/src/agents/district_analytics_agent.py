@@ -274,6 +274,74 @@ def _maybe_apply_active_student_filter(raw_query: str, active_filters: dict[str,
     return rewritten_query
 
 
+def _load_district_entities(engine: Engine, district_key: str | None) -> dict[str, list[str]]:
+    """Load district-scoped entities for students, vendors, and clinicians."""
+
+    empty_entities: dict[str, list[str]] = {"students": [], "vendors": [], "clinicians": []}
+    if not district_key:
+        return empty_entities
+
+    try:
+        with engine.connect() as conn:
+            students = [
+                row.student_name
+                for row in conn.execute(
+                    sql_text(
+                        """
+                        SELECT DISTINCT student_name
+                        FROM invoices
+                        WHERE district_key = :district_key
+                          AND student_name IS NOT NULL
+                        ORDER BY student_name;
+                        """
+                    ),
+                    {"district_key": district_key},
+                )
+            ]
+
+            vendors = [
+                row.name
+                for row in conn.execute(
+                    sql_text(
+                        """
+                        SELECT DISTINCT name
+                        FROM vendors
+                        WHERE district_key = :district_key
+                          AND name IS NOT NULL
+                        ORDER BY name;
+                        """
+                    ),
+                    {"district_key": district_key},
+                )
+            ]
+
+            clinicians = [
+                row.clinician
+                for row in conn.execute(
+                    sql_text(
+                        """
+                        SELECT DISTINCT ili.clinician
+                        FROM invoice_line_items ili
+                        JOIN invoices i ON i.id = ili.invoice_id
+                        WHERE i.district_key = :district_key
+                          AND ili.clinician IS NOT NULL
+                        ORDER BY ili.clinician;
+                        """
+                    ),
+                    {"district_key": district_key},
+                )
+            ]
+    except Exception as exc:  # pragma: no cover - defensive
+        LOGGER.warning("district_entity_load_failed", error=str(exc))
+        return empty_entities
+
+    return {
+        "students": list(students),
+        "vendors": list(vendors),
+        "clinicians": list(clinicians),
+    }
+
+
 class Workflow:
     """Coordinates model reasoning and tool usage."""
 
@@ -290,6 +358,7 @@ class Workflow:
         business_rule_system_prompt: str,
         max_iterations: int = MAX_ITERATIONS,
         memory: ConversationMemory | None = None,
+        engine: Engine | None = None,
     ) -> None:
         self.nlv_system_prompt = nlv_system_prompt
         self.entity_resolution_system_prompt = entity_resolution_system_prompt
@@ -301,6 +370,7 @@ class Workflow:
         self.business_rule_system_prompt = business_rule_system_prompt
         self.max_iterations = max_iterations
         self.memory = memory
+        self.engine = engine
 
     def execute(self, agent: "Agent", query: str, user_context: dict[str, Any]) -> AgentResponse:
         session_id = _build_session_id(user_context)
@@ -330,10 +400,13 @@ class Workflow:
             temperature=agent.nlv_temperature,
         )
 
+        known_entities = _load_district_entities(self.engine, context.district_key)
+
         entity_result = run_entity_resolution_model(
             user_query=query,
             normalized_intent=normalized_intent,
             user_context=context.user_context,
+            known_entities=known_entities,
             client=agent.client,
             model=agent.entity_model,
             system_prompt=self.entity_resolution_system_prompt,
@@ -1811,6 +1884,7 @@ def _build_agent() -> Agent:
         business_rule_system_prompt=business_rule_system_prompt,
         max_iterations=MAX_ITERATIONS,
         memory=memory,
+        engine=engine,
     )
     tools = [_build_run_sql_tool(engine), _build_list_s3_tool()]
     return Agent(
