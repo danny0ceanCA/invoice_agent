@@ -22,8 +22,8 @@ from .ir import AnalyticsEntities, AnalyticsIR, _coerce_rows, _payload_to_ir
 from .logic_model import build_logic_system_prompt, run_logic_model
 from .nlv_model import build_nlv_system_prompt, run_nlv_model
 from .rendering_model import build_rendering_system_prompt, run_rendering_model
-from .validator_model import run_validator_model
-from .insight_model import run_insight_model
+from .validator_model import build_validator_system_prompt, run_validator_model
+from .insight_model import build_insight_system_prompt, run_insight_model
 
 LOGGER = structlog.get_logger(__name__)
 
@@ -133,38 +133,6 @@ class Tool:
     def invoke(self, context: AgentContext, arguments: Mapping[str, Any]) -> Any:
         return self.handler(context, arguments)
 
-
-class _EnrichedIR:
-    """Attach validator metadata and optional insights without mutating AnalyticsIR."""
-
-    def __init__(
-        self,
-        base_ir: Any,
-        *,
-        insights: list[str] | None = None,
-        metadata: Mapping[str, Any] | None = None,
-    ) -> None:
-        self._base_ir = base_ir
-        self._insights = list(insights or [])
-        self._metadata = dict(metadata or {})
-        self.rows = getattr(base_ir, "rows", None)
-
-    def model_dump(self) -> dict[str, Any]:
-        payload = {}
-        if hasattr(self._base_ir, "model_dump"):
-            payload.update(self._base_ir.model_dump())
-        else:  # pragma: no cover - defensive
-            payload.update(getattr(self._base_ir, "__dict__", {}))
-
-        payload.update(self._metadata)
-
-        if self._insights:
-            payload["insights"] = self._insights
-
-        return payload
-
-    def __getattr__(self, name: str) -> Any:  # pragma: no cover - passthrough
-        return getattr(self._base_ir, name)
 
 
 def _extract_active_filters_from_history(history: list[dict[str, str]]) -> dict[str, str]:
@@ -309,12 +277,16 @@ class Workflow:
         nlv_system_prompt: str,
         logic_system_prompt: str,
         rendering_system_prompt: str,
+        validator_system_prompt: str,
+        insight_system_prompt: str,
         max_iterations: int = MAX_ITERATIONS,
         memory: ConversationMemory | None = None,
     ) -> None:
         self.nlv_system_prompt = nlv_system_prompt
         self.logic_system_prompt = logic_system_prompt
         self.rendering_system_prompt = rendering_system_prompt
+        self.validator_system_prompt = validator_system_prompt
+        self.insight_system_prompt = insight_system_prompt
         self.max_iterations = max_iterations
         self.memory = memory
 
@@ -359,26 +331,49 @@ class Workflow:
                 payload["entities"] = entities
             logic_ir = _payload_to_ir(payload, context.last_rows)
 
-            # Validate IR before user-facing steps to avoid unsafe rendering.
-            validation = run_validator_model(logic_ir)
-            if not validation.get("valid", False):
-                fallback = {
-                    "text": "I couldn't confidently validate that request. Please rephrase or provide more details.",
-                    "rows": None,
-                    "html": None,
-                }
-                return _finalise_response(fallback, context)
-
-            insights_result = run_insight_model(validation["ir"])
-            enriched_ir = _EnrichedIR(
-                validation["ir"],
-                insights=insights_result.get("insights") or [],
-                metadata=validation.get("metadata") or {},
+            validator_result = run_validator_model(
+                ir=logic_ir,
+                client=agent.client,
+                model=agent.validator_model,
+                system_prompt=self.validator_system_prompt,
+                temperature=agent.validator_temperature,
             )
+            is_valid = bool(validator_result.get("valid", True))
+
+            if not is_valid:
+                fallback_text = (
+                    "I’m having trouble safely interpreting this analytics request. Please rephrase or narrow your question."
+                )
+                safe_ir = AnalyticsIR(
+                    text=fallback_text,
+                    rows=None,
+                    html=None,
+                    entities=None,
+                )
+                render_payload = run_rendering_model(
+                    user_query=context.query,
+                    ir=safe_ir,
+                    insights=[],
+                    client=agent.client,
+                    model=agent.render_model,
+                    system_prompt=self.rendering_system_prompt,
+                    temperature=agent.render_temperature,
+                )
+                return _finalise_response(render_payload, context)
+
+            insight_result = run_insight_model(
+                ir=logic_ir,
+                client=agent.client,
+                model=agent.insight_model,
+                system_prompt=self.insight_system_prompt,
+                temperature=agent.insight_temperature,
+            )
+            insights = insight_result.get("insights") or []
 
             render_payload = run_rendering_model(
                 user_query=context.query,
-                ir=enriched_ir,
+                ir=logic_ir,
+                insights=insights,
                 client=agent.client,
                 model=agent.render_model,
                 system_prompt=self.rendering_system_prompt,
@@ -769,26 +764,49 @@ class Workflow:
 
             logic_ir = _payload_to_ir(payload, context.last_rows)
 
-            # Safety gate: validate IR before generating insights or rendering.
-            validation = run_validator_model(logic_ir)
-            if not validation.get("valid", False):
-                fallback = {
-                    "text": "I couldn't validate the analysis safely. Please rephrase your request.",
-                    "rows": None,
-                    "html": None,
-                }
-                return _finalise_response(fallback, context)
-
-            insights_result = run_insight_model(validation["ir"])
-            enriched_ir = _EnrichedIR(
-                validation["ir"],
-                insights=insights_result.get("insights") or [],
-                metadata=validation.get("metadata") or {},
+            validator_result = run_validator_model(
+                ir=logic_ir,
+                client=agent.client,
+                model=agent.validator_model,
+                system_prompt=self.validator_system_prompt,
+                temperature=agent.validator_temperature,
             )
+            is_valid = bool(validator_result.get("valid", True))
+
+            if not is_valid:
+                fallback_text = (
+                    "I’m having trouble safely interpreting this analytics request. Please rephrase or narrow your question."
+                )
+                safe_ir = AnalyticsIR(
+                    text=fallback_text,
+                    rows=None,
+                    html=None,
+                    entities=None,
+                )
+                render_payload = run_rendering_model(
+                    user_query=context.query,
+                    ir=safe_ir,
+                    insights=[],
+                    client=agent.client,
+                    model=agent.render_model,
+                    system_prompt=self.rendering_system_prompt,
+                    temperature=agent.render_temperature,
+                )
+                return _finalise_response(render_payload, context)
+
+            insight_result = run_insight_model(
+                ir=logic_ir,
+                client=agent.client,
+                model=agent.insight_model,
+                system_prompt=self.insight_system_prompt,
+                temperature=agent.insight_temperature,
+            )
+            insights = insight_result.get("insights") or []
 
             render_payload = run_rendering_model(
                 user_query=context.query,
-                ir=enriched_ir,
+                ir=logic_ir,
+                insights=insights,
                 client=agent.client,
                 model=agent.render_model,
                 system_prompt=self.rendering_system_prompt,
@@ -809,19 +827,27 @@ class Agent:
         nlv_model: str,
         logic_model: str,
         render_model: str,
+        validator_model: str,
+        insight_model: str,
         workflow: Workflow,
         tools: Sequence[Tool],
         nlv_temperature: float = 0.1,
         logic_temperature: float = 0.1,
         render_temperature: float = 0.1,
+        validator_temperature: float = 0.1,
+        insight_temperature: float = 0.1,
     ) -> None:
         self.client = client
         self.nlv_model = nlv_model
         self.logic_model = logic_model
         self.render_model = render_model
+        self.validator_model = validator_model
+        self.insight_model = insight_model
         self.nlv_temperature = nlv_temperature
         self.logic_temperature = logic_temperature
         self.render_temperature = render_temperature
+        self.validator_temperature = validator_temperature
+        self.insight_temperature = insight_temperature
         self.workflow = workflow
         self.tools = list(tools)
         self._tool_lookup = {tool.name: tool for tool in self.tools}
@@ -1606,6 +1632,8 @@ def _build_agent() -> Agent:
         nlv_system_prompt=build_nlv_system_prompt(),
         logic_system_prompt=build_logic_system_prompt(),
         rendering_system_prompt=build_rendering_system_prompt(),
+        validator_system_prompt=build_validator_system_prompt(),
+        insight_system_prompt=build_insight_system_prompt(),
         max_iterations=MAX_ITERATIONS,
         memory=memory,
     )
@@ -1615,6 +1643,8 @@ def _build_agent() -> Agent:
         nlv_model=DEFAULT_MODEL,
         logic_model=DEFAULT_MODEL,
         render_model=DEFAULT_MODEL,
+        validator_model=DEFAULT_MODEL,
+        insight_model=DEFAULT_MODEL,
         workflow=workflow,
         tools=tools,
     )

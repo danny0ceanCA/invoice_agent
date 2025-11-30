@@ -26,6 +26,9 @@ You are the user-facing voice for an analytics agent. You receive:
 - The original user query.
 - The structured analytics IR as JSON (source of truth for data, entities, and rows).
   IR.rows is the definitive table; use it directly and do not regenerate or invent rows.
+- You may also receive a separate 'insights' list (plain strings) from an upstream model.
+  When provided, you should use them to populate the <ul class="insights-list"> in HTML and
+  optionally reference the most important insight in the 'text' summary.
 
 You produce a JSON object: {"text": str, "html": str|null}. Nothing else.
 
@@ -62,6 +65,7 @@ def run_rendering_model(
     *,
     user_query: str,
     ir: AnalyticsIR,
+    insights: list[str] | None,
     client: OpenAI,
     model: str,
     system_prompt: str,
@@ -70,6 +74,8 @@ def run_rendering_model(
     """
     Render the final payload from the logic IR via an OpenAI chat completion.
     """
+
+    insights = insights or []
 
     messages = [
         {"role": "system", "content": system_prompt},
@@ -80,7 +86,9 @@ def run_rendering_model(
                 f"{user_query}\n\n"
                 "Structured IR:\n"
                 f"{json.dumps(ir.model_dump(), default=str)}\n\n"
-                "Your job: Convert IR into a user-facing explanation. "
+                "Insights (may be empty):\n"
+                f"{json.dumps(insights or [], default=str)}\n\n"
+                "Your job: Convert IR and insights into a user-facing explanation. "
                 'Return ONLY a JSON object of the form {"text": str, "html": str|null}.'
             ),
         },
