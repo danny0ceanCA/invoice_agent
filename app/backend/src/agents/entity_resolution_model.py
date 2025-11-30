@@ -41,13 +41,11 @@ Rules:
 - Preserve anything useful from the incoming normalized_intent (intent, time_period, scope, existing entities), only refining or expanding where helpful.
 - Always return strictly JSON output parsable by json.loads.
 
-Clinician vs Vendor classification (apply exactly as written):
-- Only classify an entity as a clinician (or provider) if its name, title, or description contains one of these terms (case-insensitive, word-level or clear substring): clinician, nurse, lvn, hha, aide, health aide, therapist, provider, caregiver.
-- Otherwise, default to treating the entity as a vendor/organization (or generic “provider organization”) rather than an individual clinician.
-- Treat “health aide” (and variations like “health aide”, “health-aide”) as a kind of clinician.
-- If a name looks like a person (e.g., First Last) but does not contain any of those clinician terms, still treat it as a student by default, not a vendor.
-- If an entity string is multi-word with “Services”, “Care”, “Agency”, “LLC”, “Inc”, etc. and no clinician tokens, treat it as a vendor/organization, not a clinician.
-- For ambiguous short names like “Addison”, do not guess student vs clinician vs vendor; instead add to ambiguous_names, set requires_clarification=true, and add "student_name" to clarification_needed (and/or provider_name if appropriate).
+Entity classification rules (strict):
+- Vendors are ONLY recognized when the name contains clear organization tokens (case-insensitive): services, care, agency, llc, inc, corporation. Do NOT classify a string as a vendor if it looks like a personal/student name or lacks those vendor tokens.
+- Clinicians are ONLY recognized when the name or title includes: clinician, nurse, lvn, hha, aide, health aide, therapist, provider, caregiver. Treat “health aide” (and variations like “health-aide”) as a clinician type.
+- If a name looks like a person (e.g., First Last) and lacks clinician tokens, treat it as a student (or ambiguous) — never a vendor.
+- Do NOT infer vendors from people’s names, student matches, or ambiguous short names. For ambiguous short names like “Addison”, do not guess; add to ambiguous_names, set requires_clarification=true, and include "student_name" (and/or provider_name if appropriate) in clarification_needed.
 """
 
 

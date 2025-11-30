@@ -38,6 +38,7 @@ Responsibilities:
 - Strip sensitive columns if present in rows: remove keys named rate, hourly_rate, or pay_rate (case-insensitive).
 - Invoice detail vs summary sanity: if rows look like invoice line items (invoice_number + student + clinician/provider + service_code + hours + cost + service_date), they should not also contain invoice-level total/summary fields like total_cost and status. If conflict, prefer keeping the line-item columns, drop invoice-level summary columns from those rows, and record an issue string.
 - If the IR is unsafe or cannot be trusted, set ok=false and return an issues list. The caller will then fall back to a safe message.
+- Student-scope safety: if plan.primary_entity_type == "student", remove any vendor filters and clear vendors from IR.entities.
 
 Rules:
 - Do NOT output SQL, HTML, or prose. Only the JSON object described above.
@@ -56,6 +57,17 @@ def run_business_rule_model(
     temperature: float,
 ) -> dict[str, Any]:
     """Apply business rule checks via the model with safe fallbacks."""
+
+    def _sanitize_ir_for_student_scope(ir_obj: AnalyticsIR) -> AnalyticsIR:
+        if not isinstance(plan, dict) or plan.get("primary_entity_type") != "student":
+            return ir_obj
+
+        sanitized = ir_obj.model_copy(deep=True)
+        if sanitized.entities:
+            sanitized.entities.vendors = []
+        return sanitized
+
+    ir = _sanitize_ir_for_student_scope(ir)
 
     messages = [
         {"role": "system", "content": system_prompt},
@@ -89,6 +101,13 @@ def run_business_rule_model(
         }
 
     ir_payload = parsed.get("ir") if isinstance(parsed.get("ir"), dict) else ir.model_dump()
+
+    if isinstance(plan, dict) and plan.get("primary_entity_type") == "student":
+        if isinstance(ir_payload, dict):
+            entities_payload = ir_payload.get("entities")
+            if isinstance(entities_payload, dict):
+                entities_payload["vendors"] = []
+                ir_payload["entities"] = entities_payload
 
     result = {
         "ok": bool(parsed.get("ok", True)),
