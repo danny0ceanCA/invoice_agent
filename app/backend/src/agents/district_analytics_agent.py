@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import re
+import json
 from dataclasses import dataclass, field
 from html import escape
 from typing import Any, Mapping, Sequence
@@ -141,6 +141,59 @@ class Tool:
         return self.handler(context, arguments)
 
 
+# ----------------------------------------------------------------------
+# CLEAN, SINGLE DEFINITION — list-intent detection
+# ----------------------------------------------------------------------
+def _is_list_intent(query: str) -> bool:
+    """
+    Detect whether the user is explicitly asking for a list of students,
+    vendors, clinicians, or any general listing-style request.
+    """
+    text = (query or "").lower().strip()
+    if not text:
+        return False
+
+    direct_phrases = [
+        "student list",
+        "list students",
+        "list of students",
+        "list the students",
+        "show students",
+        "show me the student list",
+        "give me the student list",
+        "give me list of students",
+        "students list",
+        "list all students",
+        "show all students",
+    ]
+    if any(phrase in text for phrase in direct_phrases):
+        return True
+
+    # Generic "list of ..." patterns
+    if re.search(r"\blist\s+of\s+students\b", text):
+        return True
+
+    # Other entity types (optional expansion):
+    if "list vendors" in text or "list clinicians" in text:
+        return True
+
+    # Final fallback
+    return False
+
+
+# ----------------------------------------------------------------------
+# FIX: clean helper for name extraction (tolerant of punctuation)
+# ----------------------------------------------------------------------
+def _extract_name_after_for(text: str) -> str | None:
+    """
+    Extract a student name after 'for ...' patterns.
+    Strips punctuation like '?', '!', ','.
+    """
+    m = re.search(r"\bfor\s+([A-Za-z]+(?:\s+[A-Za-z]+)+)", text, flags=re.IGNORECASE)
+    if not m:
+        return None
+    return m.group(1).strip().rstrip(".,?!")
+
 
 def _extract_active_filters_from_history(history: list[dict[str, str]]) -> dict[str, str]:
     """
@@ -155,28 +208,27 @@ def _extract_active_filters_from_history(history: list[dict[str, str]]) -> dict[
     if not history:
         return active
 
-    # If the last user message was a list-intent query, vendor-level, or
-    # district-level analytic, do not surface an active filter.
-    last_user_content: str | None = None
+    # ------------------------------------------------------------------
+    # FIX: If ANY prior user message (not just last) was list-intent,
+    #      CLEAR the sticky filter permanently.
+    # ------------------------------------------------------------------
     for message in reversed(history):
-        if not isinstance(message, dict):
-            continue
         if message.get("role") != "user":
             continue
-        last_user_content = (message.get("content") or "").strip()
-        break
-
-    if last_user_content:
-        if _is_list_intent(last_user_content):
+        content = (message.get("content") or "").strip()
+        if _is_list_intent(content):
             return {}
 
-        lowered_last = last_user_content.lower()
-        district_scope_terms = ["district", "district-wide", "all students", "entire district"]
-        provider_terms = ["vendor", "vendors", "clinician", "clinicians", "provider", "providers"]
-        if any(term in lowered_last for term in district_scope_terms) or any(
-            term in lowered_last for term in provider_terms
-        ):
-            return {}
+    # ------------------------------------------------------------------
+    # FIX: If user ever explicitly named a new student recently,
+    #      this overrides any old sticky filter.
+    # ------------------------------------------------------------------
+    for message in reversed(history):
+        if message.get("role") != "user":
+            continue
+        name = _extract_name_after_for(message.get("content") or "")
+        if name:
+            return {}  # explicit name overrides sticky filter
 
     # Walk history from newest to oldest, looking for assistant messages
     # with an ACTIVE_STUDENT_FILTER tag.
@@ -216,14 +268,11 @@ def _extract_active_filters_from_history(history: list[dict[str, str]]) -> dict[
             #   "monthly spend for avery smith"
             #   "give me invoice details for July for Carter Sanchez"
             #
-            # This regex captures one or more words after "for ".
-            m = re.search(r"\bfor\s+([A-Za-z]+(?:\s+[A-Za-z]+)+)", content, flags=re.IGNORECASE)
-            if m:
-                name = m.group(1).strip()
-                if name:
-                    # Use the raw name; SQL already uses LOWER() for matching.
-                    active["student"] = name
-                    return active
+            name = _extract_name_after_for(content)
+            if name:
+                # Use the raw name; SQL already uses LOWER() for matching.
+                active["student"] = name
+                return active
 
     return active
 
@@ -234,32 +283,30 @@ def _maybe_apply_active_student_filter(raw_query: str, active_filters: dict[str,
     and the current query does NOT explicitly change scope, rewrite the query text to
     include that student so the model receives an explicit filter.
     """
+    # Hard skip: if list intent, never rewrite
+    if _is_list_intent(raw_query):
+        return raw_query
+
     active_student = (active_filters.get("student") or "").strip()
     if not active_student:
         return raw_query
 
-    if _is_list_intent(raw_query):
-        return raw_query
-
     q_lower = raw_query.lower()
 
+    # Skip for district, global, vendor, clinician scopes
     district_scope_terms = ["all students", "entire district", "district", "district-wide"]
     provider_terms = ["vendor", "vendors", "clinician", "clinicians", "provider", "providers"]
 
-    # Detect explicit student references; never override them (and treat them as clearing
-    # the sticky filter for this turn).
-    explicit_name_match = re.search(
-        r"\bfor\s+([A-Za-z]+(?:\s+[A-Za-z]+)+)", raw_query, flags=re.IGNORECASE
-    )
-    if explicit_name_match:
-        return raw_query
-    if "for student" in q_lower or "student " in q_lower:
-        return raw_query
-
-    # District/vendor scoped analytics should not inherit a student filter.
     if any(term in q_lower for term in district_scope_terms):
         return raw_query
     if any(term in q_lower for term in provider_terms):
+        return raw_query
+
+    # If query explicitly names a student, DO NOT override
+    explicit_name = _extract_name_after_for(raw_query)
+    if explicit_name:
+        return raw_query
+    if "for student" in q_lower or "student " in q_lower:
         return raw_query
 
     analytics_keywords = [
@@ -308,6 +355,8 @@ def _maybe_apply_active_student_filter(raw_query: str, active_filters: dict[str,
         "what about",
         "how about",
         "then",
+        "same",
+        "continue",
     ]
     has_follow_up_marker = any(marker in q_lower for marker in follow_up_markers)
     if not has_follow_up_marker:
@@ -325,31 +374,6 @@ def _maybe_apply_active_student_filter(raw_query: str, active_filters: dict[str,
         rewritten=rewritten_query,
     )
     return rewritten_query
-
-
-def _is_list_intent(query: str) -> bool:
-    """Heuristically detect user requests asking for a student list."""
-
-    normalized = query.lower().strip()
-    if not normalized:
-        return False
-
-    direct_matches = [
-        "student list",
-        "list students",
-        "list of students",
-        "list the students",
-        "show students",
-        "show me the student list",
-        "give me the student list",
-        "give me list of students",
-        "students list",
-    ]
-    if any(phrase in normalized for phrase in direct_matches):
-        return True
-
-    # Fallback regex to catch variations like "can I have the list of students"
-    return bool(re.search(r"list\s+of\s+students|students?\s+list", normalized))
 
 
 def _load_district_entities(engine: Engine, district_key: str | None) -> dict[str, list[str]]:
