@@ -123,6 +123,10 @@ class MultiTurnConversationManager:
             needs_clarification = bool(state.missing_slots)
             fused_query = user_message
             print(f"[multi-turn] new_thread: {user_message!r}", flush=True)
+            print(
+                f"[multi-turn-debug] NEW THREAD | msg={user_message!r} | active_topic={state.active_topic}",
+                flush=True,
+            )
             self.save_state(state, session_id=session_id)
             return {
                 "session_id": session_id,
@@ -148,6 +152,10 @@ class MultiTurnConversationManager:
             needs_clarification = bool(state.missing_slots)
             fused_query = self.build_fused_query(state)
             print(f"[multi-turn] new_thread: {user_message!r}", flush=True)
+            print(
+                f"[multi-turn-debug] NEW THREAD | msg={user_message!r} | active_topic={state.active_topic}",
+                flush=True,
+            )
 
             self.save_state(state, session_id=session_id)
 
@@ -181,6 +189,10 @@ class MultiTurnConversationManager:
             needs_clarification = bool(state.missing_slots)
             fused_query = self.build_fused_query(state)
             print(f"[multi-turn] new_thread: {user_message!r}", flush=True)
+            print(
+                f"[multi-turn-debug] NEW THREAD | msg={user_message!r} | active_topic={state.active_topic}",
+                flush=True,
+            )
 
             self.save_state(state, session_id=session_id)
 
@@ -244,10 +256,24 @@ class MultiTurnConversationManager:
 
         needs_clarification = bool(state.missing_slots)
         fused_query = self.build_fused_query(state)
+        extracted_name = self._extract_name(user_message)
+
         if is_short_wh_followup:
             print(f"[multi-turn] followup_short_wh: {fused_query!r}", flush=True)
         else:
             print(f"[multi-turn] followup_fused: {fused_query!r}", flush=True)
+
+            print(
+                f"[multi-turn-debug] FOLLOWUP | msg={user_message!r} | active_topic={state.active_topic} | period=({state.last_period_start} → {state.last_period_end}) | month={state.last_month}",
+                flush=True,
+            )
+
+        if not state.active_topic and extracted_name:
+            state.active_topic = {
+                "type": "student",
+                "value": extracted_name,
+                "last_query": user_message,
+            }
 
         self.save_state(state, session_id=session_id)
 
@@ -503,28 +529,48 @@ class MultiTurnConversationManager:
         return match.group(1).strip().lower()
 
     def _starts_new_topic(self, message: str, state: ConversationState) -> bool:
-        if state.original_query is None:
-            return True
+        if not message:
+            return not bool(state.active_topic)
 
         text = message.lower().strip()
 
-        if self._is_followup(message, state):
-            return False
+        district_markers = [
+            "all students",
+            "district wide",
+            "district-wide",
+            "entire district",
+        ]
 
-        if self._refers_to_prior_list(message, state):
-            return False
+        if any(marker in text for marker in district_markers):
+            return True
 
         if self._is_list_intent(text):
             return True
 
-        new_name = self._extract_name(text)
-        old_name = self._extract_name((state.original_query or "").lower())
+        if not state.active_topic:
+            return True
 
-        if new_name and old_name and new_name != old_name:
-            return True
-        if new_name and not old_name:
-            return True
-        if new_name and text == new_name:
+        new_name = self._extract_name(text)
+        active_type = state.active_topic.get("type") if isinstance(state.active_topic, dict) else None
+        active_value = (
+            (state.active_topic.get("value") or "").lower()
+            if isinstance(state.active_topic, dict)
+            else ""
+        )
+
+        if active_type == "student":
+            if new_name and new_name != active_value:
+                return True
+            return False
+
+        if new_name:
+            if active_value and new_name != active_value:
+                return True
+
+            prior_name = self._extract_name((state.original_query or "").lower())
+            if prior_name:
+                return new_name != prior_name
+
             return True
 
         return False
