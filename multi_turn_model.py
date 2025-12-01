@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import asdict, dataclass, field
+from datetime import date
 from typing import Any, Dict, List, Optional
 
 
@@ -17,6 +18,11 @@ class ConversationState:
     missing_slots: List[str] = field(default_factory=list)
     resolved_slots: Dict[str, str] = field(default_factory=dict)
     history: List[Dict[str, str]] = field(default_factory=list)
+    last_period_type: Optional[str] = None
+    last_period_start: Optional[str] = None
+    last_period_end: Optional[str] = None
+    last_month: Optional[str] = None
+    last_year_window: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -30,6 +36,11 @@ class ConversationState:
             missing_slots=list(data.get("missing_slots", [])),
             resolved_slots=dict(data.get("resolved_slots", {})),
             history=list(data.get("history", [])),
+            last_period_type=data.get("last_period_type"),
+            last_period_start=data.get("last_period_start"),
+            last_period_end=data.get("last_period_end"),
+            last_month=data.get("last_month"),
+            last_year_window=data.get("last_year_window"),
         )
 
 
@@ -136,6 +147,45 @@ class MultiTurnConversationManager:
         state.history.append({"role": "user", "content": user_message})
         state.latest_user_message = user_message
 
+        period_info = self._extract_period_info(user_message)
+        is_followup = self._is_followup_message(user_message)
+        lower_message = user_message.lower()
+
+        if period_info.get("has_explicit_period"):
+            for field_name in [
+                "last_period_type",
+                "last_period_start",
+                "last_period_end",
+                "last_month",
+                "last_year_window",
+            ]:
+                setattr(state, field_name, None)
+
+        if (
+            is_followup
+            and not period_info.get("has_explicit_period")
+            and "district wide" not in lower_message
+        ):
+            for field_name in [
+                "last_period_type",
+                "last_period_start",
+                "last_period_end",
+                "last_month",
+                "last_year_window",
+            ]:
+                if period_info.get(field_name) is None:
+                    period_info[field_name] = getattr(state, field_name)
+
+        for field_name in [
+            "last_period_type",
+            "last_period_start",
+            "last_period_end",
+            "last_month",
+            "last_year_window",
+        ]:
+            if field_name in period_info and period_info[field_name] is not None:
+                setattr(state, field_name, period_info[field_name])
+
         if required_slots is not None and not state.missing_slots:
             state.missing_slots = list(required_slots)
 
@@ -159,6 +209,7 @@ class MultiTurnConversationManager:
         self, user_message: str, required_slots: Optional[List[str]]
     ) -> ConversationState:
         missing_slots = list(required_slots) if required_slots else []
+        period_info = self._extract_period_info(user_message)
         return ConversationState(
             original_query=user_message,
             latest_user_message=user_message,
@@ -166,6 +217,11 @@ class MultiTurnConversationManager:
             missing_slots=missing_slots,
             resolved_slots={},
             history=[{"role": "user", "content": user_message}],
+            last_period_type=period_info.get("last_period_type"),
+            last_period_start=period_info.get("last_period_start"),
+            last_period_end=period_info.get("last_period_end"),
+            last_month=period_info.get("last_month"),
+            last_year_window=period_info.get("last_year_window"),
         )
 
     def _is_list_intent(self, query: str) -> bool:
@@ -205,6 +261,97 @@ class MultiTurnConversationManager:
             "continue",
         ]
         return any(marker in text for marker in markers)
+
+    def _is_followup_message(self, message: str) -> bool:
+        if not message:
+            return False
+        text = message.lower().strip()
+        start_markers = [
+            "why",
+            "what about",
+            "how about",
+            "now",
+            "next",
+            "and",
+            "also",
+            "continue",
+            "then",
+            "same",
+        ]
+        if any(text.startswith(marker) for marker in start_markers):
+            return True
+
+        month_pattern = r"^(january|february|march|april|may|june|july|august|september|october|november|december)\b[\w\s]*\??$"
+        if re.search(month_pattern, text):
+            return True
+
+        if re.search(r"\b(january|february|march|april|may|june|july|august|september|october|november|december)\b", text):
+            return True
+
+        return False
+
+    def _extract_period_info(self, message: str) -> Dict[str, Optional[str]]:
+        info: Dict[str, Optional[str]] = {
+            "last_period_type": None,
+            "last_period_start": None,
+            "last_period_end": None,
+            "last_month": None,
+            "last_year_window": None,
+            "has_explicit_period": False,
+        }
+
+        if not message:
+            return info
+
+        text = message.lower()
+        info["has_explicit_period"] = bool(re.search(r"\b\d{4}-\d{2}-\d{2}\b", text))
+
+        today = date.today()
+        month_names = [
+            "january",
+            "february",
+            "march",
+            "april",
+            "may",
+            "june",
+            "july",
+            "august",
+            "september",
+            "october",
+            "november",
+            "december",
+        ]
+
+        month_match = re.search(
+            r"\b(january|february|march|april|may|june|july|august|september|october|november|december)(?:\s+(\d{4}))?",
+            text,
+        )
+        if month_match:
+            month_name = month_match.group(1).title()
+            if month_match.group(2):
+                month_name = f"{month_name} {month_match.group(2)}"
+            info["last_month"] = month_name
+
+        if "ytd" in text or "year to date" in text:
+            start_year = today.year if today.month >= 7 else today.year - 1
+            info["last_period_type"] = "school_year"
+            info["last_period_start"] = date(start_year, 7, 1).isoformat()
+            info["last_period_end"] = today.isoformat()
+            info["last_year_window"] = "school year to date"
+            return info
+
+        if "this year" in text or "school year" in text:
+            start_year = today.year if today.month >= 7 else today.year - 1
+            info["last_period_type"] = "school_year"
+            info["last_period_start"] = date(start_year, 7, 1).isoformat()
+            info["last_period_end"] = date(start_year + 1, 6, 30).isoformat()
+            info["last_year_window"] = "this school year"
+            return info
+
+        if any(month in text for month in month_names) and info["last_month"]:
+            info["last_period_type"] = "month"
+
+        return info
 
     def _starts_new_topic(self, message: str, state: ConversationState) -> bool:
         """
@@ -330,6 +477,19 @@ class MultiTurnConversationManager:
         if state.resolved_slots:
             details = "; ".join(f"{slot} is {value}" for slot, value in state.resolved_slots.items())
             parts.append(f"Details provided: {details}.")
+
+        period_details: List[str] = []
+        if state.last_year_window:
+            period_details.append(state.last_year_window)
+        if state.last_period_start and state.last_period_end:
+            period_details.append(f"{state.last_period_start} to {state.last_period_end}")
+        elif state.last_period_start:
+            period_details.append(f"starting {state.last_period_start}")
+        if state.last_month:
+            period_details.append(f"month focus is {state.last_month}")
+
+        if period_details:
+            parts.append(f"Time period is {'; '.join(period_details)}.")
 
         if state.latest_user_message and state.latest_user_message != state.original_query:
             if state.latest_user_message not in state.resolved_slots.values():
