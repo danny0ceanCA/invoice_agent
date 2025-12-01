@@ -499,12 +499,10 @@ class Workflow:
                 LOGGER.warning("multi_turn_fusion_failed", error=str(exc))
                 query = query.strip()
 
-        # Apply sticky student filter by inspecting history and, if we find an
-        # ACTIVE_STUDENT_FILTER tag, rewriting the incoming query so the model
-        # sees the student explicitly.
-        active_filters = _extract_active_filters_from_history(history)
-        if active_filters:
-            query = _maybe_apply_active_student_filter(query, active_filters)
+        # Sticky student filters are disabled in favor of multi-turn active_topic.
+        # active_filters = _extract_active_filters_from_history(history)
+        # if active_filters:
+        #     query = _maybe_apply_active_student_filter(query, active_filters)
 
         normalized_intent = run_nlv_model(
             user_query=query,

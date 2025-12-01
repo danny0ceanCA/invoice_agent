@@ -18,6 +18,7 @@ class ConversationState:
     missing_slots: List[str] = field(default_factory=list)
     resolved_slots: Dict[str, str] = field(default_factory=dict)
     history: List[Dict[str, str]] = field(default_factory=list)
+    active_topic: Dict[str, Any] = field(default_factory=dict)
     last_period_type: Optional[str] = None
     last_period_start: Optional[str] = None
     last_period_end: Optional[str] = None
@@ -36,6 +37,7 @@ class ConversationState:
             missing_slots=list(data.get("missing_slots", [])),
             resolved_slots=dict(data.get("resolved_slots", {})),
             history=list(data.get("history", [])),
+            active_topic=dict(data.get("active_topic", {})),
             last_period_type=data.get("last_period_type"),
             last_period_start=data.get("last_period_start"),
             last_period_end=data.get("last_period_end"),
@@ -101,22 +103,23 @@ class MultiTurnConversationManager:
         user_message = user_message.strip()
         state = self.get_state(session_id)
 
-        if self._is_list_intent(user_message):
-            state = self._start_new_thread(user_message, required_slots)
-            needs_clarification = False
-            fused_query = user_message
-            print(f"[multi-turn] new_thread: {user_message!r}", flush=True)
-            self.save_state(state, session_id=session_id)
-            return {
-                "session_id": session_id,
-                "needs_clarification": needs_clarification,
-                "clarification_prompt": None,
-                "fused_query": fused_query,
-                "state": state.to_dict(),
-            }
+        is_first_turn = state.original_query is None
+        starts_new_topic = False if is_first_turn else self._starts_new_topic(user_message, state)
 
-        if state.original_query is None:
+        if self._is_list_intent(user_message) or is_first_turn or starts_new_topic:
             state = self._start_new_thread(user_message, required_slots)
+            state.original_query = user_message
+            state.latest_user_message = user_message
+            state.history = [{"role": "user", "content": user_message}]
+
+            extracted_name = self._extract_name(user_message)
+            if extracted_name:
+                state.active_topic = {
+                    "type": "student",
+                    "value": extracted_name,
+                    "last_query": user_message,
+                }
+
             needs_clarification = bool(state.missing_slots)
             fused_query = user_message
             print(f"[multi-turn] new_thread: {user_message!r}", flush=True)
@@ -124,21 +127,9 @@ class MultiTurnConversationManager:
             return {
                 "session_id": session_id,
                 "needs_clarification": needs_clarification,
-                "clarification_prompt": self._build_clarification_prompt(state),
-                "fused_query": fused_query,
-                "state": state.to_dict(),
-            }
-
-        if self._starts_new_topic(user_message, state):
-            state = self._start_new_thread(user_message, required_slots)
-            needs_clarification = bool(state.missing_slots)
-            fused_query = user_message
-            print(f"[multi-turn] new_thread: {user_message!r}", flush=True)
-            self.save_state(state, session_id=session_id)
-            return {
-                "session_id": session_id,
-                "needs_clarification": needs_clarification,
-                "clarification_prompt": self._build_clarification_prompt(state),
+                "clarification_prompt": self._build_clarification_prompt(state)
+                if needs_clarification
+                else None,
                 "fused_query": fused_query,
                 "state": state.to_dict(),
             }
@@ -217,6 +208,7 @@ class MultiTurnConversationManager:
             missing_slots=missing_slots,
             resolved_slots={},
             history=[{"role": "user", "content": user_message}],
+            active_topic={},
             last_period_type=period_info.get("last_period_type"),
             last_period_start=period_info.get("last_period_start"),
             last_period_end=period_info.get("last_period_end"),
@@ -353,70 +345,68 @@ class MultiTurnConversationManager:
 
         return info
 
+    def _extract_name(self, message: str) -> Optional[str]:
+        if not message:
+            return None
+        match = re.search(r"\b([A-Za-z]+\s+[A-Za-z]+)\b", message)
+        if not match:
+            return None
+        return match.group(1).strip().lower()
+
     def _starts_new_topic(self, message: str, state: ConversationState) -> bool:
-        """
-        Determine whether the user is starting a new topic.
-
-        A new topic happens ONLY if:
-        - the user explicitly names a *different* student/vendor/clinician
-        - the message contains a clear new-subject indicator AND
-          it does NOT contain pronouns referring to the previous subject
-
-        Follow-up questions like:
-            "why did it decrease?"
-            "what about October?"
-            "explain this"
-        should NOT start new threads.
-
-        This makes multi-turn contextual.
-        """
-        if not state.original_query:
+        if state.original_query is None:
             return False
 
         text = message.lower().strip()
 
-        # Strong follow-up indicators → stay in same topic
         followup_markers = [
-            "why", "how", "explain", "what about",
-            "and for", "same", "this", "that", "it",
-            "continue", "next", "also", "again",
+            "why",
+            "how",
+            "what about",
+            "this year",
+            "this month",
+            "same",
+            "continue",
+            "next",
+            "also",
+            "again",
+            "and ",
+            "it ",
+            "that ",
+            "this ",
         ]
-        if any(f in text for f in followup_markers):
+        if any(text.startswith(marker) for marker in followup_markers):
             return False
 
-        # Detect explicit new subject (“for X Y”)
-        name_match = re.search(r"\bfor\s+([A-Za-z]+(?:\s+[A-Za-z]+)+)", text)
-        if name_match:
-            explicit_target = name_match.group(1).strip().lower()
+        new_name = self._extract_name(text)
+        old_name = self._extract_name((state.original_query or "").lower())
 
-            # Extract subject of the original query
-            prev_match = re.search(
-                r"\bfor\s+([A-Za-z]+(?:\s+[A-Za-z]+)+)",
-                state.original_query.lower()
-            )
-            prev_target = prev_match.group(1).strip().lower() if prev_match else None
-
-            # New name different from previous subject → start new topic
-            if prev_target and explicit_target != prev_target:
-                return True
-
-            # Same subject → continue existing topic
-            return False
-
-        # Generic queries like “show me”, “give me”, “find”
-        # DO NOT start new topics unless there is NO prior subject
-        starter_phrases = ["show", "give me", "find", "list", "what is"]
-        if any(text.startswith(sp) for sp in starter_phrases):
-            # If original query included a subject, treat as follow-up
-            prev_match = re.search(
-                r"\bfor\s+([A-Za-z]+(?:\s+[A-Za-z]+)+)",
-                state.original_query.lower()
-            )
-            if prev_match:
-                return False
+        if new_name and old_name and new_name != old_name:
+            return True
+        if new_name and not old_name:
+            return True
+        if new_name and text == new_name:
             return True
 
-        # Default: follow-up
+        starter_phrases = [
+            "i want",
+            "can you",
+            "can i",
+            "could you",
+            "please show",
+            "show me",
+            "give me",
+            "find",
+            "list",
+            "what is",
+            "how many",
+            "tell me",
+            "provide",
+        ]
+
+        if any(text.startswith(sp) for sp in starter_phrases):
+            return True
+
         return False
 
     def _mentions_new_entity(self, message: str) -> bool:
@@ -469,10 +459,13 @@ class MultiTurnConversationManager:
         return f"I need the following additional details: {slots_text}."
 
     def build_fused_query(self, state: ConversationState) -> str:
-        if not state.original_query:
+        base_query = state.original_query or (
+            state.active_topic.get("last_query") if state.active_topic else None
+        )
+        if not base_query:
             return state.latest_user_message or ""
 
-        parts: List[str] = [state.original_query]
+        parts: List[str] = [base_query]
 
         if state.resolved_slots:
             details = "; ".join(f"{slot} is {value}" for slot, value in state.resolved_slots.items())
@@ -493,7 +486,7 @@ class MultiTurnConversationManager:
 
         if state.latest_user_message and state.latest_user_message != state.original_query:
             if state.latest_user_message not in state.resolved_slots.values():
-                parts.append(f"Additional instruction: {state.latest_user_message}.")
+                parts.append(f"Additional instruction: {state.latest_user_message}")
 
         return " ".join(part.strip() for part in parts if part).strip()
 
