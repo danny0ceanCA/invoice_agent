@@ -341,6 +341,8 @@ class MultiTurnConversationManager:
             "list students",
             "list all students",
             "show students",
+            "show student list",
+            "show me student list",
             "show me the student list",
             "give me the student list",
             "provider list",
@@ -414,6 +416,20 @@ class MultiTurnConversationManager:
         if not message:
             return False
         text = message.lower().strip()
+
+        i_want_markers = (
+            "i want",
+            "i need",
+            "i would like",
+            "i wanna",
+        )
+
+        if any(text.startswith(prefix) for prefix in i_want_markers):
+            extracted_name = self._extract_name(message)
+            if extracted_name:
+                print("[multi-turn-debug] SUPPRESS_FOLLOWUP_I_WANT", flush=True)
+                return False
+
         suppress_prefixes = [
             "i want",
             "i need",
@@ -575,19 +591,6 @@ class MultiTurnConversationManager:
         if not message:
             return None
 
-        # 1) Prefer "for First Last" style patterns (e.g., "for Carter Sanchez").
-        #    Requires at least two capitalized words so we don't grab "for July".
-        for_pattern = re.search(
-            r"\bfor\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b",
-            message,
-        )
-        if for_pattern:
-            return for_pattern.group(1).strip()
-
-        # 2) Fallback: scan for capitalized tokens that look like names
-        #    and ignore pronouns, months, and common verbs.
-        tokens = re.findall(r"\b[A-Z][a-z]+\b", message)
-
         stop_words = {
             "I",
             "We",
@@ -622,16 +625,66 @@ class MultiTurnConversationManager:
             "November",
             "December",
         }
+        lower_stop_words = {word.lower() for word in stop_words}
 
+        # 1) Prefer "for First Last" style patterns (e.g., "for Carter Sanchez").
+        #    Allow lowercase variants and avoid swallowing trailing time-period phrases.
+        for_pattern = re.search(
+            r"\bfor\s+([A-Za-z]+(?:\s+[A-Za-z]+){1,2})\b",
+            message,
+            re.IGNORECASE,
+        )
+        if for_pattern:
+            candidate = for_pattern.group(1).strip()
+            candidate_tokens = candidate.lower().split()
+            if not all(token in lower_stop_words for token in candidate_tokens):
+                if not hasattr(self, "_is_valid_name") or self._is_valid_name(candidate):
+                    return candidate
+
+        # 2) Fallback: scan for capitalized tokens that look like names
+        #    and ignore pronouns, months, and common verbs.
+        tokens = re.findall(r"\b[A-Z][a-z]+\b", message)
         name_tokens = [t for t in tokens if t not in stop_words]
 
         # Prefer "First Last" if we have at least two name-like tokens
         if len(name_tokens) >= 2:
-            return f"{name_tokens[0]} {name_tokens[1]}"
+            candidate = f"{name_tokens[0]} {name_tokens[1]}"
+            if not hasattr(self, "_is_valid_name") or self._is_valid_name(candidate):
+                return candidate
 
         # Otherwise, a single remaining capitalized token is probably a first name
         if len(name_tokens) == 1:
-            return name_tokens[0]
+            candidate = name_tokens[0]
+            if not hasattr(self, "_is_valid_name") or self._is_valid_name(candidate):
+                return candidate
+
+        # 3) Lowercase-aware fallback: try lowercase patterns and simple token heuristics
+        message_lower = message.lower()
+
+        lower_for_pattern = re.search(
+            r"\bfor\s+([a-z]+(?:\s+[a-z]+){1,2})\b",
+            message_lower,
+        )
+        if lower_for_pattern:
+            start, end = lower_for_pattern.span(1)
+            candidate = message[start:end].strip()
+            candidate_tokens = candidate.lower().split()
+            if not all(token in lower_stop_words for token in candidate_tokens):
+                if not hasattr(self, "_is_valid_name") or self._is_valid_name(candidate):
+                    return candidate
+
+        original_tokens = re.findall(r"[A-Za-z]+", message)
+        filtered_tokens: List[str] = []
+        for token in original_tokens:
+            lower_token = token.lower()
+            if lower_token in lower_stop_words:
+                continue
+            filtered_tokens.append(token)
+
+        if len(filtered_tokens) >= 2:
+            candidate = f"{filtered_tokens[0]} {filtered_tokens[1]}"
+            if not hasattr(self, "_is_valid_name") or self._is_valid_name(candidate):
+                return candidate
 
         return None
 
