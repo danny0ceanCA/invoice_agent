@@ -111,9 +111,6 @@ class MultiTurnConversationManager:
 
         if is_explicit_list and not is_list_followup:
             state = self._start_new_thread(user_message, required_slots)
-            state.original_query = user_message
-            state.latest_user_message = user_message
-            state.history = [{"role": "user", "content": user_message}]
 
             extracted_name = self._extract_name(user_message)
             if extracted_name:
@@ -139,9 +136,6 @@ class MultiTurnConversationManager:
 
         if not has_active_topic:
             state = self._start_new_thread(user_message, required_slots)
-            state.original_query = user_message
-            state.latest_user_message = user_message
-            state.history = [{"role": "user", "content": user_message}]
 
             extracted_name = self._extract_name(user_message)
             if extracted_name:
@@ -153,7 +147,7 @@ class MultiTurnConversationManager:
 
             needs_clarification = bool(state.missing_slots)
             fused_query = self.build_fused_query(state)
-            print(f"[multi-turn] new_thread: {fused_query!r}", flush=True)
+            print(f"[multi-turn] new_thread: {user_message!r}", flush=True)
 
             self.save_state(state, session_id=session_id)
 
@@ -175,9 +169,6 @@ class MultiTurnConversationManager:
 
         if starts_new_topic and not is_list_followup and not is_short_wh_followup:
             state = self._start_new_thread(user_message, required_slots)
-            state.original_query = user_message
-            state.latest_user_message = user_message
-            state.history = [{"role": "user", "content": user_message}]
 
             extracted_name = self._extract_name(user_message)
             if extracted_name:
@@ -189,7 +180,7 @@ class MultiTurnConversationManager:
 
             needs_clarification = bool(state.missing_slots)
             fused_query = self.build_fused_query(state)
-            print(f"[multi-turn] new_thread: {fused_query!r}", flush=True)
+            print(f"[multi-turn] new_thread: {user_message!r}", flush=True)
 
             self.save_state(state, session_id=session_id)
 
@@ -404,6 +395,12 @@ class MultiTurnConversationManager:
             if any(text.startswith(prefix) for prefix in pronoun_starts):
                 return True
 
+            if "school year" in text or "this school year" in text:
+                return True
+
+            if re.search(r"\b(january|february|march|april|may|june|july|august|september|october|november|december)\b", text):
+                return True
+
         return False
 
     def _is_followup_message(self, message: str) -> bool:
@@ -517,24 +514,8 @@ class MultiTurnConversationManager:
         if self._refers_to_prior_list(message, state):
             return False
 
-        followup_markers = [
-            "why",
-            "how",
-            "what about",
-            "this year",
-            "this month",
-            "same",
-            "continue",
-            "next",
-            "also",
-            "again",
-            "and ",
-            "it ",
-            "that ",
-            "this ",
-        ]
-        if any(text.startswith(marker) for marker in followup_markers):
-            return False
+        if self._is_list_intent(text):
+            return True
 
         new_name = self._extract_name(text)
         old_name = self._extract_name((state.original_query or "").lower())
@@ -544,25 +525,6 @@ class MultiTurnConversationManager:
         if new_name and not old_name:
             return True
         if new_name and text == new_name:
-            return True
-
-        starter_phrases = [
-            "i want",
-            "can you",
-            "can i",
-            "could you",
-            "please show",
-            "show me",
-            "give me",
-            "find",
-            "list",
-            "what is",
-            "how many",
-            "tell me",
-            "provide",
-        ]
-
-        if any(text.startswith(sp) for sp in starter_phrases):
             return True
 
         return False
