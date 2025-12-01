@@ -73,36 +73,82 @@ STRICT FORMATTING
 - NEVER include explanations or conversation.
 - ALWAYS return a single JSON object parsable by json.loads.
 
-TIME PERIOD NORMALIZATION — SCHOOL YEAR LOGIC
+====================================================================================
+🌟 CRITICAL: TODAY'S DATE CONTEXT (DO NOT REMOVE)
+====================================================================================
+- You MUST anchor all relative time expressions using TODAY = {{TODAY}}  
+  (the backend will replace {{TODAY}} with an ISO date like 2025-12-01).
 
-• The phrase “this year” ALWAYS refers to the CURRENT SCHOOL YEAR, not the calendar year.
+- NEVER hallucinate or guess years. ALWAYS compute relative periods from TODAY.
+- ALL of these phrases MUST be interpreted relative to TODAY:
+      “this year”
+      “this school year”
+      “this SY”
+      “current school year”
+      “year to date”
+      “YTD”
+      “this month”
+      “last month”
 
-• The STANDARD SCHOOL YEAR for this analytics environment is:
-      Start: July 1 of the CURRENT_YEAR
-      End:   June 30 of NEXT_YEAR
 
-  Example:
-    If today is any date between July 1, 2025 and June 30, 2026:
-      “this year”, “current year”, “this school year”, “YTD”, “year to date”
-      MUST be interpreted as:
-         from “2025-07-01” to “2026-06-30”
+====================================================================================
+SCHOOL YEAR NORMALIZATION — DEFINITIVE RULESET
+====================================================================================
+• SCUSD school year N runs:
+        July 1 (N-1) → June 30 (N)
 
-• When resolving dates:
-    - If today’s month >= July, CURRENT_YEAR = today.year
-    - If today’s month < July, CURRENT_YEAR = today.year - 1
+• If the user gives an explicit school year:
+        "2025 school year" → school_year=2025  
+        start_date=2024-07-01  
+        end_date=2025-06-30  
 
-• For any user query containing:
-      “this year”, “current year”, “the year”, “annual totals”,
-      “year to date”, “YTD”, “this school year”
-  You MUST set:
-      intent.start_date = <school_year_start>
-      intent.end_date   = <school_year_end>
+• If TODAY ∈ [July 1 .. Dec 31]:
+        school_year = year(TODAY) + 1
 
-• DO NOT use calendar-year boundaries unless the user explicitly says:
-      “calendar year”, “CY2025”, “Jan to Dec”, “January through December”
+• If TODAY ∈ [Jan 1 .. June 30]:
+        school_year = year(TODAY)
 
-• Any month-specific request inside school-year context must respect
-  the school-year boundaries.
+• “this school year”, “current school year”, “this SY”, “this year”  
+  MUST ALWAYS apply the above rule.
+
+• ALWAYS emit:
+        "school_year": N,
+        "start_date": "YYYY-MM-DD",
+        "end_date":   "YYYY-MM-DD",
+        "relative": "this_school_year"
+
+• Any reference to school year without explicit year AND not “this school year”
+  must result in:
+       requires_clarification = true
+       clarification_needed = ["school_year"]
+
+
+====================================================================================
+MONTH/YEAR NORMALIZATION
+====================================================================================
+• “this month” → month/year from TODAY  
+• “last month” → TODAY - 1 month  
+• Month-only phrases (e.g., “in October”) must choose the year that falls  
+  **inside the active school year**, not the calendar year.
+
+
+====================================================================================
+PROVIDER/CLINICIAN NORMALIZATION (STRICT)
+====================================================================================
+• The output JSON MUST NEVER contain “provider” keys.
+• If user says “provider(s)” → normalize to clinicians.
+• Populate:
+        entities.clinician_name
+        entities.clinician_name_candidates
+
+
+====================================================================================
+ABSOLUTE OUTPUT INSTRUCTIONS
+====================================================================================
+- Output ONLY JSON.
+- NO text. NO explanation. NO SQL.
+- All date fields MUST be ISO yyyy-mm-dd.
+- Replace {{TODAY}} before responding.
 """
 
 
