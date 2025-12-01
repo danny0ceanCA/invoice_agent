@@ -580,14 +580,6 @@ class MultiTurnConversationManager:
         return info
 
     def _extract_name(self, message: str) -> Optional[str]:
-        """
-        Heuristic student-name extractor.
-
-        Rules:
-        - Prefer patterns like "for Carter Sanchez", "for Chloe Taylor".
-        - Ignore obvious non-names (I, This, That, Can, months, etc.).
-        - Fall back to capitalized tokens as a name (supports single-word names like "Luke").
-        """
         if not message:
             return None
 
@@ -611,80 +603,60 @@ class MultiTurnConversationManager:
             "How",
             "When",
             "Where",
-            # months – we don't want "July August" as a name
-            "January",
-            "February",
-            "March",
-            "April",
-            "May",
-            "June",
+            "Provider",
+            "Providers",
+            "Student",
+            "Students",
+            "Cost",
+            "Hours",
+            "Service",
+            "Services",
             "July",
             "August",
             "September",
             "October",
             "November",
             "December",
+            "January",
+            "February",
+            "March",
+            "April",
+            "May",
+            "June",
         }
-        lower_stop_words = {word.lower() for word in stop_words}
+        stop_words_lower = {word.lower() for word in stop_words}
 
-        # 1) Prefer "for First Last" style patterns (e.g., "for Carter Sanchez").
-        #    Allow lowercase variants and avoid swallowing trailing time-period phrases.
-        for_pattern = re.search(
-            r"\bfor\s+([A-Za-z]+(?:\s+[A-Za-z]+){1,2})\b",
-            message,
-            re.IGNORECASE,
-        )
-        if for_pattern:
-            candidate = for_pattern.group(1).strip()
-            candidate_tokens = candidate.lower().split()
-            if not all(token in lower_stop_words for token in candidate_tokens):
-                if not hasattr(self, "_is_valid_name") or self._is_valid_name(candidate):
-                    return candidate
+        token_pattern = r"\b[A-Z][a-z]+\b"
 
-        # 2) Fallback: scan for capitalized tokens that look like names
-        #    and ignore pronouns, months, and common verbs.
-        tokens = re.findall(r"\b[A-Z][a-z]+\b", message)
-        name_tokens = [t for t in tokens if t not in stop_words]
-
-        # Prefer "First Last" if we have at least two name-like tokens
-        if len(name_tokens) >= 2:
-            candidate = f"{name_tokens[0]} {name_tokens[1]}"
-            if not hasattr(self, "_is_valid_name") or self._is_valid_name(candidate):
-                return candidate
-
-        # Otherwise, a single remaining capitalized token is probably a first name
-        if len(name_tokens) == 1:
-            candidate = name_tokens[0]
-            if not hasattr(self, "_is_valid_name") or self._is_valid_name(candidate):
-                return candidate
-
-        # 3) Lowercase-aware fallback: try lowercase patterns and simple token heuristics
-        message_lower = message.lower()
-
-        lower_for_pattern = re.search(
-            r"\bfor\s+([a-z]+(?:\s+[a-z]+){1,2})\b",
-            message_lower,
-        )
-        if lower_for_pattern:
-            start, end = lower_for_pattern.span(1)
-            candidate = message[start:end].strip()
-            candidate_tokens = candidate.lower().split()
-            if not all(token in lower_stop_words for token in candidate_tokens):
-                if not hasattr(self, "_is_valid_name") or self._is_valid_name(candidate):
-                    return candidate
-
-        original_tokens = re.findall(r"[A-Za-z]+", message)
-        filtered_tokens: List[str] = []
-        for token in original_tokens:
-            lower_token = token.lower()
-            if lower_token in lower_stop_words:
+        for_match_iter = re.finditer(r"\bfor\s+((?:[A-Z][a-z]+(?:\s+|$)){1,2})", message)
+        for match in for_match_iter:
+            tokens = re.findall(token_pattern, match.group(1))
+            if not 1 <= len(tokens) <= 2:
+                candidate = " ".join(tokens) if tokens else match.group(1).strip()
+                print(f"[multi-turn-debug] NAME_SKIPPED: {candidate!r}", flush=True)
                 continue
-            filtered_tokens.append(token)
+            if any(token.lower() in stop_words_lower for token in tokens):
+                candidate = " ".join(tokens)
+                print(f"[multi-turn-debug] NAME_SKIPPED: {candidate!r}", flush=True)
+                continue
+            candidate = " ".join(tokens)
+            print(f"[multi-turn-debug] NAME_EXTRACTED: {candidate!r}", flush=True)
+            return candidate
 
-        if len(filtered_tokens) >= 2:
-            candidate = f"{filtered_tokens[0]} {filtered_tokens[1]}"
-            if not hasattr(self, "_is_valid_name") or self._is_valid_name(candidate):
-                return candidate
+        name_seq_pattern = r"\b[A-Z][a-z]+\b(?:\s+\b[A-Z][a-z]+\b)?"
+        for match in re.finditer(name_seq_pattern, message):
+            tokens = re.findall(token_pattern, match.group(0))
+            if not 1 <= len(tokens) <= 2:
+                candidate = " ".join(tokens) if tokens else match.group(0).strip()
+                print(f"[multi-turn-debug] NAME_SKIPPED: {candidate!r}", flush=True)
+                continue
+            if any(token.lower() in stop_words_lower for token in tokens):
+                candidate = " ".join(tokens)
+                print(f"[multi-turn-debug] NAME_SKIPPED: {candidate!r}", flush=True)
+                continue
+            candidate = " ".join(tokens)
+            print(f"[multi-turn-debug] NAME_EXTRACTED: {candidate!r}", flush=True)
+            return candidate
 
         return None
 
