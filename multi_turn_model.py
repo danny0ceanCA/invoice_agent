@@ -1,11 +1,11 @@
 """
-Multi-turn conversation fusion model.
+Unified, domain-agnostic multi-turn conversation manager.
 """
 from __future__ import annotations
 
-import re
 import json
-from dataclasses import dataclass, field, asdict
+import re
+from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional
 
 
@@ -59,10 +59,7 @@ class MultiTurnConversationManager:
 
     def save_state(self, state: ConversationState, session_id: Optional[str] = None) -> None:
         if session_id is None:
-            if state.history:
-                session_id = state.history[-1].get("session_id") or ""
-            else:
-                return
+            return
         key = self._state_key(session_id)
         try:
             payload = json.dumps(state.to_dict())
@@ -90,55 +87,58 @@ class MultiTurnConversationManager:
         user_message: str,
         required_slots: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
+        user_message = user_message.strip()
         state = self.get_state(session_id)
-        is_first_turn = state.original_query is None
 
-        # --------------------------------------------------------------
-        # NEW: If this message is a LIST INTENT, reset multi-turn state.
-        # This prevents "student list" from contaminating follow-up queries.
-        # --------------------------------------------------------------
         if self._is_list_intent(user_message):
-            # FULL RESET
-            state = ConversationState(
-                original_query=user_message,
-                latest_user_message=user_message,
-                pending_intent=None,
-                missing_slots=[],
-                resolved_slots={},
-                history=[{"role": "user", "content": user_message}]
-            )
-            # Persist reset state and return a clean fused query
+            state = self._start_new_thread(user_message, required_slots)
+            needs_clarification = False
+            fused_query = user_message
             self.save_state(state, session_id=session_id)
             return {
                 "session_id": session_id,
-                "needs_clarification": False,
+                "needs_clarification": needs_clarification,
                 "clarification_prompt": None,
-                "fused_query": user_message,
+                "fused_query": fused_query,
                 "state": state.to_dict(),
             }
 
-        if is_first_turn:
-            state.original_query = user_message
-        else:
-            state.latest_user_message = user_message
+        if state.original_query is None:
+            state = self._start_new_thread(user_message, required_slots)
+            needs_clarification = bool(state.missing_slots)
+            fused_query = user_message
+            self.save_state(state, session_id=session_id)
+            return {
+                "session_id": session_id,
+                "needs_clarification": needs_clarification,
+                "clarification_prompt": self._build_clarification_prompt(state),
+                "fused_query": fused_query,
+                "state": state.to_dict(),
+            }
 
+        if self._starts_new_topic(user_message, state):
+            state = self._start_new_thread(user_message, required_slots)
+            needs_clarification = bool(state.missing_slots)
+            fused_query = user_message
+            self.save_state(state, session_id=session_id)
+            return {
+                "session_id": session_id,
+                "needs_clarification": needs_clarification,
+                "clarification_prompt": self._build_clarification_prompt(state),
+                "fused_query": fused_query,
+                "state": state.to_dict(),
+            }
+
+        # Follow-up message keeps the existing thread
         state.history.append({"role": "user", "content": user_message})
+        state.latest_user_message = user_message
 
-        if required_slots is not None:
-            current_missing = [slot for slot in required_slots if slot not in state.resolved_slots]
-            state.missing_slots = current_missing
+        if required_slots is not None and not state.missing_slots:
+            state.missing_slots = list(required_slots)
 
-        self._attempt_slot_fill(state, user_message, allow_fallback_value=not is_first_turn)
-
-        if required_slots is not None:
-            state.missing_slots = [slot for slot in required_slots if slot not in state.resolved_slots]
+        self._attempt_slot_fill(state, user_message, allow_fallback_value=True)
 
         needs_clarification = bool(state.missing_slots)
-        clarification_prompt = None
-        if needs_clarification:
-            slots_text = ", ".join(state.missing_slots)
-            clarification_prompt = f"I need the following additional details: {slots_text}."
-
         fused_query = self.build_fused_query(state)
 
         self.save_state(state, session_id=session_id)
@@ -146,37 +146,79 @@ class MultiTurnConversationManager:
         return {
             "session_id": session_id,
             "needs_clarification": needs_clarification,
-            "clarification_prompt": clarification_prompt,
+            "clarification_prompt": self._build_clarification_prompt(state) if needs_clarification else None,
             "fused_query": fused_query,
             "state": state.to_dict(),
         }
 
-    # --------------------------------------------------------------
-    # NEW: List Intent Detection (same logic as analytics agent)
-    # --------------------------------------------------------------
+    def _start_new_thread(
+        self, user_message: str, required_slots: Optional[List[str]]
+    ) -> ConversationState:
+        missing_slots = list(required_slots) if required_slots else []
+        return ConversationState(
+            original_query=user_message,
+            latest_user_message=user_message,
+            pending_intent=None,
+            missing_slots=missing_slots,
+            resolved_slots={},
+            history=[{"role": "user", "content": user_message}],
+        )
+
     def _is_list_intent(self, query: str) -> bool:
         if not query:
             return False
         text = query.lower().strip()
-        direct = [
-            "student list",
-            "list students",
-            "list of students",
-            "show students",
-            "show me the student list",
-            "give me the student list",
-            "students list",
-            "list all students",
-            "show all students",
+        list_patterns = [
+            r"\blist\b",
+            r"\blist of\b",
+            r"\bshow me the list\b",
+            r"\b\w+ list\b",
+            r"\blist \w+\b",
         ]
-        if any(p in text for p in direct):
+        phrases = [
+            "show me the list",
+            "list of",
+            "list",
+        ]
+        if any(phrase in text for phrase in phrases):
             return True
+        return any(re.search(pattern, text) for pattern in list_patterns)
 
-        # Regex fallback
-        if re.search(r"list\s+of\s+students|students?\s+list", text):
-            return True
+    def _is_followup(self, message: str) -> bool:
+        if not message:
+            return False
+        text = message.lower()
+        markers = [
+            "now",
+            "also",
+            "again",
+            "too",
+            "as well",
+            "another",
+            "next",
+            "what about",
+            "how about",
+            "same",
+            "continue",
+        ]
+        return any(marker in text for marker in markers)
 
-        return False
+    def _starts_new_topic(self, message: str, state: ConversationState) -> bool:
+        if not state.original_query:
+            return False
+        if self._is_followup(message):
+            return False
+        triggers = [
+            "show",
+            "give me",
+            "what is",
+            "how many",
+            "tell me",
+            "provide",
+            "find",
+        ]
+        lowered = message.lower().strip()
+        return any(lowered.startswith(trigger) for trigger in triggers)
 
     def _attempt_slot_fill(
         self, state: ConversationState, user_message: str, *, allow_fallback_value: bool = True
@@ -191,18 +233,25 @@ class MultiTurnConversationManager:
         lowered = normalized.lower()
         for slot in list(state.missing_slots):
             slot_key = slot.lower()
-            prefix = f"{slot_key}:"
-            if lowered.startswith(prefix):
-                value = normalized[len(prefix):].strip()
+            pattern = rf"{re.escape(slot_key)}\s*[:=-]\s*(.+)"
+            match = re.search(pattern, lowered)
+            if match:
+                value = normalized[match.start(1) : match.end(1)].strip()
                 if value:
                     state.resolved_slots[slot] = value
                     state.missing_slots.remove(slot)
-                return
+                continue
 
         if allow_fallback_value and len(state.missing_slots) == 1 and len(normalized) <= 120 and "?" not in normalized:
             target_slot = state.missing_slots[0]
             state.resolved_slots[target_slot] = normalized
             state.missing_slots = []
+
+    def _build_clarification_prompt(self, state: ConversationState) -> Optional[str]:
+        if not state.missing_slots:
+            return None
+        slots_text = ", ".join(state.missing_slots)
+        return f"I need the following additional details: {slots_text}."
 
     def build_fused_query(self, state: ConversationState) -> str:
         if not state.original_query:
@@ -250,13 +299,13 @@ def demo() -> None:
 
     first_turn = manager.process_user_message(
         session_id,
-        "Show me last month's performance report",
-        required_slots=["department"],
+        "Show me the latest metrics",
+        required_slots=["category"],
     )
     second_turn = manager.process_user_message(
         session_id,
-        "Marketing",
-        required_slots=["department"],
+        "category: web traffic",
+        required_slots=["category"],
     )
 
     print("First turn:", first_turn)
