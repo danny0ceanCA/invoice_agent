@@ -714,9 +714,39 @@ class MultiTurnConversationManager:
         }
         return name.lower() not in bad
 
+    def _refers_to_provider_followup(self, message: str, state: ConversationState) -> bool:
+        if not state.active_topic or state.active_topic.get("type") != "student":
+            return False
+
+        text = (message or "").lower()
+        provider_keywords = [
+            "provider",
+            "providers",
+            "hours",
+            "care",
+            "who provided",
+            "show me providers",
+        ]
+
+        if not any(keyword in text for keyword in provider_keywords):
+            return False
+
+        extracted_name = self._extract_name(message)
+        if extracted_name and self._is_valid_name(extracted_name):
+            active_student = state.active_topic.get("value")
+            if not active_student or extracted_name.lower() != str(active_student).lower():
+                return False
+
+        print("[multi-turn-debug] PROVIDER_FOLLOWUP_MATCH", flush=True)
+        return True
+
     def _starts_new_topic(self, message: str, state: ConversationState) -> bool:
         if state.original_query is None:
             return True
+
+        if self._refers_to_provider_followup(message, state):
+            print("[multi-turn-debug] PROVIDER_FOLLOWUP_SUPPRESS_TOPIC_SHIFT", flush=True)
+            return False
 
         text = message.lower().strip()
 
