@@ -521,56 +521,122 @@ class MultiTurnConversationManager:
         return info
 
     def _extract_name(self, message: str) -> Optional[str]:
+        """
+        Heuristic student-name extractor.
+
+        Rules:
+        - Prefer patterns like "for Carter Sanchez", "for Chloe Taylor".
+        - Ignore obvious non-names (I, This, That, Can, months, etc.).
+        - Fall back to capitalized tokens as a name (supports single-word names like "Luke").
+        """
         if not message:
             return None
-        match = re.search(r"\b([A-Za-z]+\s+[A-Za-z]+)\b", message)
-        if not match:
-            return None
-        return match.group(1).strip().lower()
+
+        # 1) Prefer "for First Last" style patterns (e.g., "for Carter Sanchez").
+        #    Requires at least two capitalized words so we don't grab "for July".
+        for_pattern = re.search(
+            r"\bfor\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b",
+            message,
+        )
+        if for_pattern:
+            return for_pattern.group(1).strip()
+
+        # 2) Fallback: scan for capitalized tokens that look like names
+        #    and ignore pronouns, months, and common verbs.
+        tokens = re.findall(r"\b[A-Z][a-z]+\b", message)
+
+        stop_words = {
+            "I",
+            "We",
+            "You",
+            "They",
+            "It",
+            "This",
+            "That",
+            "Now",
+            "Then",
+            "Can",
+            "Give",
+            "Show",
+            "List",
+            "Who",
+            "What",
+            "Why",
+            "How",
+            "When",
+            "Where",
+            # months – we don't want "July August" as a name
+            "January",
+            "February",
+            "March",
+            "April",
+            "May",
+            "June",
+            "July",
+            "August",
+            "September",
+            "October",
+            "November",
+            "December",
+        }
+
+        name_tokens = [t for t in tokens if t not in stop_words]
+
+        # Prefer "First Last" if we have at least two name-like tokens
+        if len(name_tokens) >= 2:
+            return f"{name_tokens[0]} {name_tokens[1]}"
+
+        # Otherwise, a single remaining capitalized token is probably a first name
+        if len(name_tokens) == 1:
+            return name_tokens[0]
+
+        return None
 
     def _starts_new_topic(self, message: str, state: ConversationState) -> bool:
-        if not message:
-            return not bool(state.active_topic)
+        if state.original_query is None:
+            return True
 
         text = message.lower().strip()
 
-        district_markers = [
-            "all students",
-            "district wide",
-            "district-wide",
-            "entire district",
-        ]
+        # --- 1) ENTITY-BASED TOPIC SHIFT (student change) --------------------
+        new_name = self._extract_name(message)
+        old_name = self._extract_name(state.original_query or "")
 
-        if any(marker in text for marker in district_markers):
+        if new_name and old_name and new_name.lower() != old_name.lower():
+            # New explicit student → always a new topic
+            print(
+                f"[multi-turn-debug] NEW_TOPIC_BY_STUDENT | old={old_name!r} -> new={new_name!r}",
+                flush=True,
+            )
             return True
 
-        if self._is_list_intent(text):
+        if new_name and not old_name:
+            # Previously no student, now we have one → new topic
+            print(
+                f"[multi-turn-debug] NEW_TOPIC_BY_STUDENT | old=None -> new={new_name!r}",
+                flush=True,
+            )
             return True
 
-        if not state.active_topic:
+        if new_name and text == new_name.lower():
+            # Message is just the name (e.g., "Carter Sanchez") → treat as a fresh topic
+            print(
+                f"[multi-turn-debug] NEW_TOPIC_BY_NAME_ONLY | name={new_name!r}",
+                flush=True,
+            )
             return True
 
-        new_name = self._extract_name(text)
-        active_type = state.active_topic.get("type") if isinstance(state.active_topic, dict) else None
-        active_value = (
-            (state.active_topic.get("value") or "").lower()
-            if isinstance(state.active_topic, dict)
-            else ""
-        )
-
-        if active_type == "student":
-            if new_name and new_name != active_value:
-                return True
+        # --- 2) POINTERS BACK TO PRIOR LISTS ARE FOLLOW-UPS -----------------
+        if self._refers_to_prior_list(message, state):
             return False
 
-        if new_name:
-            if active_value and new_name != active_value:
-                return True
+        # --- 3) PURE FOLLOW-UP MARKERS (what about, now, this school year...) ---
+        # These only apply if we did NOT detect a new student.
+        if self._is_followup(message, state):
+            return False
 
-            prior_name = self._extract_name((state.original_query or "").lower())
-            if prior_name:
-                return new_name != prior_name
-
+        # --- 4) EXPLICIT LIST INTENTS (global) ------------------------------
+        if self._is_list_intent(text):
             return True
 
         return False
