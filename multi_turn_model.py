@@ -207,27 +207,70 @@ class MultiTurnConversationManager:
         return any(marker in text for marker in markers)
 
     def _starts_new_topic(self, message: str, state: ConversationState) -> bool:
+        """
+        Determine whether the user is starting a new topic.
+
+        A new topic happens ONLY if:
+        - the user explicitly names a *different* student/vendor/clinician
+        - the message contains a clear new-subject indicator AND
+          it does NOT contain pronouns referring to the previous subject
+
+        Follow-up questions like:
+            "why did it decrease?"
+            "what about October?"
+            "explain this"
+        should NOT start new threads.
+
+        This makes multi-turn contextual.
+        """
         if not state.original_query:
             return False
-        lowered = message.lower().strip()
-        if self._mentions_new_entity(lowered):
-            return True
-        if self._is_followup(lowered):
-            return False
-        if self._looks_like_short_clarification(lowered):
-            return False
-        triggers = [
-            "show",
-            "give me",
-            "what is",
-            "how many",
-            "tell me",
-            "provide",
-            "find",
+
+        text = message.lower().strip()
+
+        # Strong follow-up indicators → stay in same topic
+        followup_markers = [
+            "why", "how", "explain", "what about",
+            "and for", "same", "this", "that", "it",
+            "continue", "next", "also", "again",
         ]
-        if any(lowered.startswith(trigger) for trigger in triggers):
+        if any(f in text for f in followup_markers):
+            return False
+
+        # Detect explicit new subject (“for X Y”)
+        name_match = re.search(r"\bfor\s+([A-Za-z]+(?:\s+[A-Za-z]+)+)", text)
+        if name_match:
+            explicit_target = name_match.group(1).strip().lower()
+
+            # Extract subject of the original query
+            prev_match = re.search(
+                r"\bfor\s+([A-Za-z]+(?:\s+[A-Za-z]+)+)",
+                state.original_query.lower()
+            )
+            prev_target = prev_match.group(1).strip().lower() if prev_match else None
+
+            # New name different from previous subject → start new topic
+            if prev_target and explicit_target != prev_target:
+                return True
+
+            # Same subject → continue existing topic
+            return False
+
+        # Generic queries like “show me”, “give me”, “find”
+        # DO NOT start new topics unless there is NO prior subject
+        starter_phrases = ["show", "give me", "find", "list", "what is"]
+        if any(text.startswith(sp) for sp in starter_phrases):
+            # If original query included a subject, treat as follow-up
+            prev_match = re.search(
+                r"\bfor\s+([A-Za-z]+(?:\s+[A-Za-z]+)+)",
+                state.original_query.lower()
+            )
+            if prev_match:
+                return False
             return True
-        return True
+
+        # Default: follow-up
+        return False
 
     def _mentions_new_entity(self, message: str) -> bool:
         if not message:

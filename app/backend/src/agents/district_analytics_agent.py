@@ -486,24 +486,18 @@ class Workflow:
             except Exception as exc:  # pragma: no cover - defensive
                 LOGGER.warning("analytics_memory_load_failed", error=str(exc))
 
+        # Multi-turn fusion: incorporate follow-up context into a fused query
         if agent.multi_turn_manager and session_id:
             try:
-                fusion_result = agent.multi_turn_manager.process_user_message(session_id, query)
-                candidate = fusion_result.get("fused_query")
-                if isinstance(candidate, str) and candidate.strip():
-                    LOGGER.debug(
-                        "multi_turn_applied",
-                        original_query=query,
-                        fused_query=candidate.strip(),
-                    )
-                    query = candidate.strip()
+                fusion = agent.multi_turn_manager.process_user_message(session_id, query)
+                fused = fusion.get("fused_query")
+                if isinstance(fused, str) and fused.strip():
+                    query = fused.strip()
                 else:
                     query = query.strip()
             except Exception as exc:
                 LOGGER.warning("multi_turn_fusion_failed", error=str(exc))
                 query = query.strip()
-        else:
-            query = query.strip()
 
         # Apply sticky student filter by inspecting history and, if we find an
         # ACTIVE_STUDENT_FILTER tag, rewriting the incoming query so the model
