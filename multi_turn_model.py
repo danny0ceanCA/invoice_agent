@@ -113,12 +113,17 @@ class MultiTurnConversationManager:
             state = self._start_new_thread(user_message, required_slots)
 
             extracted_name = self._extract_name(user_message)
-            if extracted_name:
+            if extracted_name and self._is_valid_name(extracted_name):
                 state.active_topic = {
                     "type": "student",
                     "value": extracted_name,
                     "last_query": user_message,
                 }
+            elif extracted_name and not self._is_valid_name(extracted_name):
+                print(
+                    f"[multi-turn-debug] IGNORE_BAD_NAME | extracted={extracted_name!r}",
+                    flush=True,
+                )
 
             needs_clarification = bool(state.missing_slots)
             fused_query = user_message
@@ -142,12 +147,17 @@ class MultiTurnConversationManager:
             state = self._start_new_thread(user_message, required_slots)
 
             extracted_name = self._extract_name(user_message)
-            if extracted_name:
+            if extracted_name and self._is_valid_name(extracted_name):
                 state.active_topic = {
                     "type": "student",
                     "value": extracted_name,
                     "last_query": user_message,
                 }
+            elif extracted_name and not self._is_valid_name(extracted_name):
+                print(
+                    f"[multi-turn-debug] IGNORE_BAD_NAME | extracted={extracted_name!r}",
+                    flush=True,
+                )
 
             needs_clarification = bool(state.missing_slots)
             fused_query = self.build_fused_query(state)
@@ -179,12 +189,17 @@ class MultiTurnConversationManager:
             state = self._start_new_thread(user_message, required_slots)
 
             extracted_name = self._extract_name(user_message)
-            if extracted_name:
+            if extracted_name and self._is_valid_name(extracted_name):
                 state.active_topic = {
                     "type": "student",
                     "value": extracted_name,
                     "last_query": user_message,
                 }
+            elif extracted_name and not self._is_valid_name(extracted_name):
+                print(
+                    f"[multi-turn-debug] IGNORE_BAD_NAME | extracted={extracted_name!r}",
+                    flush=True,
+                )
 
             needs_clarification = bool(state.missing_slots)
             fused_query = self.build_fused_query(state)
@@ -591,6 +606,32 @@ class MultiTurnConversationManager:
             return name_tokens[0]
 
         return None
+
+    def _is_valid_name(self, name: str) -> bool:
+        if not name:
+            return False
+        bad = {
+            "i",
+            "me",
+            "you",
+            "we",
+            "they",
+            "i want",
+            "want",
+            "show",
+            "give",
+            "this",
+            "that",
+            "it",
+            "cost",
+            "hours",
+            "provider",
+            "providers",
+            "student",
+            "students",
+            "see",
+        }
+        return name.lower() not in bad
 
     def _starts_new_topic(self, message: str, state: ConversationState) -> bool:
         if state.original_query is None:
