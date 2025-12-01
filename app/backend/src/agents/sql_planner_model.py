@@ -197,6 +197,19 @@ Do NOT insert schema columns.
 Do NOT produce SQL.
 
 ===============================================================
+SCHOOL YEAR SQL RULES:
+
+• When NLV has flagged a school-year period (start_date, end_date),
+  you MUST use those exact normalized boundaries in SQL:
+
+    WHERE invoice_date BETWEEN :start_date AND :end_date
+
+• NEVER substitute calendar-year ranges unless the user explicitly requests them.
+
+• If the user says “this year” and NO explicit dates are supplied,
+  you MUST generate a SQL plan using the school-year boundaries from NLV.
+
+==============================================================
 END OF RULES
 """
 
