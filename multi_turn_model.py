@@ -106,7 +106,12 @@ class MultiTurnConversationManager:
         is_first_turn = state.original_query is None
         starts_new_topic = False if is_first_turn else self._starts_new_topic(user_message, state)
 
-        if self._is_list_intent(user_message) or is_first_turn or starts_new_topic:
+        refers_to_prior_list = self._refers_to_prior_list(user_message, state)
+
+        if (
+            not refers_to_prior_list
+            and (self._is_list_intent(user_message) or is_first_turn or starts_new_topic)
+        ):
             state = self._start_new_thread(user_message, required_slots)
             state.original_query = user_message
             state.latest_user_message = user_message
@@ -220,20 +225,35 @@ class MultiTurnConversationManager:
         if not query:
             return False
         text = query.lower().strip()
-        list_patterns = [
-            r"\blist\s+of\s+\w+",
-            r"\b\w+\s+list\b",
-            r"\blist\s+\w+",
-            r"\bshow\s+.*\blist\b",
+
+        if "this list" in text or "that list" in text:
+            return False
+
+        explicit_phrases = [
+            "student list",
+            "list students",
+            "list of students",
+            "show students",
+            "show me the student list",
+            "give me the student list",
+            "students list",
+            "list all students",
+            "show all students",
+            "provider list",
+            "list providers",
+            "list all providers",
+            "show all providers",
         ]
-        phrases = [
-            "list of",
-            "list all",
-            "show me the list",
-        ]
-        if any(phrase in text for phrase in phrases):
+
+        return any(phrase in text for phrase in explicit_phrases)
+
+    def _refers_to_prior_list(self, message: str, state: ConversationState) -> bool:
+        if not message or not state.original_query:
+            return False
+        text = message.lower()
+        if "this list" in text or "that list" in text:
             return True
-        return any(re.search(pattern, text) for pattern in list_patterns)
+        return False
 
     def _is_followup(self, message: str) -> bool:
         if not message:
