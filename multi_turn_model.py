@@ -137,9 +137,43 @@ class MultiTurnConversationManager:
                 "state": state.to_dict(),
             }
 
+        if not has_active_topic:
+            state = self._start_new_thread(user_message, required_slots)
+            state.original_query = user_message
+            state.latest_user_message = user_message
+            state.history = [{"role": "user", "content": user_message}]
+
+            extracted_name = self._extract_name(user_message)
+            if extracted_name:
+                state.active_topic = {
+                    "type": "student",
+                    "value": extracted_name,
+                    "last_query": user_message,
+                }
+
+            needs_clarification = bool(state.missing_slots)
+            fused_query = self.build_fused_query(state)
+            print(f"[multi-turn] new_thread: {fused_query!r}", flush=True)
+
+            self.save_state(state, session_id=session_id)
+
+            return {
+                "session_id": session_id,
+                "needs_clarification": needs_clarification,
+                "clarification_prompt": self._build_clarification_prompt(state)
+                if needs_clarification
+                else None,
+                "fused_query": fused_query,
+                "state": state.to_dict(),
+            }
+
+        is_short_wh_followup = (
+            self._is_short_wh_followup(user_message) if has_active_topic else False
+        )
+
         starts_new_topic = self._starts_new_topic(user_message, state)
 
-        if starts_new_topic and not is_list_followup:
+        if starts_new_topic and not is_list_followup and not is_short_wh_followup:
             state = self._start_new_thread(user_message, required_slots)
             state.original_query = user_message
             state.latest_user_message = user_message
@@ -219,7 +253,10 @@ class MultiTurnConversationManager:
 
         needs_clarification = bool(state.missing_slots)
         fused_query = self.build_fused_query(state)
-        print(f"[multi-turn] followup_fused: {fused_query!r}", flush=True)
+        if is_short_wh_followup:
+            print(f"[multi-turn] followup_short_wh: {fused_query!r}", flush=True)
+        else:
+            print(f"[multi-turn] followup_fused: {fused_query!r}", flush=True)
 
         self.save_state(state, session_id=session_id)
 
@@ -294,6 +331,41 @@ class MultiTurnConversationManager:
             "that student list",
         ]
         return any(marker in text for marker in markers)
+
+    def _is_short_wh_followup(self, message: str) -> bool:
+        if not message:
+            return False
+
+        normalized = message.strip()
+        if len(normalized) > 80:
+            return False
+
+        prefixes = [
+            "who",
+            "what",
+            "why",
+            "how",
+            "when",
+            "where",
+            "can you",
+            "could you",
+            "would you",
+            "now",
+            "ok",
+            "okay",
+            "and",
+            "then",
+        ]
+
+        lower_message = normalized.lower()
+        if not any(lower_message.startswith(prefix) for prefix in prefixes):
+            return False
+
+        capitalized_words = re.findall(r"\b[A-Z][a-z]+\b", normalized)
+        if len(capitalized_words) >= 2:
+            return False
+
+        return True
 
     def _is_followup(self, message: str, state: ConversationState) -> bool:
         if not message:
