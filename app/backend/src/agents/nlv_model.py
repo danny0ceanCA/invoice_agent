@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from datetime import date
 
 from openai import OpenAI
 
@@ -163,6 +164,82 @@ def _default_payload() -> dict[str, Any]:
     }
 
 
+def _compute_current_school_year(today: date) -> dict[str, Any]:
+    """
+    Compute the current school year window treating "this year" / "this school year"
+    as the ACTIVE school year that spans July 1 → June 30.
+
+    SCUSD convention:
+      - School year N runs from July 1 (N-1) to June 30 (N).
+      - If today is between July 1 and Dec 31 (inclusive):
+            school_year = today.year + 1
+        else (Jan 1 to Jun 30):
+            school_year = today.year
+    """
+    if today.month >= 7:
+        start_year = today.year
+        end_year = today.year + 1
+        school_year = end_year
+    else:
+        start_year = today.year - 1
+        end_year = today.year
+        school_year = end_year
+
+    return {
+        "school_year": school_year,
+        "start_date": f"{start_year:04d}-07-01",
+        "end_date": f"{end_year:04d}-06-30",
+    }
+
+
+def _apply_this_school_year_override(user_query: str, payload: dict[str, Any]) -> None:
+    """
+    Hard override the time_period for phrases like:
+      - "this school year", "current school year", "this SY"
+      - "this year", "current year", "year to date", "YTD" (per SCUSD semantics)
+
+    We do NOT rely on the model to compute dates here; we compute them
+    deterministically from date.today().
+    """
+    text = (user_query or "").lower()
+    triggers = [
+        "this school year",
+        "current school year",
+        "this sy",
+        "this year",
+        "current year",
+        "year to date",
+        "ytd",
+    ]
+
+    if not any(trigger in text for trigger in triggers):
+        return
+
+    window = _compute_current_school_year(date.today())
+
+    time_period = payload.get("time_period") or {}
+    if not isinstance(time_period, dict):
+        time_period = {}
+
+    time_period.update(
+        {
+            "school_year": window["school_year"],
+            "start_date": window["start_date"],
+            "end_date": window["end_date"],
+            "relative": "this_school_year",
+        }
+    )
+    payload["time_period"] = time_period
+
+    # If the model complained about missing school_year, clear that.
+    clar_list = payload.get("clarification_needed")
+    if isinstance(clar_list, list):
+        clar_list = [c for c in clar_list if c != "school_year"]
+        payload["clarification_needed"] = clar_list
+        if not clar_list:
+            payload["requires_clarification"] = False
+
+
 def run_nlv_model(
     *,
     user_query: str,
@@ -203,6 +280,10 @@ def run_nlv_model(
             parsed.get("clarification_needed"), list
         ):
             payload["clarification_needed"] = []
+
+        # Deterministic override for "this school year" / "this year" semantics.
+        _apply_this_school_year_override(user_query, payload)
+
         return payload
     except Exception:
         return _default_payload()
