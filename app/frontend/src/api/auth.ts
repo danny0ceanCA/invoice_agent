@@ -92,7 +92,10 @@ export async function selectUserRole(
   accessToken: string,
   role: RoleSelectionOption,
 ): Promise<CurrentUserResponse> {
-  return apiFetch<CurrentUserResponse>("/auth/set-role", accessToken, {
+  // The onboarding endpoint lives under the users namespace on the backend.
+  // Using the auth prefix results in a 404, leaving new accounts stuck on the
+  // role selection screen.
+  return apiFetch<CurrentUserResponse>("/users/set-role", accessToken, {
     method: "POST",
     body: JSON.stringify({ role }),
   });
