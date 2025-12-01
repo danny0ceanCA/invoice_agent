@@ -72,6 +72,37 @@ AMBIGUITY HANDLING
 STRICT FORMATTING
 - NEVER include explanations or conversation.
 - ALWAYS return a single JSON object parsable by json.loads.
+
+TIME PERIOD NORMALIZATION — SCHOOL YEAR LOGIC
+
+• The phrase “this year” ALWAYS refers to the CURRENT SCHOOL YEAR, not the calendar year.
+
+• The STANDARD SCHOOL YEAR for this analytics environment is:
+      Start: July 1 of the CURRENT_YEAR
+      End:   June 30 of NEXT_YEAR
+
+  Example:
+    If today is any date between July 1, 2025 and June 30, 2026:
+      “this year”, “current year”, “this school year”, “YTD”, “year to date”
+      MUST be interpreted as:
+         from “2025-07-01” to “2026-06-30”
+
+• When resolving dates:
+    - If today’s month >= July, CURRENT_YEAR = today.year
+    - If today’s month < July, CURRENT_YEAR = today.year - 1
+
+• For any user query containing:
+      “this year”, “current year”, “the year”, “annual totals”,
+      “year to date”, “YTD”, “this school year”
+  You MUST set:
+      intent.start_date = <school_year_start>
+      intent.end_date   = <school_year_end>
+
+• DO NOT use calendar-year boundaries unless the user explicitly says:
+      “calendar year”, “CY2025”, “Jan to Dec”, “January through December”
+
+• Any month-specific request inside school-year context must respect
+  the school-year boundaries.
 """
 
 
