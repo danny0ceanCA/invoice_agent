@@ -94,6 +94,7 @@ class MultiTurnConversationManager:
             state = self._start_new_thread(user_message, required_slots)
             needs_clarification = False
             fused_query = user_message
+            print(f"[multi-turn] new_thread: {user_message!r}", flush=True)
             self.save_state(state, session_id=session_id)
             return {
                 "session_id": session_id,
@@ -107,6 +108,7 @@ class MultiTurnConversationManager:
             state = self._start_new_thread(user_message, required_slots)
             needs_clarification = bool(state.missing_slots)
             fused_query = user_message
+            print(f"[multi-turn] new_thread: {user_message!r}", flush=True)
             self.save_state(state, session_id=session_id)
             return {
                 "session_id": session_id,
@@ -120,6 +122,7 @@ class MultiTurnConversationManager:
             state = self._start_new_thread(user_message, required_slots)
             needs_clarification = bool(state.missing_slots)
             fused_query = user_message
+            print(f"[multi-turn] new_thread: {user_message!r}", flush=True)
             self.save_state(state, session_id=session_id)
             return {
                 "session_id": session_id,
@@ -140,6 +143,7 @@ class MultiTurnConversationManager:
 
         needs_clarification = bool(state.missing_slots)
         fused_query = self.build_fused_query(state)
+        print(f"[multi-turn] followup_fused: {fused_query!r}", flush=True)
 
         self.save_state(state, session_id=session_id)
 
@@ -169,16 +173,15 @@ class MultiTurnConversationManager:
             return False
         text = query.lower().strip()
         list_patterns = [
-            r"\blist\b",
-            r"\blist of\b",
-            r"\bshow me the list\b",
-            r"\b\w+ list\b",
-            r"\blist \w+\b",
+            r"\blist\s+of\s+\w+",
+            r"\b\w+\s+list\b",
+            r"\blist\s+\w+",
+            r"\bshow\s+.*\blist\b",
         ]
         phrases = [
-            "show me the list",
             "list of",
-            "list",
+            "list all",
+            "show me the list",
         ]
         if any(phrase in text for phrase in phrases):
             return True
@@ -206,7 +209,12 @@ class MultiTurnConversationManager:
     def _starts_new_topic(self, message: str, state: ConversationState) -> bool:
         if not state.original_query:
             return False
-        if self._is_followup(message):
+        lowered = message.lower().strip()
+        if self._mentions_new_entity(lowered):
+            return True
+        if self._is_followup(lowered):
+            return False
+        if self._looks_like_short_clarification(lowered):
             return False
         triggers = [
             "show",
@@ -217,8 +225,25 @@ class MultiTurnConversationManager:
             "provide",
             "find",
         ]
-        lowered = message.lower().strip()
-        return any(lowered.startswith(trigger) for trigger in triggers)
+        if any(lowered.startswith(trigger) for trigger in triggers):
+            return True
+        return True
+
+    def _mentions_new_entity(self, message: str) -> bool:
+        if not message:
+            return False
+        return bool(re.search(r"\bfor\s+\w+", message))
+
+    def _looks_like_short_clarification(self, message: str) -> bool:
+        if not message:
+            return False
+        short_replies = {"yes", "no", "ok", "okay", "correct", "right", "sure", "thanks"}
+        words = message.split()
+        if len(words) <= 4:
+            return True
+        if message in short_replies:
+            return True
+        return False
 
     def _attempt_slot_fill(
         self, state: ConversationState, user_message: str, *, allow_fallback_value: bool = True
