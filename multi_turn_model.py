@@ -403,6 +403,14 @@ class MultiTurnConversationManager:
         if not message:
             return False
         text = message.lower().strip()
+        suppress_prefixes = [
+            "i want",
+            "i need",
+            "i would like",
+            "i'd like",
+            "i wanna",
+        ]
+        starts_with_suppressed = any(text.startswith(prefix) for prefix in suppress_prefixes)
         markers = [
             "now",
             "also",
@@ -416,12 +424,15 @@ class MultiTurnConversationManager:
             "same",
             "continue",
         ]
-        if any(marker in text for marker in markers):
-            return True
+        marker_hit = any(marker in text for marker in markers)
 
+        list_ref = False
+        pronoun_prefix_hit = False
+        school_year_hit = False
+        month_hit = False
         if state.original_query:
             if "that list" in text or "this list" in text:
-                return True
+                list_ref = True
 
             pronoun_starts = [
                 "who has ",
@@ -434,15 +445,21 @@ class MultiTurnConversationManager:
                 "why did that ",
             ]
             if any(text.startswith(prefix) for prefix in pronoun_starts):
-                return True
+                pronoun_prefix_hit = True
 
             if "school year" in text or "this school year" in text:
-                return True
+                school_year_hit = True
 
             if re.search(r"\b(january|february|march|april|may|june|july|august|september|october|november|december)\b", text):
-                return True
+                month_hit = True
 
-        return False
+        is_followup = marker_hit or list_ref or pronoun_prefix_hit or school_year_hit or month_hit
+
+        if starts_with_suppressed and not (list_ref or pronoun_prefix_hit or school_year_hit or month_hit):
+            print("[multi-turn-debug] SUPPRESS_FOLLOWUP_I_WANT", flush=True)
+            return False
+
+        return is_followup
 
     def _is_followup_message(self, message: str) -> bool:
         if not message:
