@@ -29,7 +29,7 @@ from .ir import AnalyticsEntities, AnalyticsIR, _coerce_rows, _payload_to_ir
 from .logic_model import build_logic_system_prompt, run_logic_model
 from .nlv_model import build_nlv_system_prompt, run_nlv_model
 from .rendering_model import build_rendering_system_prompt, run_rendering_model
-from .sql_router import route_sql
+from .sql_router import build_sql_router_system_prompt, run_sql_router_model
 from .sql_planner_model import build_sql_planner_system_prompt, run_sql_planner_model
 from .validator_model import build_validator_system_prompt, run_validator_model
 
@@ -454,6 +454,7 @@ class Workflow:
         nlv_system_prompt: str,
         entity_resolution_system_prompt: str,
         sql_planner_system_prompt: str,
+        router_system_prompt: str,
         logic_system_prompt: str,
         rendering_system_prompt: str,
         validator_system_prompt: str,
@@ -466,6 +467,7 @@ class Workflow:
         self.nlv_system_prompt = nlv_system_prompt
         self.entity_resolution_system_prompt = entity_resolution_system_prompt
         self.sql_planner_system_prompt = sql_planner_system_prompt
+        self.router_system_prompt = router_system_prompt
         self.logic_system_prompt = logic_system_prompt
         self.rendering_system_prompt = rendering_system_prompt
         self.validator_system_prompt = validator_system_prompt
@@ -709,12 +711,16 @@ class Workflow:
                 )
                 return _finalise_response(render_payload, context)
 
-        router_decision = route_sql(
+        router_decision = run_sql_router_model(
             user_query=query,
             sql_plan=plan,
             entities=resolved_entities,
             normalized_intent=resolved_intent,
             multi_turn_state=multi_turn_state,
+            client=agent.client,
+            model=agent.router_model,
+            system_prompt=self.router_system_prompt,
+            temperature=agent.router_temperature,
         )
 
         messages: list[dict[str, Any]] = [
@@ -1022,6 +1028,7 @@ class Agent:
         nlv_model: str,
         entity_model: str,
         sql_planner_model: str,
+        router_model: str,
         logic_model: str,
         render_model: str,
         validator_model: str,
@@ -1032,6 +1039,7 @@ class Agent:
         nlv_temperature: float = 0.1,
         entity_temperature: float = 0.1,
         sql_planner_temperature: float = 0.1,
+        router_temperature: float = 0.1,
         logic_temperature: float = 0.1,
         render_temperature: float = 0.1,
         validator_temperature: float = 0.1,
@@ -1042,6 +1050,7 @@ class Agent:
         self.nlv_model = nlv_model
         self.entity_model = entity_model
         self.sql_planner_model = sql_planner_model
+        self.router_model = router_model
         self.logic_model = logic_model
         self.render_model = render_model
         self.validator_model = validator_model
@@ -1050,6 +1059,7 @@ class Agent:
         self.nlv_temperature = nlv_temperature
         self.entity_temperature = entity_temperature
         self.sql_planner_temperature = sql_planner_temperature
+        self.router_temperature = router_temperature
         self.logic_temperature = logic_temperature
         self.render_temperature = render_temperature
         self.validator_temperature = validator_temperature
@@ -1845,6 +1855,7 @@ def _build_agent() -> Agent:
     nlv_system_prompt = build_nlv_system_prompt()
     entity_resolution_system_prompt = build_entity_resolution_system_prompt()
     sql_planner_system_prompt = build_sql_planner_system_prompt()
+    sql_router_system_prompt = build_sql_router_system_prompt()
     logic_system_prompt = build_logic_system_prompt()
     rendering_system_prompt = build_rendering_system_prompt()
     validator_system_prompt = build_validator_system_prompt()
@@ -1855,6 +1866,7 @@ def _build_agent() -> Agent:
         nlv_system_prompt=nlv_system_prompt,
         entity_resolution_system_prompt=entity_resolution_system_prompt,
         sql_planner_system_prompt=sql_planner_system_prompt,
+        router_system_prompt=sql_router_system_prompt,
         logic_system_prompt=logic_system_prompt,
         rendering_system_prompt=rendering_system_prompt,
         validator_system_prompt=validator_system_prompt,
@@ -1870,6 +1882,7 @@ def _build_agent() -> Agent:
         nlv_model=DEFAULT_MODEL,
         entity_model=DEFAULT_MODEL,
         sql_planner_model=DEFAULT_MODEL,
+        router_model=DEFAULT_MODEL,
         logic_model=DEFAULT_MODEL,
         render_model=DEFAULT_MODEL,
         validator_model=DEFAULT_MODEL,
