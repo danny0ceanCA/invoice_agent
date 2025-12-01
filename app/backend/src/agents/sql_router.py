@@ -1,6 +1,13 @@
 from __future__ import annotations
+import json
 from dataclasses import dataclass, asdict
 from typing import Any, List
+
+import structlog
+from openai import OpenAI
+
+
+LOGGER = structlog.get_logger(__name__)
 
 
 @dataclass
@@ -26,7 +33,7 @@ def route_sql(
     entities: dict | None,
     normalized_intent: dict | None,
     multi_turn_state: dict | None,
-) -> RouterDecision:
+    ) -> RouterDecision:
     """
     Routes a semantic SQL plan into a high-level RouterDecision for logic_model.
     Does not generate SQL. Does not access database. Pure semantic routing.
@@ -100,3 +107,135 @@ def route_sql(
         needs_provider_breakdown=needs_provider_breakdown,
         notes=[],
     )
+
+
+def build_sql_router_system_prompt() -> str:
+    """System prompt for AI-driven routing of semantic SQL plans."""
+
+    return """
+You are the SQL routing model for the district analytics agent.
+
+Your task is to map a semantic SQL plan, normalized intent, entities, and the
+multi-turn conversation state into a RouterDecision JSON object. Do NOT write
+SQL and do NOT describe logic—only emit the routing JSON.
+
+RouterDecision schema (all keys required):
+- mode: string. One of: district_summary, student_monthly, vendor_monthly,
+  invoice_details, student_provider_breakdown, provider_breakdown.
+- primary_entity_type: string|null. Usually "student" or "vendor".
+- primary_entities: array of strings.
+- time_window: string|null. e.g., "last_month", "this_school_year".
+- month_names: array of strings. e.g., ["August"].
+- metrics: array of strings for requested measures (e.g., cost, hours).
+- needs_invoice_details: boolean. True when the user wants invoice/line-item
+  detail or says "drill", "line items", etc.
+- needs_provider_breakdown: boolean. True when the user wants results broken
+  down by provider/clinician.
+- notes: array of strings for any clarifications or routing notes.
+
+Routing rules (strict):
+- If the user wants invoice details or line-item drilldowns → mode=invoice_details.
+- If provider breakdown is requested and the primary type is student →
+  mode=student_provider_breakdown, else provider_breakdown.
+- If primary entity is a student → mode=student_monthly.
+- If primary entity is a vendor → mode=vendor_monthly.
+- Otherwise default to district_summary.
+
+Multi-turn context:
+- Preserve the active_topic and last_month fields from the multi_turn_state when
+  the current plan does not override them.
+
+Output:
+- Return ONLY a single JSON object that matches the RouterDecision schema.
+- Never include SQL, prose, or explanations.
+"""
+
+
+def _coerce_router_decision(payload: dict[str, Any], fallback: RouterDecision) -> RouterDecision:
+    if not isinstance(payload, dict):
+        return fallback
+
+    def _as_list(value: Any) -> list[str]:
+        if isinstance(value, list):
+            return [str(v) for v in value if isinstance(v, (str, int, float))]
+        if isinstance(value, (str, int, float)):
+            return [str(value)]
+        return []
+
+    mode = payload.get("mode") or fallback.mode
+    primary_entity_type = payload.get("primary_entity_type") or fallback.primary_entity_type
+    primary_entities = _as_list(payload.get("primary_entities")) or fallback.primary_entities
+    time_window = payload.get("time_window") or fallback.time_window
+    month_names = _as_list(payload.get("month_names")) or fallback.month_names
+    metrics = _as_list(payload.get("metrics")) or fallback.metrics
+    needs_invoice_details = bool(payload.get("needs_invoice_details", fallback.needs_invoice_details))
+    needs_provider_breakdown = bool(payload.get("needs_provider_breakdown", fallback.needs_provider_breakdown))
+    notes = _as_list(payload.get("notes")) or []
+
+    if not mode:
+        return fallback
+
+    return RouterDecision(
+        mode=str(mode),
+        primary_entity_type=str(primary_entity_type) if primary_entity_type else None,
+        primary_entities=primary_entities,
+        time_window=str(time_window) if time_window else None,
+        month_names=month_names,
+        metrics=metrics,
+        needs_invoice_details=needs_invoice_details,
+        needs_provider_breakdown=needs_provider_breakdown,
+        notes=notes,
+    )
+
+
+def run_sql_router_model(
+    *,
+    user_query: str,
+    sql_plan: dict | None,
+    entities: dict | None,
+    normalized_intent: dict | None,
+    multi_turn_state: dict | None,
+    client: OpenAI,
+    model: str,
+    system_prompt: str,
+    temperature: float,
+) -> RouterDecision:
+    """Execute the AI router model with a deterministic fallback."""
+
+    fallback_decision = route_sql(
+        user_query=user_query,
+        sql_plan=sql_plan,
+        entities=entities,
+        normalized_intent=normalized_intent,
+        multi_turn_state=multi_turn_state,
+    )
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {
+            "role": "user",
+            "content": json.dumps(
+                {
+                    "query": user_query,
+                    "sql_plan": sql_plan or {},
+                    "entities": entities or {},
+                    "normalized_intent": normalized_intent or {},
+                    "multi_turn_state": multi_turn_state or {},
+                    "baseline_router_decision": fallback_decision.to_dict(),
+                }
+            ),
+        },
+    ]
+
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+        )
+        assistant_content = response.choices[0].message.content if response.choices else None
+        parsed = json.loads(assistant_content or "{}")
+        return _coerce_router_decision(parsed, fallback_decision)
+    except Exception as exc:  # pragma: no cover - defensive
+        LOGGER.warning("router_model_failed", error=str(exc))
+        return fallback_decision
