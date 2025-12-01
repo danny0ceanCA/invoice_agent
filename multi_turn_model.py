@@ -103,15 +103,13 @@ class MultiTurnConversationManager:
         user_message = user_message.strip()
         state = self.get_state(session_id)
 
-        is_first_turn = state.original_query is None
-        starts_new_topic = False if is_first_turn else self._starts_new_topic(user_message, state)
+        has_active_topic = state.original_query is not None
+        is_list_followup = (
+            self._refers_to_prior_list(user_message, state) if has_active_topic else False
+        )
+        is_explicit_list = self._is_list_intent(user_message)
 
-        refers_to_prior_list = self._refers_to_prior_list(user_message, state)
-
-        if (
-            not refers_to_prior_list
-            and (self._is_list_intent(user_message) or is_first_turn or starts_new_topic)
-        ):
+        if is_explicit_list and not is_list_followup:
             state = self._start_new_thread(user_message, required_slots)
             state.original_query = user_message
             state.latest_user_message = user_message
@@ -129,6 +127,38 @@ class MultiTurnConversationManager:
             fused_query = user_message
             print(f"[multi-turn] new_thread: {user_message!r}", flush=True)
             self.save_state(state, session_id=session_id)
+            return {
+                "session_id": session_id,
+                "needs_clarification": needs_clarification,
+                "clarification_prompt": self._build_clarification_prompt(state)
+                if needs_clarification
+                else None,
+                "fused_query": fused_query,
+                "state": state.to_dict(),
+            }
+
+        starts_new_topic = self._starts_new_topic(user_message, state)
+
+        if starts_new_topic and not is_list_followup:
+            state = self._start_new_thread(user_message, required_slots)
+            state.original_query = user_message
+            state.latest_user_message = user_message
+            state.history = [{"role": "user", "content": user_message}]
+
+            extracted_name = self._extract_name(user_message)
+            if extracted_name:
+                state.active_topic = {
+                    "type": "student",
+                    "value": extracted_name,
+                    "last_query": user_message,
+                }
+
+            needs_clarification = bool(state.missing_slots)
+            fused_query = self.build_fused_query(state)
+            print(f"[multi-turn] new_thread: {fused_query!r}", flush=True)
+
+            self.save_state(state, session_id=session_id)
+
             return {
                 "session_id": session_id,
                 "needs_clarification": needs_clarification,
@@ -226,39 +256,49 @@ class MultiTurnConversationManager:
             return False
         text = query.lower().strip()
 
-        if "this list" in text or "that list" in text:
-            return False
-
         explicit_phrases = [
             "student list",
             "list students",
-            "list of students",
+            "list all students",
             "show students",
             "show me the student list",
             "give me the student list",
-            "students list",
-            "list all students",
-            "show all students",
             "provider list",
             "list providers",
             "list all providers",
-            "show all providers",
+            "show provider list",
+            "show providers",
         ]
 
-        return any(phrase in text for phrase in explicit_phrases)
+        for phrase in explicit_phrases:
+            if (
+                text == phrase
+                or text.startswith(f"{phrase} ")
+                or text.startswith(f"{phrase}?")
+                or text.startswith(f"{phrase}.")
+            ):
+                return True
+
+        return False
 
     def _refers_to_prior_list(self, message: str, state: ConversationState) -> bool:
         if not message or not state.original_query:
             return False
-        text = message.lower()
-        if "this list" in text or "that list" in text:
-            return True
-        return False
+        text = message.lower().strip()
+        markers = [
+            "that list",
+            "this list",
+            "the list you just showed",
+            "the list you showed",
+            "that provider list",
+            "that student list",
+        ]
+        return any(marker in text for marker in markers)
 
-    def _is_followup(self, message: str) -> bool:
+    def _is_followup(self, message: str, state: ConversationState) -> bool:
         if not message:
             return False
-        text = message.lower()
+        text = message.lower().strip()
         markers = [
             "now",
             "also",
@@ -272,7 +312,27 @@ class MultiTurnConversationManager:
             "same",
             "continue",
         ]
-        return any(marker in text for marker in markers)
+        if any(marker in text for marker in markers):
+            return True
+
+        if state.original_query:
+            if "that list" in text or "this list" in text:
+                return True
+
+            pronoun_starts = [
+                "who has ",
+                "who provided ",
+                "who provides ",
+                "who did ",
+                "can you tell me who",
+                "why did it ",
+                "why did this ",
+                "why did that ",
+            ]
+            if any(text.startswith(prefix) for prefix in pronoun_starts):
+                return True
+
+        return False
 
     def _is_followup_message(self, message: str) -> bool:
         if not message:
@@ -375,9 +435,15 @@ class MultiTurnConversationManager:
 
     def _starts_new_topic(self, message: str, state: ConversationState) -> bool:
         if state.original_query is None:
-            return False
+            return True
 
         text = message.lower().strip()
+
+        if self._is_followup(message, state):
+            return False
+
+        if self._refers_to_prior_list(message, state):
+            return False
 
         followup_markers = [
             "why",
