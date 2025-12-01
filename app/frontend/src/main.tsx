@@ -29,22 +29,18 @@ if (!domain || !clientId) {
   );
   console.error("Auth0 configuration missing. Set VITE_AUTH0_DOMAIN and VITE_AUTH0_CLIENT_ID.");
 } else {
-  const authorizationParams = {
-    ...(audience ? { audience } : {}),
-    scope: "openid profile email read:profile read:email offline_access",
-  };
-
-  const redirectUri = window.location.origin;
-
   ReactDOM.createRoot(rootElement).render(
     <Auth0Provider
       domain={domain}
       clientId={clientId}
-      authorizationParams={authorizationParams}
+      authorizationParams={{
+        redirect_uri: window.location.origin,
+        audience: audience,
+        scope: "openid profile email read:profile read:email offline_access",
+      }}
       cacheLocation="localstorage"
       useRefreshTokens={true}
       useRefreshTokensFallback={false}
-      redirectUri={redirectUri}
     >
       <BrowserRouter>
         <App />
