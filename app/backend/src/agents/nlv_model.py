@@ -25,11 +25,11 @@ Return one JSON object capturing the normalized intent. Suggested shape:
   "intent": "monthly_spend" | "invoice_details" | "provider_summary" | "student_caseload" | null,
   "entities": {
     "student_name": "..." | null,
-    "provider_name": "..." | null,
+    "clinician_name": "..." | null,
     "vendor_name": "..." | null,
     "invoice_number": "..." | null,
     "student_name_candidates": ["..."],
-    "provider_name_candidates": ["..."]
+    "clinician_name_candidates": ["..."]
   },
   "time_period": {
     "month": "August",
@@ -41,7 +41,7 @@ Return one JSON object capturing the normalized intent. Suggested shape:
   },
   "scope": "district" | "single_student" | "provider" | null,
   "requires_clarification": false,
-  "clarification_needed": ["student_name", "time_period", "provider_name"]
+  "clarification_needed": ["student_name", "time_period", "clinician_name"]
 }
 - Include both canonical values and candidate lists when names are ambiguous.
 - Leave unknown fields as null but preserve the keys.
@@ -52,12 +52,16 @@ NATURAL LANGUAGE NORMALIZATION
   • Caseload/student counts: caseload, students served, kids, kiddos, students on their list.
   • Provider/clinician: provider, clinician, nurse, LVN, health aide, aide, therapist, care staff.
   • Support staff synonyms map to provider/clinician.
+- Treat “provider” and “providers” as direct synonyms of “clinician” and “clinicians”.
+- When interpreting the user query, normalize these terms in the produced intent JSON.
+- Do not emit “provider” as an entity type in the JSON output. Any entity-type keys must use clinician / clinicians.
+- If the user asks for providers, populate the clinicians field, e.g., "clinicians": ["name1", ...] (or an empty list if unresolved).
 - Normalize time phrases: "last month", "this month", "YTD", "October services", "when uploaded" → fill month/year or start/end ranges.
 - Normalize school-year phrases and always emit school_year, start_date, and end_date when any school-year language appears. The SCUSD school year N runs from July 1 (N-1) through June 30 (N). Examples: "2025 school year" → school_year=2025, start_date=2024-07-01, end_date=2025-06-30; "the 2024–2025 school year" → school_year=2025 with the same start/end; "SY2025" → school_year=2025.
 - "this school year" or "current school year" or "this SY" or "services this SY" must compute dynamically: if today's date is between July 1 and Dec 31, set school_year to current_year + 1; if today's date is between Jan 1 and June 30, set school_year to current_year. Fill start_date/end_date accordingly. Mark relative="this_school_year".
 - Semester mapping: "fall semester" → Aug 1 to Dec 31 of the identified school year; "spring semester" → Jan 1 to Jun 30 of the identified school year.
 - Normalize scope cues: "district-wide" → district; "all students" → district; named students → single_student.
-- Extract entities: student_name, provider_name, vendor_name, invoice_number, service months, invoice dates.
+- Extract entities: student_name, clinician_name, vendor_name, invoice_number, service months, invoice dates.
 - If the user mentions "school year" without specifying which one (and it is not a "this school year" style phrase), set requires_clarification=true and add "school_year" to clarification_needed.
 - STRICT OUTPUT: whenever a school-year phrase is present, always populate time_period.school_year, start_date, end_date (ISO yyyy-mm-dd).
 
