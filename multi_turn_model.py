@@ -100,6 +100,17 @@ class MultiTurnConversationManager:
         user_message: str,
         required_slots: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
+        if user_message.strip().lower() == "reset please":
+            self.clear_state(session_id)
+            print("[multi-turn] state cleared by user command", flush=True)
+            return {
+                "session_id": session_id,
+                "needs_clarification": False,
+                "clarification_prompt": None,
+                "fused_query": "reset",
+                "state": {},
+            }
+
         user_message = user_message.strip()
         state = self.get_state(session_id)
 
