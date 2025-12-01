@@ -108,6 +108,14 @@ requires_clarification=true
 clarification_needed=["student_name" | "provider_name" | "vendor_name"]
 
 ===============================================================
+PROVIDER / CLINICIAN NORMALIZATION
+
+- The database does NOT contain any column named “provider”. All provider queries must be rewritten to target the column `ili.clinician`.
+- If the user asked for “provider(s)”, use the clinician column.
+- Do not emit SQL that references a provider column.
+- When the plan indicates a provider query, the SELECT fields must be “clinician” or an alias like “clinician AS provider”.
+
+===============================================================
 MAPPING NATURAL LANGUAGE → PLAN KIND
 
 STUDENT REPORTS

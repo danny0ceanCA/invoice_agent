@@ -45,6 +45,9 @@ Expected shape (flexible but consistent):
 Rules:
 - Preserve anything useful from the incoming normalized_intent (intent, time_period, scope, existing entities), only refining or expanding where helpful.
 - Always return strictly JSON output parsable by json.loads.
+- When resolving provider(s), resolve them using the clinicians list from known_entities.
+- The resolved_entities JSON MAY NOT contain “providers”; populate “clinicians” instead.
+- If the normalized intent requests providers, treat them as clinicians for resolution purposes.
 
 Entity classification rules:
 - Use known_entities as the universe of valid students, vendors, and clinicians, but you may fuzzy match user-supplied names against those lists.
@@ -117,6 +120,15 @@ def run_entity_resolution_model(
 
     if not isinstance(payload.get("entities"), dict):
         payload["entities"] = {}
+
+    resolved = payload.get("entities") or {}
+    if isinstance(resolved, dict) and resolved.get("providers"):
+        providers = resolved.get("providers") or []
+        clinicians = resolved.get("clinicians") or []
+        if not clinicians:
+            resolved["clinicians"] = providers
+        resolved.pop("providers", None)
+    payload["entities"] = resolved if isinstance(resolved, dict) else {}
 
     if not isinstance(payload.get("clarification_needed"), list):
         payload["clarification_needed"] = []
