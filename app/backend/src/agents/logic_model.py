@@ -6,6 +6,7 @@ prompting and inference without altering behavior.
 
 from __future__ import annotations
 
+import json
 from typing import Any, Sequence
 
 from openai import OpenAI
@@ -583,6 +584,58 @@ def build_logic_system_prompt() -> str:
     )
 
 
+def _build_router_guidance(router_decision: dict[str, Any] | None) -> str:
+    if not router_decision:
+        return ""
+
+    mode = router_decision.get("mode") or "district_summary"
+    template_hint = "district_summary"
+    template_notes = "Use the standard district summary aggregation with invoice totals."
+
+    if mode == "invoice_details":
+        template_hint = "invoice_line_items_detail"
+        template_notes = (
+            "Use invoice_line_items detail keyed by invoice_number or student+month. "
+            "Return service_date, clinician/provider, service_code, hours, and cost only."
+        )
+    elif mode == "student_provider_breakdown":
+        template_hint = "student_provider_hours_cost"
+        template_notes = (
+            "Use student+clinician breakdown grouped by provider with SUM(invoice_line_items.cost) "
+            "and hours for the student scope."
+        )
+    elif mode == "student_monthly":
+        template_hint = "student_monthly_hours_spend"
+        template_notes = "Use student-scoped monthly hours/spend aggregation."
+    elif mode == "vendor_monthly":
+        template_hint = "vendor_monthly_spend"
+        template_notes = "Use vendor-scoped monthly spend aggregation via invoices and vendors."
+
+    primary_entities = router_decision.get("primary_entities") or []
+    month_names = router_decision.get("month_names") or []
+    time_window = router_decision.get("time_window") or ""
+
+    lines = [
+        "ROUTER_DECISION (do not reinterpret):",
+        json.dumps(router_decision, sort_keys=True),
+        f"ROUTED_MODE: {mode}",
+        f"SQL_TEMPLATE_HINT: {template_hint}",
+        template_notes,
+    ]
+
+    if primary_entities:
+        lines.append(f"PRIMARY_ENTITIES: {primary_entities}")
+    if month_names:
+        lines.append(f"MONTH_SCOPE: {month_names}")
+    if time_window:
+        lines.append(f"TIME_WINDOW: {time_window}")
+
+    lines.append(
+        "Follow the hinted template; avoid fresh semantic interpretation beyond these filters."
+    )
+    return "\n".join(lines)
+
+
 def run_logic_model(
     client: OpenAI,
     *,
@@ -590,12 +643,17 @@ def run_logic_model(
     messages: Sequence[dict[str, Any]],
     tools: Sequence[dict[str, Any]],
     temperature: float,
+    router_decision: dict[str, Any] | None = None,
 ):
     """Execute the logic model using the existing OpenAI client pattern."""
+    router_instructions = _build_router_guidance(router_decision)
+    routed_messages = list(messages)
+    if router_instructions:
+        routed_messages.append({"role": "system", "content": router_instructions})
 
     completion = client.chat.completions.create(
         model=model,
-        messages=messages,
+        messages=routed_messages,
         tools=tools,
         tool_choice="auto",
         temperature=temperature,

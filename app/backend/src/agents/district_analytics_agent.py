@@ -29,6 +29,7 @@ from .ir import AnalyticsEntities, AnalyticsIR, _coerce_rows, _payload_to_ir
 from .logic_model import build_logic_system_prompt, run_logic_model
 from .nlv_model import build_nlv_system_prompt, run_nlv_model
 from .rendering_model import build_rendering_system_prompt, run_rendering_model
+from .sql_router import route_sql
 from .sql_planner_model import build_sql_planner_system_prompt, run_sql_planner_model
 from .validator_model import build_validator_system_prompt, run_validator_model
 
@@ -487,10 +488,15 @@ class Workflow:
                 LOGGER.warning("analytics_memory_load_failed", error=str(exc))
 
         # Multi-turn fusion: incorporate follow-up context into a fused query
+        multi_turn_state: dict[str, Any] | None = None
         if agent.multi_turn_manager and session_id:
             try:
                 fusion = agent.multi_turn_manager.process_user_message(session_id, query)
                 fused = fusion.get("fused_query")
+                if isinstance(fusion, Mapping):
+                    state = fusion.get("state")
+                    if isinstance(state, Mapping):
+                        multi_turn_state = dict(state)
                 if isinstance(fused, str) and fused.strip():
                     query = fused.strip()
                 else:
@@ -692,16 +698,24 @@ class Workflow:
             )
             insights = insight_result.get("insights") or []
 
-            render_payload = run_rendering_model(
-                user_query=context.query,
-                ir=effective_ir,
-                insights=insights,
-                client=agent.client,
-                model=agent.render_model,
-                system_prompt=self.rendering_system_prompt,
-                temperature=agent.render_temperature,
-            )
-            return _finalise_response(render_payload, context)
+                render_payload = run_rendering_model(
+                    user_query=context.query,
+                    ir=effective_ir,
+                    insights=insights,
+                    client=agent.client,
+                    model=agent.render_model,
+                    system_prompt=self.rendering_system_prompt,
+                    temperature=agent.render_temperature,
+                )
+                return _finalise_response(render_payload, context)
+
+        router_decision = route_sql(
+            user_query=query,
+            sql_plan=plan,
+            entities=resolved_entities,
+            normalized_intent=resolved_intent,
+            multi_turn_state=multi_turn_state,
+        )
 
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": self.logic_system_prompt}
@@ -839,6 +853,7 @@ class Workflow:
                 messages=messages,
                 tools=[tool.schema() for tool in agent.tools],
                 temperature=agent.logic_temperature,
+                router_decision=router_decision.to_dict(),
             )
             tool_calls = message.tool_calls or []
             assistant_message: dict[str, Any] = {
