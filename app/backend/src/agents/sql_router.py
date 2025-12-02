@@ -21,6 +21,7 @@ class RouterDecision:
     needs_invoice_details: bool
     needs_provider_breakdown: bool
     notes: List[str]
+    date_range: dict | None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -52,6 +53,7 @@ def route_sql(
 
     time_window = plan.get("time_window") or intent.get("time_period", {}).get("relative")
     month_names = plan.get("month_names") or intent.get("time_period", {}).get("month", [])
+    date_range = plan.get("date_range") if isinstance(plan.get("date_range"), dict) else None
     metrics = plan.get("metrics") or []
 
     # Flags
@@ -123,6 +125,7 @@ def route_sql(
         needs_invoice_details=needs_invoice_details,
         needs_provider_breakdown=needs_provider_breakdown,
         notes=[],
+        date_range=date_range,
     )
 
 
@@ -159,6 +162,13 @@ Routing rules (strict):
 - If primary entity is a vendor → mode=vendor_monthly.
 - Otherwise default to district_summary.
 
+NEW MODE RULE — student_provider_year:
+- If intent/entities indicate a single student,
+- AND the user asks for providers/clinicians and hours,
+- AND the time period is this_school_year,
+- AND NO explicit month is mentioned,
+Then mode MUST be 'student_provider_year'.
+
 Multi-turn context:
 - Preserve the active_topic and last_month fields from the multi_turn_state when
   the current plan does not override them.
@@ -189,6 +199,7 @@ def _coerce_router_decision(payload: dict[str, Any], fallback: RouterDecision) -
     needs_invoice_details = bool(payload.get("needs_invoice_details", fallback.needs_invoice_details))
     needs_provider_breakdown = bool(payload.get("needs_provider_breakdown", fallback.needs_provider_breakdown))
     notes = _as_list(payload.get("notes")) or []
+    date_range = payload.get("date_range") if isinstance(payload.get("date_range"), dict) else fallback.date_range
 
     if not mode:
         return fallback
@@ -203,6 +214,7 @@ def _coerce_router_decision(payload: dict[str, Any], fallback: RouterDecision) -
         needs_invoice_details=needs_invoice_details,
         needs_provider_breakdown=needs_provider_breakdown,
         notes=notes,
+        date_range=date_range if isinstance(date_range, dict) else None,
     )
 
 
@@ -253,7 +265,38 @@ def run_sql_router_model(
         )
         assistant_content = response.choices[0].message.content if response.choices else None
         parsed = json.loads(assistant_content or "{}")
-        return _coerce_router_decision(parsed, fallback_decision)
     except Exception as exc:  # pragma: no cover - defensive
         LOGGER.warning("router_model_failed", error=str(exc))
         return fallback_decision
+
+    router_decision = _coerce_router_decision(parsed, fallback_decision)
+
+    q_lower = (user_query or "").lower()
+    mentions_provider = any(
+        kw in q_lower for kw in ["provider", "providers", "clinician", "clinicians", "therapist", "therapists"]
+    )
+    mentions_hours = "hour" in q_lower or "time" in q_lower or "service hour" in q_lower
+
+    time_window = router_decision.time_window or (
+        (normalized_intent or {}).get("time_period", {}) if isinstance(normalized_intent, dict) else {}
+    )
+    if isinstance(time_window, dict):
+        time_window = time_window.get("relative")
+
+    month_names = router_decision.month_names or []
+    primary_entity_type = router_decision.primary_entity_type
+    primary_entities = router_decision.primary_entities or []
+    mode = parsed.get("mode") if isinstance(parsed, dict) else router_decision.mode
+
+    if (
+        primary_entity_type == "student"
+        and primary_entities
+        and mentions_provider
+        and mentions_hours
+        and time_window == "this_school_year"
+        and not month_names
+    ):
+        mode = "student_provider_year"
+
+    router_decision.mode = mode or router_decision.mode or "district_summary"
+    return router_decision

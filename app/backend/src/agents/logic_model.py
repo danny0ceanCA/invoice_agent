@@ -7,6 +7,7 @@ prompting and inference without altering behavior.
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from typing import Any, Sequence
 
 from openai import OpenAI
@@ -683,6 +684,40 @@ def run_logic_model(
     router_decision: dict[str, Any] | None = None,
 ):
     """Execute the logic model using the existing OpenAI client pattern."""
+    if router_decision and router_decision.get("mode") == "student_provider_year":
+        primary_entities = router_decision.get("primary_entities") or []
+        date_range = router_decision.get("date_range") or {}
+        start = date_range.get("start_date")
+        end = date_range.get("end_date")
+
+        if primary_entities and isinstance(start, str) and isinstance(end, str):
+            student = primary_entities[0]
+
+            sql = f"""
+            SELECT
+                ili.clinician AS provider,
+                SUM(ili.hours) AS total_hours,
+                SUM(ili.cost)  AS total_cost
+            FROM invoice_line_items ili
+            JOIN invoices i ON i.id = ili.invoice_id
+            WHERE i.district_key = :district_key
+              AND LOWER(i.student_name) LIKE LOWER('%{student}%')
+              AND i.invoice_date BETWEEN '{start}' AND '{end}'
+            GROUP BY ili.clinician
+            ORDER BY total_hours DESC;
+            """
+
+            tool_call = SimpleNamespace(
+                id="call_student_provider_year",
+                type="function",
+                function=SimpleNamespace(
+                    name="run_sql",
+                    arguments=json.dumps({"query": sql}),
+                ),
+            )
+
+            return SimpleNamespace(content="", tool_calls=[tool_call])
+
     router_instructions = _build_router_guidance(router_decision)
     routed_messages = list(messages)
     if router_instructions:

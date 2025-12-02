@@ -353,9 +353,26 @@ def run_sql_planner_model(
         else {}
     )
     month_name = time_period.get("month") if isinstance(time_period, dict) else None
+    explicit_month_mentioned = False
+    if isinstance(month_name, list):
+        explicit_month_mentioned = bool(month_name)
+    elif isinstance(month_name, str):
+        explicit_month_mentioned = True
     year_value = time_period.get("year") if isinstance(time_period, dict) else None
     start_date = time_period.get("start_date") if isinstance(time_period, dict) else None
     end_date = time_period.get("end_date") if isinstance(time_period, dict) else None
+
+    if normalized_intent.get("time_period", {}).get("relative") == "this_school_year":
+        tp = normalized_intent["time_period"]
+        if not isinstance(plan, dict):
+            plan = plan or {}
+        if isinstance(tp.get("start_date"), str) and isinstance(tp.get("end_date"), str):
+            plan["date_range"] = {
+                "start_date": tp["start_date"],
+                "end_date": tp["end_date"],
+            }
+        if not explicit_month_mentioned:
+            plan["month_names"] = []
 
     if isinstance(year_value, str) and year_value.isdigit():
         year_value = int(year_value)
