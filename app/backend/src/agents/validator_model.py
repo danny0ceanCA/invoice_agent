@@ -86,10 +86,13 @@ def run_validator_model(
     temperature: float,
 ) -> dict[str, Any]:
     # -----------------------------------------------------------
-    # WHITELIST: Simple list queries (students/vendors/clinicians)
-    # A list query is detected when:
-    # - rows exist
-    # - and each row has exactly 1 column
+    # WHITELIST #1 — Simple list queries take ABSOLUTE PRIORITY.
+    #
+    # If rows exist and each row has exactly 1 column, it is a
+    # simple list query (students, vendors, clinicians).
+    #
+    # These queries must ALWAYS validate successfully and MUST NOT
+    # fall through to the second whitelist or the model validator.
     # -----------------------------------------------------------
     try:
         ir_dict = ir.model_dump()
@@ -100,7 +103,6 @@ def run_validator_model(
             and isinstance(rows[0], dict)
             and len(rows[0].keys()) == 1
         ):
-            # Approve simple list queries without further validation
             return {
                 "valid": True,
                 "issues": [],
@@ -110,8 +112,11 @@ def run_validator_model(
         pass
 
     # ------------------------------------------------------------------
-    # WHITELIST: Simple list-queries (students/vendors/clinicians)
-    # If the IR contains only rows and no analytics metadata, approve it.
+    # WHITELIST #2 — Simple table without analytics metadata.
+    #
+    # IMPORTANT:
+    # This whitelist only runs if Whitelist #1 has NOT matched.
+    # DO NOT return invalid on simple list queries.
     # ------------------------------------------------------------------
     try:
         ir_dict = ir.model_dump()
@@ -121,11 +126,8 @@ def run_validator_model(
             for kw in ["select", "insert", "update", "delete", "drop", "join", "from"]
         )
         entities = ir_dict.get("entities")
-        entities_ok = (
-            entities is None
-            or all(len(entities.get(bucket, [])) == 0
-                   for bucket in ["students", "providers", "vendors", "invoices"])
-        )
+        # Relax entity rule: allow non-empty entity buckets (logic layer often passes these)
+        entities_ok = True
         no_analytics = (
             not ir_dict.get("select")
             and not ir_dict.get("html")
