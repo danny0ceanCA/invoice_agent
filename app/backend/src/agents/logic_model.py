@@ -172,6 +172,8 @@ def build_logic_system_prompt() -> str:
         "- Keep 'text' concise and internal-facing; the renderer will handle user-facing language.\n"
         "- Organize SQL outputs and any extracted entities into the IR JSON fields.\n"
         "- Do NOT add conversational tone, pleasantries, or UX guidance in 'text'.\n"
+        "- EXCEPTION: When RouterDecision.mode is 'student_provider_breakdown' or RouterDecision.needs_provider_breakdown is true, skip all ambiguity checks and requirement validation, and immediately run provider-breakdown SQL using invoice_line_items joined to invoices, grouped by clinician with SUM(invoice_line_items.hours) and SUM(invoice_line_items.cost). Do NOT ask for clarification or add 'need time period/student' notes.\n"
+        "- EXCEPTION: When RouterDecision.mode is 'invoice_details', skip ambiguity handling and run the invoice detail SQL directly.\n"
     )
 
     return (
@@ -395,6 +397,8 @@ def build_logic_system_prompt() -> str:
         "- Do NOT guess column names. Use only: student_name, vendor_id, vendors.name, service_month, invoice_date, total_cost.\n\n"
         "CLINICIAN QUERIES:\n"
         "- When RouterDecision.needs_provider_breakdown is true or RouterDecision.mode indicates provider-centric analytics (for example, student_provider_breakdown or provider_breakdown), use invoice_line_items joined to invoices and filter by clinician as specified.\n"
+        "- When RouterDecision.needs_provider_breakdown = true, the logic model must NOT ask for clarification. RouterDecision already contains the required scope.\n"
+        "- For student_provider_breakdown or needs_provider_breakdown, bypass metric ambiguity checks and requirement validation; always run provider breakdown grouped by clinician with SUM(invoice_line_items.hours) and SUM(invoice_line_items.cost).\n"
         "- Use invoices.district_key = :district_key to scope results to the current district.\n"
         "- Use partial matches (LIKE) on the clinician name when only a first name or partial name is given.\n\n"
         "- When aggregating amounts by clinician, provider, or service_code, NEVER use invoices.total_cost. Always use SUM(invoice_line_items.cost) for the amount.\n\n"
@@ -483,6 +487,7 @@ def build_logic_system_prompt() -> str:
         "INVOICE DETAIL QUERIES (ROUTER-DRIVEN):\n"
         "- Do NOT select or return any rate or pay-rate columns (e.g., 'rate', 'hourly_rate', 'pay_rate') in your SQL. When showing invoice or line-item details, include hours and cost only, not the rate.\n"
         "- When RouterDecision.mode is invoice_details or RouterDecision.needs_invoice_details is true (including when an invoice_number is provided), you MUST use the invoice_line_items table keyed by invoice_number and/or student+month scope from RouterDecision.\n"
+        "- When RouterDecision.mode is invoice_details, skip ambiguity checks and clarifications and run the invoice detail SQL directly.\n"
         "- Example (raw line-item detail for an invoice):\n"
         "  SELECT invoice_number,\n"
         "         student        AS student_name,\n"
