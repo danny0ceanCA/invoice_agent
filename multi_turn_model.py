@@ -114,6 +114,88 @@ class MultiTurnConversationManager:
         user_message = user_message.strip()
         state = self.get_state(session_id)
 
+        lower_message = user_message.lower()
+
+        def _reset_thread_and_return() -> Dict[str, Any]:
+            print("[multi-turn-debug] SAFE_FUSION_RESET", flush=True)
+            self.clear_state(session_id)
+            fresh_state = self._start_new_thread(user_message, required_slots)
+
+            extracted_name = self._extract_name(user_message)
+            if extracted_name and self._is_valid_name(extracted_name):
+                fresh_state.active_topic = {
+                    "type": "student",
+                    "value": extracted_name,
+                    "last_query": user_message,
+                }
+            elif extracted_name and not self._is_valid_name(extracted_name):
+                print(
+                    f"[multi-turn-debug] IGNORE_BAD_NAME | extracted={extracted_name!r}",
+                    flush=True,
+                )
+
+            needs_clarification = bool(fresh_state.missing_slots)
+            fused_query = user_message
+            print(f"[multi-turn] safe_new_thread: {user_message!r}", flush=True)
+            self.save_state(fresh_state, session_id=session_id)
+            return {
+                "session_id": session_id,
+                "needs_clarification": needs_clarification,
+                "clarification_prompt": self._build_clarification_prompt(fresh_state)
+                if needs_clarification
+                else None,
+                "fused_query": fused_query,
+                "state": fresh_state.to_dict(),
+            }
+
+        new_intent_openers = [
+            "i want",
+            "give me",
+            "show me",
+            "list",
+            "top",
+            "highest",
+            "summary",
+            "most expensive",
+            "all invoices",
+            "what are",
+            "what is",
+            "vendor summary",
+        ]
+        if any(lower_message.startswith(o) for o in new_intent_openers):
+            return _reset_thread_and_return()
+
+        extracted_name_new = self._extract_name(user_message)
+        if extracted_name_new and self._is_valid_name(extracted_name_new):
+            active_value = state.active_topic.get("value") if state.active_topic else None
+            if not active_value or extracted_name_new.lower() != str(active_value).lower():
+                return _reset_thread_and_return()
+
+        district_terms = ["district", "district-wide", "all invoices", "vendor summary"]
+        if any(term in lower_message for term in district_terms):
+            return _reset_thread_and_return()
+
+        last_mode = getattr(state, "last_mode", None)
+        if last_mode == "invoice_details":
+            summary_keywords = ["top", "highest", "summary", "total", "spend"]
+            if any(keyword in lower_message for keyword in summary_keywords):
+                return _reset_thread_and_return()
+
+        followup_markers = [
+            "now",
+            "also",
+            "what about",
+            "continue",
+            "next",
+            "same",
+            "and",
+            "and for him",
+            "and for her",
+            "and for them",
+        ]
+        if not any(marker in lower_message for marker in followup_markers):
+            return _reset_thread_and_return()
+
         has_active_topic = state.original_query is not None
         is_list_followup = (
             self._refers_to_prior_list(user_message, state) if has_active_topic else False
