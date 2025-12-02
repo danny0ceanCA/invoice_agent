@@ -35,7 +35,8 @@ from .validator_model import build_validator_system_prompt, run_validator_model
 
 LOGGER = structlog.get_logger(__name__)
 
-DEFAULT_MODEL = "gpt-4.1-mini"
+DEFAULT_MODEL = "gpt-4.1-speed"  # used for all supporting models
+LOGIC_MODEL = "gpt-5.1"  # only for logic_model
 MAX_ITERATIONS = 8
 
 class AgentResponse(BaseModel):
@@ -1883,7 +1884,7 @@ def _build_agent() -> Agent:
         entity_model=DEFAULT_MODEL,
         sql_planner_model=DEFAULT_MODEL,
         router_model=DEFAULT_MODEL,
-        logic_model=DEFAULT_MODEL,
+        logic_model=LOGIC_MODEL,
         render_model=DEFAULT_MODEL,
         validator_model=DEFAULT_MODEL,
         insight_model=DEFAULT_MODEL,
