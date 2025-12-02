@@ -9,6 +9,11 @@ from dataclasses import asdict, dataclass, field
 from datetime import date
 from typing import Any, Dict, List, Optional
 
+import structlog
+
+
+LOGGER = structlog.get_logger(__name__)
+
 
 @dataclass
 class ConversationState:
@@ -131,6 +136,70 @@ class MultiTurnConversationManager:
 
         if message_is_time_only and not time_only_followup:
             return _reset_thread_and_return()
+
+        # ============================================================
+        # PROVIDER FOLLOW-UP FUSION (Option B+)
+        # Fuse with active student topic when:
+        # - session_id matches
+        # - active_topic.type == "student"
+        # - follow-up mentions providers
+        # - follow-up mentions time/month
+        # - follow-up does NOT request district-wide scope
+        # ============================================================
+
+        if (
+            session_id == getattr(state, "last_session_id", None)
+            and active_topic
+            and active_topic.get("type") == "student"
+        ):
+
+            text = user_message.lower().strip()
+
+            provider_terms = [
+                "provider", "providers", "clinician", "clinicians",
+                "care staff", "carestaff", "nurse", "lvn", "hha",
+                "health aide", "aide", "who supported", "who provided care"
+            ]
+
+            time_terms = [
+                "january", "february", "march", "april", "may", "june",
+                "july", "august", "september", "october",
+                "november", "december",
+                "this month", "last month", "this school year",
+                "this year", "ytd", "what about", "now", "next", "then"
+            ]
+
+            district_reset_terms = [
+                "district", "district-wide", "all students", "whole district"
+            ]
+
+            mentions_provider = any(term in text for term in provider_terms)
+            mentions_time = any(term in text for term in time_terms)
+            is_district_reset = any(term in text for term in district_reset_terms)
+
+            if mentions_provider and mentions_time and not is_district_reset:
+                # Build fused query
+                previous_query = active_topic.get("last_query") or state.original_query or ""
+                fused_query = f"{previous_query} Additional instruction: {user_message}"
+
+                state.latest_user_message = user_message
+                state.history.append({"role": "user", "content": user_message})
+
+                self.save_state(state, session_id=session_id)
+
+                # DEBUG LOGS
+                LOGGER.debug("multi-turn-debug PROVIDER_FUSION_TRIGGERED")
+                LOGGER.debug("multi-turn-debug previous", previous=previous_query)
+                LOGGER.debug("multi-turn-debug followup", followup=user_message)
+                LOGGER.debug("multi-turn-debug fused_query", fused_query=fused_query)
+
+                return {
+                    "session_id": session_id,
+                    "needs_clarification": False,
+                    "clarification_prompt": None,
+                    "fused_query": fused_query,
+                    "state": state.to_dict(),
+                }
 
         def _reset_thread_and_return() -> Dict[str, Any]:
             print("[multi-turn-debug] SAFE_FUSION_RESET", flush=True)
