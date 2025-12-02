@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 from datetime import date
 
@@ -272,6 +273,7 @@ def run_nlv_model(
         )
         assistant_content = response.choices[0].message.content if response.choices else None
         parsed = json.loads(assistant_content or "{}")
+
         if not isinstance(parsed, dict):
             return _default_payload()
         payload = _default_payload()
@@ -281,8 +283,87 @@ def run_nlv_model(
         ):
             payload["clarification_needed"] = []
 
+        # ------------------------------------------------------------
+        # Detect explicit month + year (e.g., "September 2025")
+        # ------------------------------------------------------------
+        explicit_month_year = re.search(
+            r"\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|"
+            r"Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|"
+            r"Dec(?:ember)?)\s+(['’]?\d{2,4})\b",
+            user_query,
+            flags=re.IGNORECASE,
+        )
+
+        def _normalize_two_digit_year(year_text: str) -> int:
+            year_text = year_text.strip("’'")
+            if len(year_text) == 2:
+                return int(f"20{year_text}")
+            return int(year_text)
+
+        explicit_month_year_found = False
+        if explicit_month_year:
+            month = explicit_month_year.group(1)
+            year_raw = explicit_month_year.group(2)
+            year = _normalize_two_digit_year(year_raw)
+
+            time_period = payload.get("time_period") or {}
+            if not isinstance(time_period, dict):
+                time_period = {}
+
+            time_period["month"] = month
+            time_period["year"] = year
+            time_period["relative"] = None
+            time_period["start_date"] = None
+            time_period["end_date"] = None
+
+            payload["time_period"] = time_period
+
+            explicit_month_year_found = True
+        else:
+            # --------------------------------------------------------
+            # Month without year → default to current school year
+            # --------------------------------------------------------
+            month_only = re.search(
+                r"\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|"
+                r"Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|"
+                r"Dec(?:ember)?)\b",
+                user_query,
+                flags=re.IGNORECASE,
+            )
+            if month_only:
+                today = date.today()
+                school_year_window = _compute_current_school_year(today)
+                month_name = month_only.group(1)
+
+                month_lower = month_name.lower()
+                jul_to_dec = {
+                    "july",
+                    "august",
+                    "september",
+                    "october",
+                    "november",
+                    "december",
+                }
+                if month_lower in jul_to_dec:
+                    inferred_year = school_year_window["school_year"] - 1
+                else:
+                    inferred_year = school_year_window["school_year"]
+
+                time_period = payload.get("time_period") or {}
+                if not isinstance(time_period, dict):
+                    time_period = {}
+
+                time_period["month"] = month_name
+                time_period["year"] = inferred_year
+                time_period["relative"] = None
+                time_period.setdefault("start_date", None)
+                time_period.setdefault("end_date", None)
+
+                payload["time_period"] = time_period
+
         # Deterministic override for "this school year" / "this year" semantics.
-        _apply_this_school_year_override(user_query, payload)
+        if not explicit_month_year_found:
+            _apply_this_school_year_override(user_query, payload)
 
         return payload
     except Exception:
