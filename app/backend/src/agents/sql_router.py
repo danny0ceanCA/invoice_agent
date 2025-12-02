@@ -51,6 +51,9 @@ def route_sql(
         plan.get("primary_entities") or ents.get(primary_type + "s", []) if primary_type else []
     )
 
+    if not primary_type and isinstance(mt.get("active_topic"), dict):
+        primary_type = mt["active_topic"].get("type")
+
     time_window = plan.get("time_window") or intent.get("time_period", {}).get("relative")
     month_names = plan.get("month_names") or intent.get("time_period", {}).get("month", [])
     date_range = plan.get("date_range") if isinstance(plan.get("date_range"), dict) else None
