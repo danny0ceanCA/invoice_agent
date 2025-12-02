@@ -347,6 +347,38 @@ def run_sql_planner_model(
     entities = entities or {}
     normalized_intent = normalized_intent or {}
 
+    time_period = (
+        normalized_intent.get("time_period")
+        if isinstance(normalized_intent, dict)
+        else {}
+    )
+    month_name = time_period.get("month") if isinstance(time_period, dict) else None
+    year_value = time_period.get("year") if isinstance(time_period, dict) else None
+    if isinstance(year_value, str) and year_value.isdigit():
+        year_value = int(year_value)
+
+    if isinstance(month_name, str) and year_value is not None:
+        if not isinstance(plan, dict):
+            plan = {}
+
+        start_date = time_period.get("start_date")
+        end_date = time_period.get("end_date")
+        plan["month_names"] = [month_name]
+
+        if isinstance(start_date, str) and isinstance(end_date, str):
+            plan["date_range"] = {"start_date": start_date, "end_date": end_date}
+
+        if isinstance(time_period.get("relative"), str):
+            plan.setdefault("time_window", time_period.get("relative"))
+
+        clar_needed = payload.get("clarification_needed")
+        clar_needed = clar_needed if isinstance(clar_needed, list) else []
+        clar_needed = [item for item in clar_needed if item != "time_period"]
+
+        payload["clarification_needed"] = clar_needed
+        payload["requires_clarification"] = bool(clar_needed)
+        payload["plan"] = plan
+
     vendor_entities = (
         entities.get("vendors")
         if isinstance(entities.get("vendors"), list)

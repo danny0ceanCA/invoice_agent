@@ -128,10 +128,11 @@ SCHOOL YEAR NORMALIZATION — DEFINITIVE RULESET
 ====================================================================================
 MONTH/YEAR NORMALIZATION
 ====================================================================================
-• “this month” → month/year from TODAY  
-• “last month” → TODAY - 1 month  
-• Month-only phrases (e.g., “in October”) must choose the year that falls  
-  **inside the active school year**, not the calendar year.
+• “this month” → month/year from TODAY
+• “last month” → TODAY - 1 month
+• Month-only phrases (e.g., “in October”) must choose the year that falls
+  **inside the active school year**, not the calendar year. Emit month, inferred year, school_year,
+  start_date, end_date, and set relative="this_school_year" when a month is provided without a year.
 
 
 ====================================================================================
@@ -330,7 +331,12 @@ def run_nlv_model(
                 user_query,
                 flags=re.IGNORECASE,
             )
-            if month_only:
+            time_period = payload.get("time_period") or {}
+            existing_year = None
+            if isinstance(time_period, dict):
+                existing_year = time_period.get("year")
+
+            if month_only and existing_year is None:
                 today = date.today()
                 school_year_window = _compute_current_school_year(today)
                 month_name = month_only.group(1)
@@ -349,15 +355,26 @@ def run_nlv_model(
                 else:
                     inferred_year = school_year_window["school_year"]
 
-                time_period = payload.get("time_period") or {}
                 if not isinstance(time_period, dict):
                     time_period = {}
 
-                time_period["month"] = month_name
-                time_period["year"] = inferred_year
-                time_period["relative"] = None
-                time_period.setdefault("start_date", None)
-                time_period.setdefault("end_date", None)
+                time_period.update(
+                    {
+                        "month": month_name,
+                        "year": inferred_year,
+                        "school_year": school_year_window["school_year"],
+                        "start_date": school_year_window["start_date"],
+                        "end_date": school_year_window["end_date"],
+                        "relative": "this_school_year",
+                    }
+                )
+
+                clar_list = payload.get("clarification_needed")
+                if isinstance(clar_list, list):
+                    clar_list = [c for c in clar_list if c != "time_period"]
+                    payload["clarification_needed"] = clar_list
+                    if not clar_list:
+                        payload["requires_clarification"] = False
 
                 payload["time_period"] = time_period
 
