@@ -113,6 +113,15 @@ class MultiTurnConversationManager:
         if user_message.strip().lower() == "reset please":
             self.clear_state(session_id)
             print("[multi-turn] state cleared by user command", flush=True)
+            state = ConversationState()
+            fused_query = locals().get("fused_query")
+            print("[multi-turn-debug] FUSION TRACE:")
+            print(f"  - session_id: {session_id}")
+            print(f"  - active_topic: {state.active_topic}")
+            print(f"  - original_query: {state.original_query}")
+            print(f"  - latest_user_message: {user_message}")
+            print(f"  - fusion: {'YES' if fused_query else 'NO'}")
+            print(f"  - fused_query: {fused_query or '<none>'}")
             return {
                 "session_id": session_id,
                 "needs_clarification": False,
@@ -264,6 +273,14 @@ class MultiTurnConversationManager:
                     fused=fused_query,
                 )
 
+                fused_query = locals().get("fused_query")
+                print("[multi-turn-debug] FUSION TRACE:")
+                print(f"  - session_id: {session_id}")
+                print(f"  - active_topic: {state.active_topic}")
+                print(f"  - original_query: {state.original_query}")
+                print(f"  - latest_user_message: {user_message}")
+                print(f"  - fusion: {'YES' if fused_query else 'NO'}")
+                print(f"  - fused_query: {fused_query or '<none>'}")
                 return {
                     "session_id": session_id,
                     "needs_clarification": False,
@@ -326,6 +343,14 @@ class MultiTurnConversationManager:
                     fused=fused_query,
                 )
 
+                fused_query = locals().get("fused_query")
+                print("[multi-turn-debug] FUSION TRACE:")
+                print(f"  - session_id: {session_id}")
+                print(f"  - active_topic: {state.active_topic}")
+                print(f"  - original_query: {state.original_query}")
+                print(f"  - latest_user_message: {user_message}")
+                print(f"  - fusion: {'YES' if fused_query else 'NO'}")
+                print(f"  - fused_query: {fused_query or '<none>'}")
                 return {
                     "session_id": session_id,
                     "needs_clarification": False,
@@ -362,6 +387,14 @@ class MultiTurnConversationManager:
             fused_query = user_message
             print(f"[multi-turn] safe_new_thread: {user_message!r}", flush=True)
             self.save_state(fresh_state, session_id=session_id)
+            fused_query = locals().get("fused_query")
+            print("[multi-turn-debug] FUSION TRACE:")
+            print(f"  - session_id: {session_id}")
+            print(f"  - active_topic: {state.active_topic}")
+            print(f"  - original_query: {state.original_query}")
+            print(f"  - latest_user_message: {user_message}")
+            print(f"  - fusion: {'YES' if fused_query else 'NO'}")
+            print(f"  - fused_query: {fused_query or '<none>'}")
             return {
                 "session_id": session_id,
                 "needs_clarification": needs_clarification,
@@ -451,6 +484,14 @@ class MultiTurnConversationManager:
                 flush=True,
             )
             self.save_state(state, session_id=session_id)
+            fused_query = locals().get("fused_query")
+            print("[multi-turn-debug] FUSION TRACE:")
+            print(f"  - session_id: {session_id}")
+            print(f"  - active_topic: {state.active_topic}")
+            print(f"  - original_query: {state.original_query}")
+            print(f"  - latest_user_message: {user_message}")
+            print(f"  - fusion: {'YES' if fused_query else 'NO'}")
+            print(f"  - fused_query: {fused_query or '<none>'}")
             return {
                 "session_id": session_id,
                 "needs_clarification": needs_clarification,
@@ -488,6 +529,14 @@ class MultiTurnConversationManager:
 
             self.save_state(state, session_id=session_id)
 
+            fused_query = locals().get("fused_query")
+            print("[multi-turn-debug] FUSION TRACE:")
+            print(f"  - session_id: {session_id}")
+            print(f"  - active_topic: {state.active_topic}")
+            print(f"  - original_query: {state.original_query}")
+            print(f"  - latest_user_message: {user_message}")
+            print(f"  - fusion: {'YES' if fused_query else 'NO'}")
+            print(f"  - fused_query: {fused_query or '<none>'}")
             return {
                 "session_id": session_id,
                 "needs_clarification": needs_clarification,
@@ -531,6 +580,14 @@ class MultiTurnConversationManager:
 
             self.save_state(state, session_id=session_id)
 
+            fused_query = locals().get("fused_query")
+            print("[multi-turn-debug] FUSION TRACE:")
+            print(f"  - session_id: {session_id}")
+            print(f"  - active_topic: {state.active_topic}")
+            print(f"  - original_query: {state.original_query}")
+            print(f"  - latest_user_message: {user_message}")
+            print(f"  - fusion: {'YES' if fused_query else 'NO'}")
+            print(f"  - fused_query: {fused_query or '<none>'}")
             return {
                 "session_id": session_id,
                 "needs_clarification": needs_clarification,
@@ -619,6 +676,14 @@ class MultiTurnConversationManager:
 
         self.save_state(state, session_id=session_id)
 
+        fused_query = locals().get("fused_query")
+        print("[multi-turn-debug] FUSION TRACE:")
+        print(f"  - session_id: {session_id}")
+        print(f"  - active_topic: {state.active_topic}")
+        print(f"  - original_query: {state.original_query}")
+        print(f"  - latest_user_message: {user_message}")
+        print(f"  - fusion: {'YES' if fused_query else 'NO'}")
+        print(f"  - fused_query: {fused_query or '<none>'}")
         return {
             "session_id": session_id,
             "needs_clarification": needs_clarification,
