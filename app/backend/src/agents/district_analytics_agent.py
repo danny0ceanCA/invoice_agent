@@ -960,7 +960,20 @@ class Workflow:
             # This prevents the LLM from returning null/empty rows.
             # ------------------------------------------------------------------
             try:
-                if router_decision and router_decision.get("mode") == "invoice_details":
+                # SAFELY determine router mode (dataclass or dict)
+                if router_decision:
+                    if hasattr(router_decision, "mode"):
+                        # RouterDecision dataclass
+                        mode = router_decision.mode
+                    elif isinstance(router_decision, dict):
+                        # dict fallback (older versions)
+                        mode = router_decision.get("mode")
+                    else:
+                        mode = None
+                else:
+                    mode = None
+
+                if mode == "invoice_details":
                     if context.last_rows:
                         logic_ir.rows = context.last_rows
                         logic_ir.text = logic_ir.text or ""  # Ensure text is non-null
