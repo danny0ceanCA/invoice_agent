@@ -117,48 +117,40 @@ def route_sql(
 
     # Fallback provider logic for student queries with month detection
     q_lower = user_query.lower()
-    mentions_provider = any(
-        t in q_lower for t in [
-            "provider", "providers", "clinician", "clinicians"
-        ]
-    )
-    mentions_hours_or_cost = any(
-        t in q_lower for t in [
-            "hours", "cost", "spend", "total"
-        ]
-    )
 
-    # Pull month from any available source
+    mentions_provider = any(t in q_lower for t in [
+        "provider", "providers", "clinician", "clinicians"
+    ])
+    mentions_hours_or_cost = any(t in q_lower for t in [
+        "hours", "hour", "cost", "spend", "total"
+    ])
+
+    # Pull month from plan or multi-turn
     month_from_state = None
-    if isinstance(mt, dict):
-        month_from_state = mt.get("last_month")
+    if isinstance(multi_turn_state, dict):
+        month_from_state = multi_turn_state.get("last_month")
 
     has_month = (
         (month_names and len(month_names) > 0) or
         bool(month_from_state)
     )
 
-    # FINAL FALLBACK LOGIC
-    if (
-        mode not in ["invoice_details", "top_invoices"]
-        and primary_type == "student"
-        and mentions_provider
-        and mentions_hours_or_cost
-    ):
-        if time_window in ["this_school_year", "school_year", "ytd"] and not has_month:
+    # FINAL SAFE FALLBACK
+    # Only override into provider-breakdown mode WHEN WE HAVE A MONTH.
+    if primary_entity_type == "student" and mentions_provider and mentions_hours_or_cost and has_month:
+
+        if time_window in ["this_school_year", "school_year", "ytd"] and not month_names:
             mode = "student_provider_year"
         else:
             mode = "student_provider_breakdown"
 
-        needs_provider_breakdown = True
+        LOGGER.debug("router_safe_provider_override",
+                     mode=mode,
+                     month=month_names,
+                     month_from_state=month_from_state)
 
-        LOGGER.debug(
-            "router_mode_override",
-            mode=mode,
-            reason="student provider fallback with month detection",
-            month=month_names,
-            month_from_state=month_from_state,
-        )
+    # If NO month is present, NEVER override the router mode.
+    # Allow planner + NLV + multi-turn to resolve normally to avoid infinite loops.
 
     return RouterDecision(
         mode=mode,
