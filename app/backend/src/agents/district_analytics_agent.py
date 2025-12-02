@@ -591,13 +591,13 @@ class Workflow:
                     entities=None,
                 )
                 render_payload = run_rendering_model(
-                    user_query=context.query,
-                    ir=safe_ir,
-                    insights=[],
-                    client=agent.client,
-                    model=agent.render_model,
-                    system_prompt=self.rendering_system_prompt,
-                    temperature=agent.render_temperature,
+                user_query=context.query,
+                ir=safe_ir,
+                insights=[],
+                client=agent.client,
+                model=agent.render_model,
+                system_prompt=self.rendering_system_prompt,
+                temperature=agent.render_temperature,
                 )
                 return _finalise_response(render_payload, context)
 
@@ -681,13 +681,13 @@ class Workflow:
                     entities=None,
                 )
                 render_payload = run_rendering_model(
-                    user_query=context.query,
-                    ir=safe_ir,
-                    insights=[],
-                    client=agent.client,
-                    model=agent.render_model,
-                    system_prompt=self.rendering_system_prompt,
-                    temperature=agent.render_temperature,
+                user_query=context.query,
+                ir=safe_ir,
+                insights=[],
+                client=agent.client,
+                model=agent.render_model,
+                system_prompt=self.rendering_system_prompt,
+                temperature=agent.render_temperature,
                 )
                 return _finalise_response(render_payload, context)
 
@@ -985,13 +985,13 @@ class Workflow:
                     entities=None,
                 )
                 render_payload = run_rendering_model(
-                    user_query=context.query,
-                    ir=safe_ir,
-                    insights=[],
-                    client=agent.client,
-                    model=agent.render_model,
-                    system_prompt=self.rendering_system_prompt,
-                    temperature=agent.render_temperature,
+                user_query=context.query,
+                ir=safe_ir,
+                insights=[],
+                client=agent.client,
+                model=agent.render_model,
+                system_prompt=self.rendering_system_prompt,
+                temperature=agent.render_temperature,
                 )
                 return _finalise_response(render_payload, context)
 
