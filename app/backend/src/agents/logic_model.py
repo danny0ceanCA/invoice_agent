@@ -676,6 +676,27 @@ def run_logic_model(
     if router_instructions:
         routed_messages.append({"role": "system", "content": router_instructions})
 
+    # The core issue:
+    # The logic model may run multiple tool calls per iteration (e.g., summary + detail).
+    # We must ensure that invoice_details mode ALWAYS chooses the LAST tool result.
+
+    # Inject strong instruction directly into the routed system guidance:
+    if router_decision and router_decision.get("mode") == "invoice_details":
+        routed_messages.append(
+            {
+                "role": "system",
+                "content": (
+                    "INVOICE_DETAILS FINAL RESULT RULE:\n"
+                    "- Multiple tool calls may occur in this turn.\n"
+                    "- You MUST treat the *last* tool call in this turn as the authoritative result.\n"
+                    "- You MUST set IR.rows equal to the rows from the last tool call.\n"
+                    "- You MUST ignore any earlier summary or helper tool results.\n"
+                    "- Never return summary rows when invoice details are requested.\n"
+                    "- Only invoice_line_items detail rows should populate IR.rows."
+                ),
+            }
+        )
+
     completion = client.chat.completions.create(
         model=model,
         messages=routed_messages,
