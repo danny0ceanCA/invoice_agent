@@ -1513,9 +1513,28 @@ def _summarize_response(response: AgentResponse) -> str:
 
 
 def _build_session_id(user_context: Mapping[str, Any] | None) -> str | None:
+    """
+    Build a session_id for multi-turn memory.
+
+    NEW BEHAVIOR (Option A):
+    - If the frontend passes a `session_id` inside user_context,
+      we use that as the authoritative session key. This ensures
+      every browser page load starts a fresh conversation.
+
+    FALLBACK:
+    - If no session_id is supplied, fall back to the original
+      user_id + district_key method.
+    """
     if not user_context:
         return None
 
+    # Option A — Frontend-controlled session ID
+    if "session_id" in user_context and user_context["session_id"]:
+        sid = str(user_context["session_id"])
+        LOGGER.debug("session_id_from_frontend", session_id=sid)
+        return sid
+
+    # Fallback to old behavior
     parts: list[str] = []
     user_id = user_context.get("user_id")
     district_key = user_context.get("district_key")
@@ -1528,7 +1547,9 @@ def _build_session_id(user_context: Mapping[str, Any] | None) -> str | None:
     if not parts:
         return None
 
-    return "|".join(parts)
+    sid = "|".join(parts)
+    LOGGER.debug("session_id_fallback", session_id=sid)
+    return sid
 
 
 def _finalise_response(payload: Mapping[str, Any], context: AgentContext) -> AgentResponse:
