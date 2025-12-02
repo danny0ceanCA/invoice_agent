@@ -137,7 +137,7 @@ def route_sql(
 
     # FINAL SAFE FALLBACK
     # Only override into provider-breakdown mode WHEN WE HAVE A MONTH.
-    if primary_entity_type == "student" and mentions_provider and mentions_hours_or_cost and has_month:
+    if primary_type == "student" and mentions_provider and mentions_hours_or_cost and has_month:
 
         if time_window in ["this_school_year", "school_year", "ytd"] and not month_names:
             mode = "student_provider_year"
