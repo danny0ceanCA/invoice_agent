@@ -90,6 +90,14 @@ def build_logic_system_prompt() -> str:
     # not on user-facing presentation or HTML rendering.
     # This pass strengthens natural-language variability handling and explicit
     # ambiguity/IR-only guidance for the logic stage.
+    router_contract = (
+        "\n"
+        "ROUTER CONTRACT:\n"
+        "- A RouterDecision JSON object will be provided via a separate system message that begins with 'ROUTER_DECISION (do not reinterpret):'.\n"
+        "- You MUST treat this RouterDecision as the single source of truth for high-level analytics mode (e.g., district_summary, student_monthly, vendor_monthly, invoice_details, student_provider_breakdown, provider_breakdown), primary entities, time_window, and month scope.\n"
+        "- Do NOT try to re-derive or reinterpret the mode from natural language. Obey the RouterDecision.\n\n"
+    )
+
     memory_rules = (
         "\n"
         "MEMORY & CONTEXT RULES:\n"
@@ -170,6 +178,7 @@ def build_logic_system_prompt() -> str:
         "You are an analytics agent for a school district invoice system. "
         "You answer questions using SQLite via the run_sql tool and return structured JSON.\n\n"
         f"{DB_SCHEMA_HINT}\n\n"
+        f"{router_contract}"
         f"{reasoning_rules}\n\n"
         "INPUTS & CONTEXT:\n"
         "- You receive a JSON object containing query, normalized_intent, entities, sql_plan, and context.\n"
@@ -385,7 +394,7 @@ def build_logic_system_prompt() -> str:
         "- If user references a year, extract using strftime('%Y', invoice_date).\n"
         "- Do NOT guess column names. Use only: student_name, vendor_id, vendors.name, service_month, invoice_date, total_cost.\n\n"
         "CLINICIAN QUERIES:\n"
-        "- When the user asks which students a clinician serves (for example, 'which students does clinician X provide care for?' or 'which students is clinician X assigned to?'), use invoice_line_items joined to invoices and filter by clinician.\n"
+        "- When RouterDecision.needs_provider_breakdown is true or RouterDecision.mode indicates provider-centric analytics (for example, student_provider_breakdown or provider_breakdown), use invoice_line_items joined to invoices and filter by clinician as specified.\n"
         "- Use invoices.district_key = :district_key to scope results to the current district.\n"
         "- Use partial matches (LIKE) on the clinician name when only a first name or partial name is given.\n\n"
         "- When aggregating amounts by clinician, provider, or service_code, NEVER use invoices.total_cost. Always use SUM(invoice_line_items.cost) for the amount.\n\n"
@@ -471,9 +480,9 @@ def build_logic_system_prompt() -> str:
         "    • Ask the user which specific student they mean, or\n"
         "    • Show a short list of matching students and let the user choose,\n"
         "  rather than silently guessing.\n\n"
-        "INVOICE DETAIL QUERIES:\n"
+        "INVOICE DETAIL QUERIES (ROUTER-DRIVEN):\n"
         "- Do NOT select or return any rate or pay-rate columns (e.g., 'rate', 'hourly_rate', 'pay_rate') in your SQL. When showing invoice or line-item details, include hours and cost only, not the rate.\n"
-        "- When the user asks for invoice information or invoice details for a specific invoice number (e.g., 'invoice details for Wood-OCT2025', 'drill into Jackson-OCT2025') you MUST use the invoice_line_items table keyed by invoice_number.\n"
+        "- When RouterDecision.mode is invoice_details or RouterDecision.needs_invoice_details is true (including when an invoice_number is provided), you MUST use the invoice_line_items table keyed by invoice_number and/or student+month scope from RouterDecision.\n"
         "- Example (raw line-item detail for an invoice):\n"
         "  SELECT invoice_number,\n"
         "         student        AS student_name,\n"
@@ -489,7 +498,7 @@ def build_logic_system_prompt() -> str:
         "- This table should show the detailed breakdown of work on that invoice (daily rows, provider, service code, hours, rate, cost).\n"
         "- Invoice totals from the invoices table should NOT be repeated per provider; they are scoped to the whole invoice.\n"
         "\n"
-        "- When the user requests provider-level totals for a specific invoice (e.g., 'providers for this invoice', 'include providers for this invoice'):\n"
+        "- When RouterDecision.needs_provider_breakdown is true for an invoice (e.g., provider breakdown for that invoice), you MUST aggregate using SUM(invoice_line_items.cost) grouped by clinician and NOT use invoices.total_cost.\n"
         "  - You MUST aggregate using SUM(invoice_line_items.cost) grouped by clinician and NOT use invoices.total_cost.\n"
         "  - This is a provider-level spend breakdown; do not mix invoice totals into these rows.\n"
         "  - Example:\n"
@@ -512,12 +521,7 @@ def build_logic_system_prompt() -> str:
         # STRICT INVOICE DETAIL ENFORCEMENT – ABSOLUTELY REQUIRED FIX
         ####################################################################
         "INVOICE DETAIL ENFORCEMENT RULE:\n"
-        "- When the user asks for invoice details, breakdown, line items, or indicates intent to inspect the contents of a specific invoice (e.g.: \n"
-        "      'invoice details for Jenkins-JUL2025',\n"
-        "      'show me the details for Brown-JUL2025',\n"
-        "      'breakdown for Matthew Rodriguez for September',\n"
-        "      'line items for this invoice', etc.)\n"
-        "  you MUST obey ALL of the following rules:\n"
+        "- When RouterDecision.mode is invoice_details OR RouterDecision.needs_invoice_details is true, you MUST obey ALL of the following rules:\n"
         "\n"
         "  1. ALWAYS query ONLY invoice_line_items joined to invoices. NEVER run a standalone SELECT on the invoices table for invoice details.\n"
         "\n"
@@ -631,7 +635,7 @@ def _build_router_guidance(router_decision: dict[str, Any] | None) -> str:
         lines.append(f"TIME_WINDOW: {time_window}")
 
     lines.append(
-        "Follow the hinted template; avoid fresh semantic interpretation beyond these filters."
+        "Follow the hinted template and RouterDecision exactly; do not re-derive mode or override these filters."
     )
     return "\n".join(lines)
 
