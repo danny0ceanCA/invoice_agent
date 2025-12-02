@@ -309,6 +309,26 @@ def run_sql_router_model(
         multi_turn_state=multi_turn_state,
     )
 
+    # SHORT-CIRCUIT: if the deterministic router has already identified a
+    # student-scoped provider breakdown, do NOT let the LLM router override it.
+    # This prevents the router model from downgrading the mode and causing
+    # follow-ups like "provider by hours for July" to ask for a specific
+    # provider instead of returning a full provider breakdown.
+    if (
+        fallback_decision.primary_entity_type == "student"
+        and fallback_decision.primary_entities
+        and fallback_decision.needs_provider_breakdown
+        and fallback_decision.mode in {"student_provider_breakdown", "student_provider_year"}
+    ):
+        LOGGER.debug(
+            "router_short_circuit_student_provider_breakdown",
+            mode=fallback_decision.mode,
+            primary_entities=fallback_decision.primary_entities,
+            month_names=fallback_decision.month_names,
+            time_window=fallback_decision.time_window,
+        )
+        return fallback_decision
+
     messages = [
         {"role": "system", "content": system_prompt},
         {
