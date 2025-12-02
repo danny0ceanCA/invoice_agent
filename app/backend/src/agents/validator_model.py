@@ -85,6 +85,37 @@ def run_validator_model(
     system_prompt: str,
     temperature: float,
 ) -> dict[str, Any]:
+    # ------------------------------------------------------------------
+    # WHITELIST: Simple list-queries (students/vendors/clinicians)
+    # If the IR contains only rows and no analytics metadata, approve it.
+    # ------------------------------------------------------------------
+    try:
+        ir_dict = ir.model_dump()
+        rows_ok = isinstance(ir_dict.get("rows"), list) and len(ir_dict["rows"]) > 0
+        text_ok = not any(
+            kw in (ir_dict.get("text") or "").lower()
+            for kw in ["select", "insert", "update", "delete", "drop", "join", "from"]
+        )
+        entities = ir_dict.get("entities")
+        entities_ok = (
+            entities is None
+            or all(len(entities.get(bucket, [])) == 0
+                   for bucket in ["students", "providers", "vendors", "invoices"])
+        )
+        no_analytics = (
+            not ir_dict.get("select")
+            and not ir_dict.get("html")
+        )
+
+        if rows_ok and text_ok and entities_ok and no_analytics:
+            return {
+                "valid": True,
+                "issues": [],
+                "ir": ir_dict,
+            }
+    except Exception:
+        pass
+
     messages = [
         {"role": "system", "content": system_prompt},
         {
