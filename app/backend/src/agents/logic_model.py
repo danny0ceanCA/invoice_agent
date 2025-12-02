@@ -203,6 +203,7 @@ def build_logic_system_prompt() -> str:
         "SQL RULES:\n"
         "- Only use columns that exist in the schema.\n"
         "- Follow the SCHOOL YEAR & DATE FILTERING RULES: do not add invoice_date BETWEEN filters for school_year/time_window queries when sql_plan.date_range is null. Apply invoice_date BETWEEN :start_date AND :end_date only when the planner provides explicit dates or the user asks about invoice submission/processing dates.\n"
+        "- When RouterDecision.month_names is provided AND RouterDecision.time_window = 'this_school_year', enforce month/year filters using the injected metadata: WHERE LOWER(i.service_month) = LOWER(:month) AND strftime('%Y', i.invoice_date) = :year. Use the :year value from normalized_intent.time_period.year or planner metadata across invoice_details, student_monthly, and district_monthly without asking for clarification or defaulting to YTD.\n"
         "- Canonical school-year spend by month when a concrete date_range is provided:\n"
         "SELECT LOWER(i.service_month) AS service_month,\n"
         "       SUM(i.total_cost) AS total_spend\n"
@@ -654,6 +655,11 @@ def _build_router_guidance(router_decision: dict[str, Any] | None) -> str:
         lines.append(f"MONTH_SCOPE: {month_names}")
     if time_window:
         lines.append(f"TIME_WINDOW: {time_window}")
+
+    if month_names and time_window == "this_school_year":
+        lines.append(
+            "MONTH/YEAR FILTER: For month-only school-year queries, use WHERE LOWER(i.service_month) = LOWER(:month) AND strftime('%Y', i.invoice_date) = :year with the injected month/year. Do not ask for clarification; override any YTD defaults."
+        )
 
     lines.append(
         "Follow the hinted template and RouterDecision exactly; do not re-derive mode or override these filters."
