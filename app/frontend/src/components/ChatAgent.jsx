@@ -5,6 +5,7 @@ import { useAuth0 } from "@auth0/auth0-react";
 
 // Backend API base URL (Render: VITE_API_BASE_URL, Dev: fallback to /api)
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api";
+const PAGE_SESSION_ID = crypto.randomUUID();
 
 function ChatAgent({ districtKey }) {
   console.log("ChatAgent using districtKey:", districtKey);
@@ -82,6 +83,7 @@ function ChatAgent({ districtKey }) {
           district_key: districtKey ?? null,
           context: {
             district_key: districtKey ?? null,
+            session_id: PAGE_SESSION_ID,
           },
         }),
       });
