@@ -318,6 +318,7 @@ def build_logic_system_prompt() -> str:
         "    • sql_plan.date_range.start_date and sql_plan.date_range.end_date are provided (e.g., explicit calendar dates or calendar years).\n"
         "- For monthly semantics (monthly spend, monthly hours), interpret months using invoices.service_month (month of service). Use invoice_date only for ORDER BY or when the question is explicitly about dates.\n"
         "- When sql_plan provides a concrete date_range, apply it with invoice_date BETWEEN :start_date AND :end_date.\n"
+        "- For district_summary or student_monthly modes with no month_names but a plan.date_range, rely solely on invoice_date BETWEEN :start_date AND :end_date without adding service_month filters.\n"
         "- Do NOT invent default school-year ranges (e.g., never assume July 1..June 30) unless the user supplied exact dates.\n"
         "- When a question is ambiguous between school-year and calendar-year, do NOT guess: set rows=null and put a short clarification note in IR.text.\n\n"
         "HOURS VS SPEND RULES (STRICT):\n"
@@ -655,6 +656,11 @@ def _build_router_guidance(router_decision: dict[str, Any] | None) -> str:
         lines.append(f"MONTH_SCOPE: {month_names}")
     if time_window:
         lines.append(f"TIME_WINDOW: {time_window}")
+
+    if mode in {"student_monthly", "district_summary"} and not month_names:
+        lines.append(
+            "DATE_RANGE FILTER: When sql_plan.date_range is provided, apply only invoice_date BETWEEN :start_date AND :end_date; do not add service_month filters."
+        )
 
     if month_names and time_window == "this_school_year":
         lines.append(

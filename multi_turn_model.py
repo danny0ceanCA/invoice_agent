@@ -24,6 +24,7 @@ class ConversationState:
     last_period_end: Optional[str] = None
     last_month: Optional[str] = None
     last_year_window: Optional[str] = None
+    last_session_id: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -43,6 +44,7 @@ class ConversationState:
             last_period_end=data.get("last_period_end"),
             last_month=data.get("last_month"),
             last_year_window=data.get("last_year_window"),
+            last_session_id=data.get("last_session_id"),
         )
 
 
@@ -73,6 +75,7 @@ class MultiTurnConversationManager:
     def save_state(self, state: ConversationState, session_id: Optional[str] = None) -> None:
         if session_id is None:
             return
+        state.last_session_id = session_id
         key = self._state_key(session_id)
         try:
             payload = json.dumps(state.to_dict())
@@ -115,6 +118,19 @@ class MultiTurnConversationManager:
         state = self.get_state(session_id)
 
         lower_message = user_message.lower()
+        message_is_time_only = self._is_time_only(user_message)
+        last_session_id = getattr(state, "last_session_id", None)
+        active_topic = state.active_topic if isinstance(state.active_topic, dict) else {}
+        active_topic_valid = active_topic.get("type") in {"student", "vendor", "district", "month"}
+        time_only_followup = (
+            message_is_time_only
+            and last_session_id == session_id
+            and active_topic_valid
+            and state.original_query is not None
+        )
+
+        if message_is_time_only and not time_only_followup:
+            return _reset_thread_and_return()
 
         def _reset_thread_and_return() -> Dict[str, Any]:
             print("[multi-turn-debug] SAFE_FUSION_RESET", flush=True)
@@ -193,7 +209,7 @@ class MultiTurnConversationManager:
             "and for her",
             "and for them",
         ]
-        if not any(marker in lower_message for marker in followup_markers):
+        if not time_only_followup and not any(marker in lower_message for marker in followup_markers):
             return _reset_thread_and_return()
 
         has_active_topic = state.original_query is not None
@@ -597,6 +613,39 @@ class MultiTurnConversationManager:
             return True
 
         return False
+
+    def _is_time_only(self, message: str) -> bool:
+        if not message:
+            return False
+
+        normalized = re.sub(r"[?.!]", "", message.strip().lower())
+        if not normalized:
+            return False
+
+        if normalized.startswith("what about "):
+            normalized = normalized[len("what about ") :].strip()
+        if normalized.startswith("now "):
+            normalized = normalized[len("now ") :].strip()
+
+        time_phrases = {
+            "this school year",
+            "current school year",
+            "this month",
+            "last month",
+            "this year",
+            "last year",
+            "this sy",
+        }
+
+        if normalized in time_phrases:
+            return True
+
+        month_pattern = (
+            r"^(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|"
+            r"aug(?:ust)?|sep(?:t)?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)(?:\s+\d{4})?$"
+        )
+
+        return bool(re.match(month_pattern, normalized))
 
     def _extract_period_info(self, message: str) -> Dict[str, Optional[str]]:
         info: Dict[str, Optional[str]] = {

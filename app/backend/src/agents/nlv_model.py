@@ -242,6 +242,37 @@ def _apply_this_school_year_override(user_query: str, payload: dict[str, Any]) -
             payload["requires_clarification"] = False
 
 
+def _contains_total_keywords(user_query: str) -> bool:
+    """Check whether the query asks for totals or spend."""
+
+    text = (user_query or "").lower()
+    return bool(
+        re.search(r"\b(total cost|total|summary|spend|cost|charges)\b", text)
+    )
+
+
+def _has_time_reference(user_query: str, time_period: dict[str, Any] | None) -> bool:
+    """Detect explicit time mentions to avoid overwriting them."""
+
+    if isinstance(time_period, dict):
+        for key in ("month", "year", "start_date", "end_date", "relative", "school_year"):
+            if time_period.get(key) not in (None, ""):
+                return True
+
+    text = (user_query or "").lower()
+    month_pattern = r"\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b"
+    if re.search(month_pattern, text):
+        return True
+
+    if re.search(r"\b\d{4}\b", text):
+        return True
+
+    if "school year" in text or "this year" in text or "last year" in text or "this month" in text or "last month" in text:
+        return True
+
+    return False
+
+
 def run_nlv_model(
     *,
     user_query: str,
@@ -376,6 +407,37 @@ def run_nlv_model(
                     if not clar_list:
                         payload["requires_clarification"] = False
 
+                payload["time_period"] = time_period
+
+        # --------------------------------------------------------------------
+        # Default student totals → current school year window
+        # --------------------------------------------------------------------
+        time_period = payload.get("time_period") if isinstance(payload.get("time_period"), dict) else {}
+        if (
+            payload.get("scope") == "single_student"
+            and _contains_total_keywords(user_query)
+            and not explicit_month_year_found
+            and not _has_time_reference(user_query, time_period)
+        ):
+            if not isinstance(time_period, dict):
+                time_period = {}
+
+            if time_period.get("month") is None and time_period.get("year") is None:
+                window = _compute_current_school_year(date.today())
+                time_period.update(
+                    {
+                        "school_year": window["school_year"],
+                        "start_date": window["start_date"],
+                        "end_date": window["end_date"],
+                        "relative": "this_school_year",
+                    }
+                )
+                clar_list = payload.get("clarification_needed")
+                if isinstance(clar_list, list):
+                    clar_list = [c for c in clar_list if c != "time_period"]
+                    payload["clarification_needed"] = clar_list
+                    if not clar_list:
+                        payload["requires_clarification"] = False
                 payload["time_period"] = time_period
 
         # Deterministic override for "this school year" / "this year" semantics.
