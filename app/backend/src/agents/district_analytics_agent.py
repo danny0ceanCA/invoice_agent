@@ -953,6 +953,29 @@ class Workflow:
 
             logic_ir = _payload_to_ir(payload, context.last_rows)
 
+            # ------------------------------------------------------------------
+            # ENFORCEMENT: INVOICE DETAILS ALWAYS RETURNS SQL DETAIL ROWS
+            # If router_decision.mode == "invoice_details", override IR.rows
+            # with the actual SQL result from the last run_sql tool call.
+            # This prevents the LLM from returning null/empty rows.
+            # ------------------------------------------------------------------
+            try:
+                if router_decision and router_decision.get("mode") == "invoice_details":
+                    if context.last_rows:
+                        logic_ir.rows = context.last_rows
+                        logic_ir.text = logic_ir.text or ""  # Ensure text is non-null
+                        LOGGER.debug(
+                            "invoice_details_enforced_rows",
+                            row_count=len(context.last_rows)
+                        )
+                    else:
+                        LOGGER.debug(
+                            "invoice_details_no_rows_found",
+                            note="context.last_rows was empty"
+                        )
+            except Exception as exc:
+                LOGGER.warning("invoice_details_enforcement_failed", error=str(exc))
+
             br_result = run_business_rule_model(
                 ir=logic_ir,
                 entities=resolved_entities,
