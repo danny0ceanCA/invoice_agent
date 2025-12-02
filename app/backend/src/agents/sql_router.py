@@ -155,6 +155,27 @@ def route_sql(
     # If NO month is present, NEVER override the router mode.
     # Allow planner + NLV + multi-turn to resolve normally to avoid infinite loops.
 
+    # 1. Resolve a month from user_query text if month_names is empty
+    if not month_names:
+        all_months = [
+            "january", "february", "march", "april", "may", "june",
+            "july", "august", "september", "october", "november", "december"
+        ]
+        for m in all_months:
+            if m in q_lower:
+                month_names = [m.capitalize()]
+                break
+
+    # 2. If still empty, pull from multi_turn_state.last_month
+    if not month_names and isinstance(multi_turn_state, dict):
+        last_month = multi_turn_state.get("last_month")
+        if isinstance(last_month, str) and last_month.strip():
+            month_names = [last_month]
+
+    # 3. Ensure month_names is always a list
+    if isinstance(month_names, str):
+        month_names = [month_names]
+
     return RouterDecision(
         mode=mode,
         primary_entity_type=primary_type,
