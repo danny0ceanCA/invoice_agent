@@ -138,6 +138,22 @@ class MultiTurnConversationManager:
             return _reset_thread_and_return()
 
         # ============================================================
+        # VISUAL FUSION LOG TREE
+        # Prints a compact tree showing fusion details.
+        # ============================================================
+        def _log_fusion_tree(decision: str, reason: str, fused: str | None = None):
+            LOGGER.debug("multi-turn-debug FUSION_DECISION_TREE")
+            LOGGER.debug("└── FUSION_DECISION")
+            LOGGER.debug(f"    ├── active_topic: {active_topic}")
+            LOGGER.debug(f"    ├── new_message: {user_message}")
+            LOGGER.debug(f"    ├── decision: {decision}")
+            LOGGER.debug(f"    ├── reason: {reason}")
+            if fused:
+                LOGGER.debug(f"    └── fused_query: {fused}")
+            else:
+                LOGGER.debug("    └── fused_query: <none>")
+
+        # ============================================================
         # PROVIDER FOLLOW-UP FUSION (Option B+)
         # Fuse with active student topic when:
         # - session_id matches
@@ -193,6 +209,13 @@ class MultiTurnConversationManager:
                 LOGGER.debug("multi-turn-debug followup", followup=user_message)
                 LOGGER.debug("multi-turn-debug fused_query", fused_query=fused_query)
 
+                # Visual fusion log
+                _log_fusion_tree(
+                    decision="fused",
+                    reason="provider_follow_up",
+                    fused=fused_query,
+                )
+
                 return {
                     "session_id": session_id,
                     "needs_clarification": False,
@@ -203,6 +226,11 @@ class MultiTurnConversationManager:
 
         def _reset_thread_and_return() -> Dict[str, Any]:
             print("[multi-turn-debug] SAFE_FUSION_RESET", flush=True)
+            _log_fusion_tree(
+                decision="reset",
+                reason="does_not_meet_fusion_conditions",
+                fused=None,
+            )
             self.clear_state(session_id)
             fresh_state = self._start_new_thread(user_message, required_slots)
 
@@ -450,6 +478,13 @@ class MultiTurnConversationManager:
         needs_clarification = bool(state.missing_slots)
         fused_query = self.build_fused_query(state)
         extracted_name = self._extract_name(user_message)
+
+        if message_is_time_only and time_only_followup:
+            _log_fusion_tree(
+                decision="fused",
+                reason="time_only_follow_up",
+                fused=fused_query,
+            )
 
         if is_short_wh_followup:
             print(f"[multi-turn] followup_short_wh: {fused_query!r}", flush=True)
