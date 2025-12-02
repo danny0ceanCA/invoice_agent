@@ -56,6 +56,17 @@ def route_sql(
 
     # Flags
     q_lower = user_query.lower()
+    top_invoices_intent = any(
+        kw in q_lower
+        for kw in [
+            "highest invoices",
+            "most expensive invoices",
+            "top invoices",
+            "biggest invoices",
+            "highest cost invoices",
+        ]
+    ) or ("top" in q_lower and "invoice" in q_lower)
+
     needs_invoice_details = any(
         kw in q_lower
         for kw in [
@@ -66,14 +77,20 @@ def route_sql(
             "drill",
             "show me the details",
         ]
-    )
+    ) and not top_invoices_intent
 
     needs_provider_breakdown = any(
         kw in q_lower for kw in ["provider", "clinician", "hours by provider", "who provided"]
-    )
+    ) and not top_invoices_intent
 
     # Modes
-    if needs_invoice_details:
+    if top_invoices_intent or plan.get("kind") == "top_invoices":
+        mode = "top_invoices"
+        primary_type = None
+        primary_entities = []
+        needs_invoice_details = False
+        needs_provider_breakdown = False
+    elif needs_invoice_details:
         mode = "invoice_details"
     elif needs_provider_breakdown:
         if primary_type == "student":
@@ -121,7 +138,7 @@ SQL and do NOT describe logic—only emit the routing JSON.
 
 RouterDecision schema (all keys required):
 - mode: string. One of: district_summary, student_monthly, vendor_monthly,
-  invoice_details, student_provider_breakdown, provider_breakdown.
+  invoice_details, student_provider_breakdown, provider_breakdown, top_invoices.
 - primary_entity_type: string|null. Usually "student" or "vendor".
 - primary_entities: array of strings.
 - time_window: string|null. e.g., "last_month", "this_school_year".
@@ -134,6 +151,7 @@ RouterDecision schema (all keys required):
 - notes: array of strings for any clarifications or routing notes.
 
 Routing rules (strict):
+- If the user asks for "highest invoices", "most expensive invoices", "top invoices", "biggest invoices", "highest cost invoices", or "top N invoices" → mode=top_invoices with no invoice details or provider breakdown.
 - If the user wants invoice details or line-item drilldowns → mode=invoice_details.
 - If provider breakdown is requested and the primary type is student →
   mode=student_provider_breakdown, else provider_breakdown.
