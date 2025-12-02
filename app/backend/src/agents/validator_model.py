@@ -85,6 +85,30 @@ def run_validator_model(
     system_prompt: str,
     temperature: float,
 ) -> dict[str, Any]:
+    # -----------------------------------------------------------
+    # WHITELIST: Simple list queries (students/vendors/clinicians)
+    # A list query is detected when:
+    # - rows exist
+    # - and each row has exactly 1 column
+    # -----------------------------------------------------------
+    try:
+        ir_dict = ir.model_dump()
+        rows = ir_dict.get("rows")
+        if (
+            isinstance(rows, list)
+            and len(rows) > 0
+            and isinstance(rows[0], dict)
+            and len(rows[0].keys()) == 1
+        ):
+            # Approve simple list queries without further validation
+            return {
+                "valid": True,
+                "issues": [],
+                "ir": ir_dict,
+            }
+    except Exception:
+        pass
+
     # ------------------------------------------------------------------
     # WHITELIST: Simple list-queries (students/vendors/clinicians)
     # If the IR contains only rows and no analytics metadata, approve it.
