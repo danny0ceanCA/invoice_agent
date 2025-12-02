@@ -30,6 +30,7 @@ class ConversationState:
     last_month: Optional[str] = None
     last_year_window: Optional[str] = None
     last_session_id: Optional[str] = None
+    active_mode: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -50,6 +51,7 @@ class ConversationState:
             last_month=data.get("last_month"),
             last_year_window=data.get("last_year_window"),
             last_session_id=data.get("last_session_id"),
+            active_mode=data.get("active_mode"),
         )
 
 
@@ -122,6 +124,45 @@ class MultiTurnConversationManager:
         user_message = user_message.strip()
         state = self.get_state(session_id)
 
+        active_mode = getattr(state, "active_mode", None)
+        last_query = None
+        if isinstance(state.active_topic, dict):
+            last_query = state.active_topic.get("last_query")
+        if last_query is None:
+            last_query = state.original_query
+
+        def _classify_mode(text: str) -> Optional[str]:
+            t = text.lower()
+            provider_terms = [
+                "provider",
+                "providers",
+                "clinician",
+                "clinicians",
+                "care staff",
+                "nurse",
+                "lvn",
+                "hha",
+                "health aide",
+                "aide",
+            ]
+            hours_terms = ["hours", "hrs"]
+            if any(p in t for p in provider_terms) and any(h in t for h in hours_terms):
+                return "student_provider_breakdown"
+
+            total_terms = [
+                "total cost",
+                "total spend",
+                "spend",
+                "charges",
+                "burn",
+                "burn rate",
+                "amount",
+            ]
+            if any(term in t for term in total_terms):
+                return "student_total_cost"
+
+            return None
+
         lower_message = user_message.lower()
         message_is_time_only = self._is_time_only(user_message)
         last_session_id = getattr(state, "last_session_id", None)
@@ -142,16 +183,22 @@ class MultiTurnConversationManager:
         # Prints a compact tree showing fusion details.
         # ============================================================
         def _log_fusion_tree(decision: str, reason: str, fused: str | None = None):
-            LOGGER.debug("multi-turn-debug FUSION_DECISION_TREE")
-            LOGGER.debug("└── FUSION_DECISION")
-            LOGGER.debug(f"    ├── active_topic: {active_topic}")
-            LOGGER.debug(f"    ├── new_message: {user_message}")
-            LOGGER.debug(f"    ├── decision: {decision}")
-            LOGGER.debug(f"    ├── reason: {reason}")
-            if fused:
-                LOGGER.debug(f"    └── fused_query: {fused}")
-            else:
-                LOGGER.debug("    └── fused_query: <none>")
+            try:
+                LOGGER.debug("multi-turn-debug FUSION_DECISION_TREE")
+                LOGGER.debug("└── FUSION_DECISION")
+                LOGGER.debug(f"    ├── session_id: {session_id}")
+                LOGGER.debug(f"    ├── active_topic: {active_topic}")
+                LOGGER.debug(f"    ├── active_mode: {active_mode}")
+                LOGGER.debug(f"    ├── last_query: {last_query}")
+                LOGGER.debug(f"    ├── new_message: {user_message}")
+                LOGGER.debug(f"    ├── decision: {decision}")
+                LOGGER.debug(f"    ├── reason: {reason}")
+                if fused:
+                    LOGGER.debug(f"    └── fused_query: {fused}")
+                else:
+                    LOGGER.debug("    └── fused_query: <none>")
+            except Exception:
+                pass
 
         # ============================================================
         # PROVIDER FOLLOW-UP FUSION (Option B+)
@@ -194,12 +241,13 @@ class MultiTurnConversationManager:
             is_district_reset = any(term in text for term in district_reset_terms)
 
             if mentions_provider and mentions_time and not is_district_reset:
-                # Build fused query
-                previous_query = active_topic.get("last_query") or state.original_query or ""
+                previous_query = last_query or ""
                 fused_query = f"{previous_query} Additional instruction: {user_message}"
 
                 state.latest_user_message = user_message
                 state.history.append({"role": "user", "content": user_message})
+                state.active_mode = "student_provider_breakdown"
+                active_topic["last_query"] = fused_query
 
                 self.save_state(state, session_id=session_id)
 
@@ -224,6 +272,68 @@ class MultiTurnConversationManager:
                     "state": state.to_dict(),
                 }
 
+        if (
+            session_id == getattr(state, "last_session_id", None)
+            and active_topic
+            and active_topic.get("type") == "student"
+        ):
+            t = user_message.lower().strip()
+
+            time_only_terms = [
+                "january",
+                "february",
+                "march",
+                "april",
+                "may",
+                "june",
+                "july",
+                "august",
+                "september",
+                "october",
+                "november",
+                "december",
+                "this month",
+                "last month",
+                "this school year",
+                "this year",
+                "ytd",
+            ]
+            is_time_only = any(m in t for m in time_only_terms) and "provider" not in t and "clinician" not in t
+
+            if is_time_only and not any(dw in t for dw in ["district", "all students", "whole district"]):
+                mode = active_mode or _classify_mode(last_query or "")
+
+                if mode == "student_provider_breakdown":
+                    fused_query = (
+                        f"{last_query or ''} Time period is month focus is {user_message.strip()}. "
+                        "Additional instruction: providers and hours for this month."
+                    )
+                else:
+                    fused_query = (
+                        f"{last_query or ''} Time period is month focus is {user_message.strip()}. "
+                        f"Additional instruction: {user_message}"
+                    )
+
+                state.latest_user_message = user_message
+                state.history.append({"role": "user", "content": user_message})
+                state.active_mode = mode
+                active_topic["last_query"] = fused_query
+                self.save_state(state, session_id=session_id)
+
+                _log_fusion_tree(
+                    decision="fused",
+                    reason="time_only_follow_up",
+                    fused=fused_query,
+                )
+
+                return {
+                    "session_id": session_id,
+                    "needs_clarification": False,
+                    "clarification_prompt": None,
+                    "fused_query": fused_query,
+                    "state": state.to_dict(),
+                }
+
         def _reset_thread_and_return() -> Dict[str, Any]:
             print("[multi-turn-debug] SAFE_FUSION_RESET", flush=True)
             _log_fusion_tree(
@@ -233,6 +343,7 @@ class MultiTurnConversationManager:
             )
             self.clear_state(session_id)
             fresh_state = self._start_new_thread(user_message, required_slots)
+            fresh_state.active_mode = _classify_mode(user_message)
 
             extracted_name = self._extract_name(user_message)
             if extracted_name and self._is_valid_name(extracted_name):
@@ -317,6 +428,7 @@ class MultiTurnConversationManager:
 
         if is_explicit_list and not is_list_followup:
             state = self._start_new_thread(user_message, required_slots)
+            state.active_mode = _classify_mode(user_message)
 
             extracted_name = self._extract_name(user_message)
             if extracted_name and self._is_valid_name(extracted_name):
@@ -351,6 +463,7 @@ class MultiTurnConversationManager:
 
         if not has_active_topic:
             state = self._start_new_thread(user_message, required_slots)
+            state.active_mode = _classify_mode(user_message)
 
             extracted_name = self._extract_name(user_message)
             if extracted_name and self._is_valid_name(extracted_name):
@@ -393,6 +506,7 @@ class MultiTurnConversationManager:
 
         if starts_new_topic and not is_list_followup and not is_short_wh_followup:
             state = self._start_new_thread(user_message, required_slots)
+            state.active_mode = _classify_mode(user_message)
 
             extracted_name = self._extract_name(user_message)
             if extracted_name and self._is_valid_name(extracted_name):
