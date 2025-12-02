@@ -115,6 +115,51 @@ def route_sql(
     if mt.get("last_month") and not month_names:
         month_names = [mt["last_month"]]
 
+    # Fallback provider logic for student queries with month detection
+    q_lower = user_query.lower()
+    mentions_provider = any(
+        t in q_lower for t in [
+            "provider", "providers", "clinician", "clinicians"
+        ]
+    )
+    mentions_hours_or_cost = any(
+        t in q_lower for t in [
+            "hours", "cost", "spend", "total"
+        ]
+    )
+
+    # Pull month from any available source
+    month_from_state = None
+    if isinstance(mt, dict):
+        month_from_state = mt.get("last_month")
+
+    has_month = (
+        (month_names and len(month_names) > 0) or
+        bool(month_from_state)
+    )
+
+    # FINAL FALLBACK LOGIC
+    if (
+        mode not in ["invoice_details", "top_invoices"]
+        and primary_type == "student"
+        and mentions_provider
+        and mentions_hours_or_cost
+    ):
+        if time_window in ["this_school_year", "school_year", "ytd"] and not has_month:
+            mode = "student_provider_year"
+        else:
+            mode = "student_provider_breakdown"
+
+        needs_provider_breakdown = True
+
+        LOGGER.debug(
+            "router_mode_override",
+            mode=mode,
+            reason="student provider fallback with month detection",
+            month=month_names,
+            month_from_state=month_from_state,
+        )
+
     return RouterDecision(
         mode=mode,
         primary_entity_type=primary_type,
