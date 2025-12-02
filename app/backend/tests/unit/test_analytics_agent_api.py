@@ -77,17 +77,16 @@ def client() -> TestClient:
 def test_run_agent_success(monkeypatch: pytest.MonkeyPatch, client: TestClient) -> None:
     """The endpoint returns normalized agent output."""
 
-    class StubAgent:
-        def query(self, *, prompt: str, context: dict[str, Any]) -> dict[str, Any]:
-            assert prompt == "How many invoices were approved?"
-            assert context == {"district_id": 404}
-            return {
-                "text": "There were 12 approved invoices last month.",
-                "html": "<p>There were <strong>12</strong> approved invoices last month.</p>",
-                "csv_url": "https://example.com/report.csv",
-            }
+    async def _stub_workflow(query: str, context: dict[str, Any]) -> dict[str, Any]:
+        assert query == "How many invoices were approved?"
+        assert context == {"district_id": 404}
+        return {
+            "text": "There were 12 approved invoices last month.",
+            "html": "<p>There were <strong>12</strong> approved invoices last month.</p>",
+            "csv_url": "https://example.com/report.csv",
+        }
 
-    monkeypatch.setattr(analytics_agent, "_ensure_agent_available", lambda: StubAgent())
+    monkeypatch.setattr(analytics_agent, "_execute_responses_workflow", _stub_workflow)
 
     response = client.post(
         "/api/analytics/agent",
@@ -95,7 +94,9 @@ def test_run_agent_success(monkeypatch: pytest.MonkeyPatch, client: TestClient) 
     )
 
     assert response.status_code == 200
-    assert response.json() == {
+    payload = response.json()
+    assert payload.pop("latency_ms") >= 0
+    assert payload == {
         "text": "There were 12 approved invoices last month.",
         "html": "<p>There were <strong>12</strong> approved invoices last month.</p>",
         "csv_url": "https://example.com/report.csv",
@@ -116,18 +117,17 @@ def test_run_agent_handles_agent_errors(
 ) -> None:
     """Exceptions raised by the Agent SDK surface as a controlled error."""
 
-    class ExplodingAgent:
-        def query(self, *, prompt: str, context: dict[str, Any]) -> None:  # pragma: no cover
-            raise RuntimeError("boom")
+    async def _exploding_workflow(*_: Any, **__: Any) -> None:  # pragma: no cover
+        raise RuntimeError("boom")
 
-    monkeypatch.setattr(analytics_agent, "_ensure_agent_available", lambda: ExplodingAgent())
+    monkeypatch.setattr(analytics_agent, "_execute_responses_workflow", _exploding_workflow)
 
     response = client.post(
         "/api/analytics/agent",
         json={"query": "Show me vendor totals."},
     )
 
-    assert response.status_code == 500
+    assert response.status_code == 503
     assert response.json() == {
-        "detail": "Analytics agent failed to process the request.",
+        "detail": "Analytics assistant is temporarily unavailable. Please try again later.",
     }

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from html import escape
 import asyncio
+from time import perf_counter
 import json
 from typing import Any, Iterable, Mapping
 
@@ -487,6 +488,7 @@ async def _execute_responses_workflow(query: str, context: Mapping[str, Any]) ->
 async def run_agent(request: dict, user: User = Depends(get_current_user)) -> dict[str, Any]:
     """Execute the analytics agent and format its response."""
 
+    start_time = perf_counter()
     query = str(request.get("query") or "").strip()
     if not query:
         raise HTTPException(
@@ -526,11 +528,16 @@ async def run_agent(request: dict, user: User = Depends(get_current_user)) -> di
         rows_value = final_output.get("rows")
         if isinstance(rows_value, list) and all(isinstance(item, Mapping) for item in rows_value):
             rows_payload = rows_value
+        for key, value in final_output.items():
+            if key not in {"text", "html", "rows"}:
+                response_payload[key] = value
     elif isinstance(final_output, list) and all(isinstance(item, Mapping) for item in final_output):
         rows_payload = final_output
 
     if rows_payload is not None:
         response_payload["rows"] = rows_payload
+
+    response_payload["latency_ms"] = int((perf_counter() - start_time) * 1000)
 
     return response_payload
 
