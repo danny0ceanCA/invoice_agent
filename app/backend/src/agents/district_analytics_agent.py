@@ -700,16 +700,16 @@ class Workflow:
             )
             insights = insight_result.get("insights") or []
 
-                render_payload = run_rendering_model(
-                    user_query=context.query,
-                    ir=effective_ir,
-                    insights=insights,
-                    client=agent.client,
-                    model=agent.render_model,
-                    system_prompt=self.rendering_system_prompt,
-                    temperature=agent.render_temperature,
-                )
-                return _finalise_response(render_payload, context)
+            render_payload = run_rendering_model(
+                user_query=context.query,
+                ir=effective_ir,
+                insights=insights,
+                client=agent.client,
+                model=agent.render_model,
+                system_prompt=self.rendering_system_prompt,
+                temperature=agent.render_temperature,
+            )
+            return _finalise_response(render_payload, context)
 
         router_decision = run_sql_router_model(
             user_query=query,
