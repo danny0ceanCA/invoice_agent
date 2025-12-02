@@ -94,7 +94,7 @@ def build_logic_system_prompt() -> str:
         "\n"
         "ROUTER CONTRACT:\n"
         "- A RouterDecision JSON object will be provided via a separate system message that begins with 'ROUTER_DECISION (do not reinterpret):'.\n"
-        "- You MUST treat this RouterDecision as the single source of truth for high-level analytics mode (e.g., district_summary, student_monthly, vendor_monthly, invoice_details, student_provider_breakdown, provider_breakdown), primary entities, time_window, and month scope.\n"
+        "- You MUST treat this RouterDecision as the single source of truth for high-level analytics mode (e.g., district_summary, student_monthly, vendor_monthly, invoice_details, student_provider_breakdown, provider_breakdown, top_invoices), primary entities, time_window, and month scope.\n"
         "- Do NOT try to re-derive or reinterpret the mode from natural language. Obey the RouterDecision.\n\n"
     )
 
@@ -174,6 +174,7 @@ def build_logic_system_prompt() -> str:
         "- Do NOT add conversational tone, pleasantries, or UX guidance in 'text'.\n"
         "- EXCEPTION: When RouterDecision.mode is 'student_provider_breakdown' or RouterDecision.needs_provider_breakdown is true, skip all ambiguity checks and requirement validation, and immediately run provider-breakdown SQL using invoice_line_items joined to invoices, grouped by clinician with SUM(invoice_line_items.hours) and SUM(invoice_line_items.cost). Do NOT ask for clarification or add 'need time period/student' notes.\n"
         "- EXCEPTION: When RouterDecision.mode is 'invoice_details', skip ambiguity handling and run the invoice detail SQL directly.\n"
+        "- EXCEPTION: When RouterDecision.mode is 'top_invoices', skip clarification and produce invoice-level SQL ranked by invoices.total_cost without joining invoice_line_items.\n"
     )
 
     return (
@@ -575,6 +576,15 @@ def build_logic_system_prompt() -> str:
         "- Do NOT include user-facing explanations, please/thanks, or HTML tags in 'text'.\n"
         "- Do NOT embed <table>, <div>, or other HTML in any field.\n"
         "- Do NOT include chain-of-thought. Reason silently and only output the final JSON.\n\n"
+        "TOP INVOICES MODE (NEW):\n"
+        "- When RouterDecision.mode = 'top_invoices':\n"
+        "  • Do NOT ask for clarification.\n"
+        "  • Do NOT attempt invoice detail logic.\n"
+        "  • Always produce invoice-level summary SQL.\n"
+        "  • Use invoices.total_cost for ranking.\n"
+        "  • Use LIMIT N where N is extracted from the normalized intent or router.\n"
+        "  • Never join invoice_line_items in this mode.\n"
+        "  • Output one row per invoice.\n\n"
         "MULTIPLE TOOL CALLS — FINAL RESULT SELECTION:\n"
         "- If you issue multiple tool calls in one turn, you MUST choose exactly one tool result as the final analytic result.\n"
         "- The final IR.rows MUST come from the tool result that best matches the user's request — typically the most specific or last tool call that targets the named entity or metric.\n"
@@ -606,6 +616,12 @@ def _build_router_guidance(router_decision: dict[str, Any] | None) -> str:
         template_notes = (
             "Use invoice_line_items detail keyed by invoice_number or student+month. "
             "Return service_date, clinician/provider, service_code, hours, and cost only."
+        )
+    elif mode == "top_invoices":
+        template_hint = "top_invoices"
+        template_notes = (
+            "Return invoice-level rows ranked by invoices.total_cost with LIMIT N; "
+            "do not join invoice_line_items."
         )
     elif mode == "student_provider_breakdown":
         template_hint = "student_provider_hours_cost"

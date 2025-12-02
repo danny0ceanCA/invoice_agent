@@ -154,6 +154,13 @@ DISTRICT REPORTS
 
 "district YTD spend" → district_ytd_spend
 
+TOP INVOICES
+
+"highest invoices", "most expensive invoices", "top invoices", "biggest invoices", "highest cost invoices", or "top N invoices" →
+plan.kind="top_invoices"
+plan.metrics=["total_cost"]
+plan.group_by=["invoice"]
+
 COMPARISON REPORTS
 
 "compare X and Y" → comparison
