@@ -35,7 +35,7 @@ from .validator_model import build_validator_system_prompt, run_validator_model
 
 LOGGER = structlog.get_logger(__name__)
 
-DEFAULT_MODEL = "gpt-4.1-speed"  # used for all supporting models
+DEFAULT_MODEL = "gpt-4.1-mini"  # used for all supporting models
 LOGIC_MODEL = "gpt-5.1"  # only for logic_model
 MAX_ITERATIONS = 8
 
