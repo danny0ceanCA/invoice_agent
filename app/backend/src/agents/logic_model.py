@@ -684,14 +684,60 @@ def run_logic_model(
     router_decision: dict[str, Any] | None = None,
 ):
     """Execute the logic model using the existing OpenAI client pattern."""
-    if router_decision and router_decision.get("mode") == "student_provider_year":
+    # ------------------------------------------------------------------
+    # HARD OVERRIDE: student provider breakdown / provider-year
+    #
+    # When the router has decided that we are in a student-scoped
+    # provider breakdown mode, we bypass the LLM logic and emit a
+    # deterministic run_sql tool call. This prevents the model from
+    # asking for a specific provider name when the user clearly wants
+    # a breakdown "by provider".
+    #
+    # Trigger conditions:
+    #   - primary_entity_type == "student"
+    #   - at least one primary entity (student name)
+    #   - mode in {"student_provider_breakdown", "student_provider_year"}
+    #     OR needs_provider_breakdown == True
+    #
+    # Behavior:
+    #   - Group by clinician
+    #   - SUM(hours) and SUM(cost)
+    #   - Optional filters:
+    #       • month_names[0] → service_month filter
+    #       • date_range.start_date/end_date → invoice_date filter
+    # ------------------------------------------------------------------
+    if router_decision:
+        mode = router_decision.get("mode")
+        primary_type = router_decision.get("primary_entity_type")
         primary_entities = router_decision.get("primary_entities") or []
+        needs_provider_breakdown = bool(router_decision.get("needs_provider_breakdown"))
         date_range = router_decision.get("date_range") or {}
-        start = date_range.get("start_date")
-        end = date_range.get("end_date")
+        month_names = router_decision.get("month_names") or []
 
-        if primary_entities and isinstance(start, str) and isinstance(end, str):
+        if (
+            primary_type == "student"
+            and primary_entities
+            and (mode in {"student_provider_breakdown", "student_provider_year"} or needs_provider_breakdown)
+        ):
             student = primary_entities[0]
+            start = date_range.get("start_date")
+            end = date_range.get("end_date")
+
+            # Build WHERE filters incrementally to avoid ambiguity and to
+            # keep the SQL deterministic.
+            filters: list[str] = [
+                "i.district_key = :district_key",
+                f"LOWER(i.student_name) LIKE LOWER('%{student}%')",
+            ]
+
+            if isinstance(month_names, list) and month_names:
+                month = str(month_names[0])
+                filters.append(f"LOWER(i.service_month) = LOWER('{month}')")
+
+            if isinstance(start, str) and isinstance(end, str):
+                filters.append(f"i.invoice_date BETWEEN '{start}' AND '{end}'")
+
+            where_clause = "  WHERE " + "\n        AND ".join(filters)
 
             sql = f"""
             SELECT
@@ -700,15 +746,13 @@ def run_logic_model(
                 SUM(ili.cost)  AS total_cost
             FROM invoice_line_items ili
             JOIN invoices i ON i.id = ili.invoice_id
-            WHERE i.district_key = :district_key
-              AND LOWER(i.student_name) LIKE LOWER('%{student}%')
-              AND i.invoice_date BETWEEN '{start}' AND '{end}'
+{where_clause}
             GROUP BY ili.clinician
             ORDER BY total_hours DESC;
             """
 
             tool_call = SimpleNamespace(
-                id="call_student_provider_year",
+                id="call_student_provider_breakdown",
                 type="function",
                 function=SimpleNamespace(
                     name="run_sql",

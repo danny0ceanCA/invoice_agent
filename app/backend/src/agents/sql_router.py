@@ -121,6 +121,8 @@ def route_sql(
     # Fallback provider logic for student queries with month detection
     q_lower = user_query.lower()
 
+    # Note: this is *in addition* to the earlier needs_provider_breakdown flag.
+    # Here we focus on conversational follow-ups that clearly imply provider+time.
     mentions_provider = any(t in q_lower for t in [
         "provider", "providers", "clinician", "clinicians"
     ])
@@ -139,13 +141,18 @@ def route_sql(
     )
 
     # FINAL SAFE FALLBACK
-    # Only override into provider-breakdown mode WHEN WE HAVE A MONTH.
+    # Only override into provider-breakdown / provider-year mode WHEN WE HAVE A MONTH
+    # signal from either the planner, NLV, or prior multi-turn state.
     if primary_type == "student" and mentions_provider and mentions_hours_or_cost and has_month:
 
         if time_window in ["this_school_year", "school_year", "ytd"] and not month_names:
             mode = "student_provider_year"
         else:
             mode = "student_provider_breakdown"
+
+        # Ensure downstream logic_model knows this is a provider breakdown
+        # and MUST NOT ask for a specific provider name.
+        needs_provider_breakdown = True
 
         LOGGER.debug("router_safe_provider_override",
                      mode=mode,
@@ -157,6 +164,7 @@ def route_sql(
 
     # 1. Resolve a month from user_query text if month_names is empty
     if not month_names:
+        # Fallback month detection directly from the fused natural-language query.
         all_months = [
             "january", "february", "march", "april", "may", "june",
             "july", "august", "september", "october", "november", "december"
