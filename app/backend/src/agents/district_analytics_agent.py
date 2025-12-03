@@ -6,6 +6,7 @@ import re
 import json
 from dataclasses import dataclass, field
 from html import escape
+from time import perf_counter
 from typing import Any, Mapping, Sequence
 
 import structlog
@@ -45,6 +46,7 @@ class AgentResponse(BaseModel):
     text: str
     html: str
     rows: list[dict[str, Any]] | None = None
+    timings: dict[str, Any] | None = None
     class Config:
         extra = "allow"
 
@@ -98,6 +100,8 @@ class AgentContext:
     session_id: str | None = None
     memory: ConversationMemory | None = None
     last_sql: str | None = None
+    timings: dict[str, float] = field(default_factory=dict)
+    started_at: float = field(default_factory=perf_counter)
 
     @property
     def district_id(self) -> int | None:
@@ -141,6 +145,35 @@ class Tool:
 
     def invoke(self, context: AgentContext, arguments: Mapping[str, Any]) -> Any:
         return self.handler(context, arguments)
+
+
+def _record_stage_duration(context: AgentContext, stage: str, start_time: float) -> None:
+    """Track the elapsed time for an individual model stage."""
+
+    try:
+        elapsed = perf_counter() - start_time
+    except Exception:  # pragma: no cover - defensive
+        return
+
+    previous = context.timings.get(stage, 0.0)
+    context.timings[stage] = previous + elapsed
+
+
+def _build_timing_summary(context: AgentContext) -> dict[str, Any] | None:
+    """Summarise total runtime and per-stage durations for the response payload."""
+
+    if not context.started_at:
+        return None
+
+    total_elapsed = perf_counter() - context.started_at
+    summary: dict[str, Any] = {"total_seconds": round(total_elapsed, 3)}
+
+    if context.timings:
+        summary["stages"] = {
+            name: round(duration, 3) for name, duration in context.timings.items()
+        }
+
+    return summary
 
 
 # ----------------------------------------------------------------------
@@ -513,6 +546,7 @@ class Workflow:
         # if active_filters:
         #     query = _maybe_apply_active_student_filter(query, active_filters)
 
+        start_time = perf_counter()
         normalized_intent = run_nlv_model(
             user_query=query,
             user_context=context.user_context,
@@ -521,9 +555,11 @@ class Workflow:
             system_prompt=self.nlv_system_prompt,
             temperature=agent.nlv_temperature,
         )
+        _record_stage_duration(context, "nlv_model", start_time)
 
         known_entities = _load_district_entities(self.engine, context.district_key)
 
+        start_time = perf_counter()
         entity_result = run_entity_resolution_model(
             user_query=query,
             normalized_intent=normalized_intent,
@@ -534,6 +570,7 @@ class Workflow:
             system_prompt=self.entity_resolution_system_prompt,
             temperature=agent.entity_temperature,
         )
+        _record_stage_duration(context, "entity_resolution_model", start_time)
 
         resolved_intent = entity_result.get("normalized_intent") or normalized_intent
         resolved_entities = entity_result.get("entities") or {}
@@ -559,6 +596,7 @@ class Workflow:
                 payload["entities"] = resolved_entities
             logic_ir = _payload_to_ir(payload, context.last_rows)
 
+            start_time = perf_counter()
             br_result = run_business_rule_model(
                 ir=logic_ir,
                 entities=resolved_entities,
@@ -568,9 +606,11 @@ class Workflow:
                 system_prompt=self.business_rule_system_prompt,
                 temperature=agent.business_rule_temperature,
             )
+            _record_stage_duration(context, "business_rule_model", start_time)
             br_ir_dict = br_result.get("ir") if isinstance(br_result.get("ir"), dict) else None
             effective_ir = _payload_to_ir(br_ir_dict, context.last_rows) if br_ir_dict else logic_ir
 
+            start_time = perf_counter()
             validator_result = run_validator_model(
                 ir=effective_ir,
                 client=agent.client,
@@ -578,6 +618,7 @@ class Workflow:
                 system_prompt=self.validator_system_prompt,
                 temperature=agent.validator_temperature,
             )
+            _record_stage_duration(context, "validator_model", start_time)
             is_valid = bool(validator_result.get("valid", True))
 
             if not is_valid:
@@ -591,6 +632,7 @@ class Workflow:
                     html=None,
                     entities=None,
                 )
+                start_time = perf_counter()
                 render_payload = run_rendering_model(
                 user_query=context.query,
                 ir=safe_ir,
@@ -600,8 +642,10 @@ class Workflow:
                 system_prompt=self.rendering_system_prompt,
                 temperature=agent.render_temperature,
                 )
+                _record_stage_duration(context, "rendering_model", start_time)
                 return _finalise_response(render_payload, context)
 
+            start_time = perf_counter()
             insight_result = run_insight_model(
                 ir=effective_ir,
                 client=agent.client,
@@ -609,8 +653,10 @@ class Workflow:
                 system_prompt=self.insight_system_prompt,
                 temperature=agent.insight_temperature,
             )
+            _record_stage_duration(context, "insight_model", start_time)
             insights = insight_result.get("insights") or []
 
+            start_time = perf_counter()
             render_payload = run_rendering_model(
                 user_query=context.query,
                 ir=effective_ir,
@@ -620,8 +666,10 @@ class Workflow:
                 system_prompt=self.rendering_system_prompt,
                 temperature=agent.render_temperature,
             )
+            _record_stage_duration(context, "rendering_model", start_time)
             return _finalise_response(render_payload, context)
 
+        start_time = perf_counter()
         sql_plan_result = run_sql_planner_model(
             user_query=query,
             normalized_intent=resolved_intent,
@@ -632,6 +680,7 @@ class Workflow:
             system_prompt=self.sql_planner_system_prompt,
             temperature=agent.sql_planner_temperature,
         )
+        _record_stage_duration(context, "sql_planner_model", start_time)
 
         plan = sql_plan_result.get("plan")
         plan_requires_clarification = bool(sql_plan_result.get("requires_clarification"))
@@ -649,6 +698,7 @@ class Workflow:
                 payload["entities"] = resolved_entities
             logic_ir = _payload_to_ir(payload, context.last_rows)
 
+            start_time = perf_counter()
             br_result = run_business_rule_model(
                 ir=logic_ir,
                 entities=resolved_entities,
@@ -658,9 +708,11 @@ class Workflow:
                 system_prompt=self.business_rule_system_prompt,
                 temperature=agent.business_rule_temperature,
             )
+            _record_stage_duration(context, "business_rule_model", start_time)
             br_ir_dict = br_result.get("ir") if isinstance(br_result.get("ir"), dict) else None
             effective_ir = _payload_to_ir(br_ir_dict, context.last_rows) if br_ir_dict else logic_ir
 
+            start_time = perf_counter()
             validator_result = run_validator_model(
                 ir=effective_ir,
                 client=agent.client,
@@ -668,6 +720,7 @@ class Workflow:
                 system_prompt=self.validator_system_prompt,
                 temperature=agent.validator_temperature,
             )
+            _record_stage_duration(context, "validator_model", start_time)
             is_valid = bool(validator_result.get("valid", True))
 
             if not is_valid:
@@ -681,6 +734,7 @@ class Workflow:
                     html=None,
                     entities=None,
                 )
+                start_time = perf_counter()
                 render_payload = run_rendering_model(
                 user_query=context.query,
                 ir=safe_ir,
@@ -690,8 +744,10 @@ class Workflow:
                 system_prompt=self.rendering_system_prompt,
                 temperature=agent.render_temperature,
                 )
+                _record_stage_duration(context, "rendering_model", start_time)
                 return _finalise_response(render_payload, context)
 
+            start_time = perf_counter()
             insight_result = run_insight_model(
                 ir=effective_ir,
                 client=agent.client,
@@ -699,8 +755,10 @@ class Workflow:
                 system_prompt=self.insight_system_prompt,
                 temperature=agent.insight_temperature,
             )
+            _record_stage_duration(context, "insight_model", start_time)
             insights = insight_result.get("insights") or []
 
+            start_time = perf_counter()
             render_payload = run_rendering_model(
                 user_query=context.query,
                 ir=effective_ir,
@@ -710,8 +768,10 @@ class Workflow:
                 system_prompt=self.rendering_system_prompt,
                 temperature=agent.render_temperature,
             )
+            _record_stage_duration(context, "rendering_model", start_time)
             return _finalise_response(render_payload, context)
 
+        start_time = perf_counter()
         router_decision = run_sql_router_model(
             user_query=query,
             sql_plan=plan,
@@ -723,6 +783,7 @@ class Workflow:
             system_prompt=self.router_system_prompt,
             temperature=agent.router_temperature,
         )
+        _record_stage_duration(context, "sql_router_model", start_time)
 
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": self.logic_system_prompt}
@@ -854,6 +915,7 @@ class Workflow:
 
                         return _finalise_response(payload, context)
 
+            start_time = perf_counter()
             message = run_logic_model(
                 agent.client,
                 model=agent.logic_model,
@@ -862,6 +924,7 @@ class Workflow:
                 temperature=agent.logic_temperature,
                 router_decision=router_decision.to_dict(),
             )
+            _record_stage_duration(context, "logic_model", start_time)
             tool_calls = message.tool_calls or []
             assistant_message: dict[str, Any] = {
                 "role": "assistant",
@@ -1053,6 +1116,7 @@ class Workflow:
                 )
                 return _finalise_response(render_payload, context)
 
+            start_time = perf_counter()
             insight_result = run_insight_model(
                 ir=effective_ir,
                 client=agent.client,
@@ -1060,8 +1124,10 @@ class Workflow:
                 system_prompt=self.insight_system_prompt,
                 temperature=agent.insight_temperature,
             )
+            _record_stage_duration(context, "insight_model", start_time)
             insights = insight_result.get("insights") or []
 
+            start_time = perf_counter()
             render_payload = run_rendering_model(
                 user_query=context.query,
                 ir=effective_ir,
@@ -1071,6 +1137,7 @@ class Workflow:
                 system_prompt=self.rendering_system_prompt,
                 temperature=agent.render_temperature,
             )
+            _record_stage_duration(context, "rendering_model", start_time)
             return _finalise_response(render_payload, context)
 
         raise RuntimeError("Agent workflow exceeded iteration limit.")
@@ -1655,13 +1722,19 @@ def _finalise_response(payload: Mapping[str, Any], context: AgentContext) -> Age
     else:
         html = html_value or _safe_html(text_value)
 
+    timing_summary = _build_timing_summary(context)
+
     # If HTML exists, keep both: conversational text + visuals.
     # 'text' should be a short explanation, not a duplication of the table.
     if html:
-        response = AgentResponse(text=text_value or "", html=html, rows=rows)
+        response = AgentResponse(
+            text=text_value or "", html=html, rows=rows, timings=timing_summary
+        )
     else:
         # Otherwise return text-only version
-        response = AgentResponse(text=text_value or "", html=html, rows=rows)
+        response = AgentResponse(
+            text=text_value or "", html=html, rows=rows, timings=timing_summary
+        )
 
     # ATTACH SQL (THIS IS THE IMPORTANT PART)
     setattr(response, "debug_sql", context.last_sql)
