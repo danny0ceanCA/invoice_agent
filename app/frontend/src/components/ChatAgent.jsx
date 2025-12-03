@@ -7,6 +7,41 @@ import { useAuth0 } from "@auth0/auth0-react";
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api";
 const PAGE_SESSION_ID = crypto.randomUUID();
 
+function formatTimingHtml(timings) {
+  if (!timings || typeof timings !== "object") return null;
+
+  const total =
+    typeof timings.total_seconds === "number"
+      ? Number(timings.total_seconds).toFixed(2)
+      : null;
+
+  const stageEntries =
+    timings.stages && typeof timings.stages === "object"
+      ? Object.entries(timings.stages).filter(
+          ([, value]) => typeof value === "number"
+        )
+      : [];
+
+  if (!total && stageEntries.length === 0) return null;
+
+  const listItems = stageEntries
+    .map(
+      ([name, value]) =>
+        `<li><span class="font-semibold">${name}</span>: ${Number(value).toFixed(
+          2
+        )}s</li>`
+    )
+    .join("");
+
+  const stagesHtml =
+    listItems.length > 0
+      ? `<ul class="mt-1 list-disc pl-4 text-[13px] text-slate-600">${listItems}</ul>`
+      : "";
+
+  const totalText = total ? `Total response time: ${total}s` : "Response timing";
+  return `<div class="text-xs text-slate-600">${totalText}${stagesHtml}</div>`;
+}
+
 function ChatAgent({ districtKey }) {
   console.log("ChatAgent using districtKey:", districtKey);
   const { isAuthenticated, isLoading, getAccessTokenSilently } = useAuth0();
@@ -103,11 +138,15 @@ function ChatAgent({ districtKey }) {
         typeof data?.html === "string" && data.html.trim().length
           ? data.html
           : `<p>${(data?.text || "").replace(/</g, "&lt;")}</p>`;
+      const timingHtml = formatTimingHtml(data?.timings);
 
-      setMessages((prev) => [
-        ...prev,
-        { role: "assistant", content: safeHtml, html: true },
-      ]);
+      setMessages((prev) => {
+        const next = [...prev, { role: "assistant", content: safeHtml, html: true }];
+        if (timingHtml) {
+          next.push({ role: "assistant", content: timingHtml, html: true });
+        }
+        return next;
+      });
     } catch (err) {
       const msg =
         err instanceof Error ? err.message : "Unexpected analytics error.";
