@@ -110,6 +110,43 @@ mv_district_daily_coverage
 - purpose: District daily hours, cost, #students, #clinicians.
 - columns: district_key TEXT, service_date DATE, total_hours REAL, total_cost REAL, num_students INTEGER, num_clinicians INTEGER
 
+MATERIALIZED VIEW PRIORITY & EXAMPLES:
+- Materialized view selection is driven solely by RouterDecision.mode.
+- Use the following mapping from RouterDecision.mode to the primary materialized view:
+  - When RouterDecision.mode == "student_monthly":
+      ALWAYS use mv_student_monthly_hours_cost.
+  - When RouterDecision.mode == "provider_monthly":
+      ALWAYS use mv_provider_monthly_hours_cost.
+  - When RouterDecision.mode == "student_provider_breakdown":
+      ALWAYS use mv_student_provider_monthly.
+  - When RouterDecision.mode == "district_summary" or "district_monthly":
+      ALWAYS use mv_district_monthly_hours_cost.
+  - When RouterDecision.mode == "vendor_monthly":
+      ALWAYS use mv_vendor_monthly_hours_cost.
+  - When RouterDecision.mode == "top_invoices":
+      ALWAYS use mv_invoice_summary.
+- If RouterDecision.mode does not match any of the above, fall back to the general rules below and to base tables when necessary.
+- Prefer prebuilt materialized views for aggregated monthly/daily metrics to avoid re-aggregating invoice_line_items.
+- Only fall back to base tables when the MV lacks the needed granularity or dimension.
+- Student monthly trends: use mv_student_monthly_hours_cost for per-student hours/cost by month.
+  Example:
+    SELECT service_year, service_month, total_hours, total_cost
+    FROM mv_student_monthly_hours_cost
+    WHERE district_key = :district_key
+      AND student = LOWER(:student_name)
+    ORDER BY service_year, service_month_num;
+- Provider monthly trends: use mv_provider_monthly_hours_cost for clinician hours/cost by month.
+- Student × provider monthly breakdown: use mv_student_provider_monthly for per-student, per-clinician monthly totals.
+- District × service_code monthly: use mv_district_service_code_monthly for service_code totals per month.
+- Invoice-level summaries: use mv_invoice_summary for invoice totals (hours, cost, num_students, num_clinicians).
+- Student yearly summary: use mv_student_year_summary for yearly totals per student.
+- Provider caseload monthly: use mv_provider_caseload_monthly for clinician caseload (num_students) and hours per month.
+- District / vendor monthly: mv_district_monthly_hours_cost for district totals; mv_vendor_monthly_hours_cost for vendor monthly totals.
+- Service_code breakdowns: mv_student_service_code_monthly for student × service_code; mv_provider_service_code_monthly for clinician × service_code.
+- Daily views: mv_student_daily_hours (student), mv_provider_daily_hours (clinician), mv_district_daily_coverage (district coverage).
+- Service intensity: mv_student_service_intensity_monthly for service_days and avg_hours_per_day per student per month.
+- General rule: if the query is about aggregated monthly or daily metrics covered by these views, use the MV directly, filter by district_key/time range/entity, and only join invoice_line_items when the user needs row-level detail absent from the MV.
+
 Provider and line-item joins you SHOULD be comfortable using:
 - Provider hours or cost by month:
     SELECT
@@ -294,6 +331,7 @@ def build_logic_system_prompt() -> str:
         "- Each invoice line item represents a unit of service: invoice_line_items.student is the student receiving care, and invoice_line_items.clinician is the clinician delivering the care.\n"
         "- The relationship between clinicians and students is represented in the invoice_line_items table, joined to invoices for district scoping and dates.\n"
         "- Do NOT search for clinician names in invoices.student_name; clinician names are only in invoice_line_items.clinician.\n\n"
+        "NOTE: Materialized view rules override all prior SQL examples.\n"
         "SQL RULES:\n"
         "- Only use columns that exist in the schema.\n"
         "- Follow the SCHOOL YEAR & DATE FILTERING RULES: do not add invoice_date BETWEEN filters for school_year/time_window queries when sql_plan.date_range is null. Apply invoice_date BETWEEN :start_date AND :end_date only when the planner provides explicit dates or the user asks about invoice submission/processing dates.\n"
@@ -467,42 +505,6 @@ def build_logic_system_prompt() -> str:
         "    When no entities satisfy strict monotonicity, return the largest movers\n"
         "    by net_change (positive for increasing queries, negative for decreasing).\n"
         "    IR.text must note the fallback.\n\n"
-        "MATERIALIZED VIEW PRIORITY & EXAMPLES:\n"
-        "- Materialized view selection is driven solely by RouterDecision.mode.\n"
-        "- Use the following mapping from RouterDecision.mode to the primary materialized view:\n"
-        "  - When RouterDecision.mode == \"student_monthly\":\n"
-        "      ALWAYS use mv_student_monthly_hours_cost.\n"
-        "  - When RouterDecision.mode == \"provider_monthly\":\n"
-        "      ALWAYS use mv_provider_monthly_hours_cost.\n"
-        "  - When RouterDecision.mode == \"student_provider_breakdown\":\n"
-        "      ALWAYS use mv_student_provider_monthly.\n"
-        "  - When RouterDecision.mode == \"district_summary\" or \"district_monthly\":\n"
-        "      ALWAYS use mv_district_monthly_hours_cost.\n"
-        "  - When RouterDecision.mode == \"vendor_monthly\":\n"
-        "      ALWAYS use mv_vendor_monthly_hours_cost.\n"
-        "  - When RouterDecision.mode == \"top_invoices\":\n"
-        "      ALWAYS use mv_invoice_summary.\n"
-        "- If RouterDecision.mode does not match any of the above, fall back to the general rules below and to base tables when necessary.\n"
-        "- Prefer prebuilt materialized views for aggregated monthly/daily metrics to avoid re-aggregating invoice_line_items.\n"
-        "- Only fall back to base tables when the MV lacks the needed granularity or dimension.\n"
-        "- Student monthly trends: use mv_student_monthly_hours_cost for per-student hours/cost by month.\n"
-        "  Example:\n"
-        "    SELECT service_year, service_month, total_hours, total_cost\n"
-        "    FROM mv_student_monthly_hours_cost\n"
-        "    WHERE district_key = :district_key\n"
-        "      AND student = LOWER(:student_name)\n"
-        "    ORDER BY service_year, service_month_num;\n"
-        "- Provider monthly trends: use mv_provider_monthly_hours_cost for clinician hours/cost by month.\n"
-        "- Student × provider monthly breakdown: use mv_student_provider_monthly for per-student, per-clinician monthly totals.\n"
-        "- District × service_code monthly: use mv_district_service_code_monthly for service_code totals per month.\n"
-        "- Invoice-level summaries: use mv_invoice_summary for invoice totals (hours, cost, num_students, num_clinicians).\n"
-        "- Student yearly summary: use mv_student_year_summary for yearly totals per student.\n"
-        "- Provider caseload monthly: use mv_provider_caseload_monthly for clinician caseload (num_students) and hours per month.\n"
-        "- District / vendor monthly: mv_district_monthly_hours_cost for district totals; mv_vendor_monthly_hours_cost for vendor monthly totals.\n"
-        "- Service_code breakdowns: mv_student_service_code_monthly for student × service_code; mv_provider_service_code_monthly for clinician × service_code.\n"
-        "- Daily views: mv_student_daily_hours (student), mv_provider_daily_hours (clinician), mv_district_daily_coverage (district coverage).\n"
-        "- Service intensity: mv_student_service_intensity_monthly for service_days and avg_hours_per_day per student per month.\n"
-        "- General rule: if the query is about aggregated monthly or daily metrics covered by these views, use the MV directly, filter by district_key/time range/entity, and only join invoice_line_items when the user needs row-level detail absent from the MV.\n\n"
         "SQL SAFETY RULES (STRICT):\n"
         "- NEVER reference invoice_line_items.service_month (that column does not exist).\n"
         "- NEVER reference non-existent columns such as: amount_due, invoice_amount, balance_due, vendor_name (unless explicitly selected), or invoice_line_items.month.\n"
