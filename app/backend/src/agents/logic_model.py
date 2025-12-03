@@ -48,6 +48,37 @@ You are querying a SQLite database for a school district invoice system.
 - cost FLOAT                            -- line-item amount
 - service_date VARCHAR(32)
 
+Provider and line-item joins you SHOULD be comfortable using:
+- Provider hours or cost by month:
+    SELECT
+        LOWER(ili.clinician) AS clinician,
+        LOWER(i.service_month) AS service_month,
+        SUM(ili.hours) AS total_hours,
+        SUM(ili.cost) AS total_cost
+    FROM invoice_line_items ili
+    JOIN invoices i ON i.id = ili.invoice_id
+    WHERE i.district_key = :district_key
+      AND LOWER(i.service_month) = LOWER('July')
+    GROUP BY LOWER(ili.clinician), LOWER(i.service_month)
+    ORDER BY LOWER(i.service_month), LOWER(ili.clinician);
+
+- Invoice line-item drilldown (service dates, clinicians, hours, costs):
+    SELECT
+        i.invoice_number,
+        i.student_name,
+        i.service_month,
+        i.invoice_date,
+        ili.service_date,
+        ili.clinician,
+        ili.service_code,
+        ili.hours,
+        ili.cost
+    FROM invoice_line_items ili
+    JOIN invoices i ON i.id = ili.invoice_id
+    WHERE i.district_key = :district_key
+      AND LOWER(i.student_name) LIKE LOWER('%chloe taylor%')
+    ORDER BY i.invoice_date, ili.service_date, i.invoice_number;
+
 Important invariants:
 - Every invoice row belongs to exactly one district via invoices.district_key.
 - Multiple vendors may share the same district_key to submit invoices to that district.
