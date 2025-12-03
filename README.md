@@ -78,3 +78,20 @@ After seeding, use Auth0-issued access tokens when calling protected endpoints s
   generation.
 - Add Alembic migrations and seed data commands.
 - Build the React dashboards and integrate with the backend APIs.
+
+## Analytics run_sql tool
+
+The district analytics agent exposes a `run_sql` tool that executes read-only analytics
+queries against the warehouse. The tool validates that every query starts with `SELECT`
+or `WITH`, strips trailing semicolons, and binds any provided `district_key` or
+`district_id` into the statement so results stay tenant-scoped. When the context only
+includes `district_id`, it looks up the corresponding key before executing the SQL via
+SQLAlchemy and logs the request and row count for observability. Hard-coded
+`district_key` predicates in the model-generated SQL are removed, and broad `SELECT * FROM
+invoices` queries can be wrapped with a `WHERE sub.district_key = :district_key` guard to
+keep results constrained. Error conditions are logged and re-raised so callers can handle
+failures. 【F:app/backend/src/agents/district_analytics_agent.py†L1703-L1864】
+
+For simpler utility usage outside the full agent workflow, `app/backend/src/api/analytics_agent.py`
+provides a helper `run_sql(query)` that enforces the same read-only restriction and runs the
+statement with SQLAlchemy, returning rows as dictionaries. 【F:app/backend/src/api/analytics_agent.py†L86-L102】
