@@ -48,6 +48,37 @@ You are querying a SQLite database for a school district invoice system.
 - cost FLOAT                            -- line-item amount
 - service_date VARCHAR(32)
 
+Provider and line-item joins you SHOULD be comfortable using:
+- Provider hours or cost by month:
+    SELECT
+        LOWER(ili.clinician) AS clinician,
+        LOWER(i.service_month) AS service_month,
+        SUM(ili.hours) AS total_hours,
+        SUM(ili.cost) AS total_cost
+    FROM invoice_line_items ili
+    JOIN invoices i ON i.id = ili.invoice_id
+    WHERE i.district_key = :district_key
+      AND LOWER(i.service_month) = LOWER('July')
+    GROUP BY LOWER(ili.clinician), LOWER(i.service_month)
+    ORDER BY LOWER(i.service_month), LOWER(ili.clinician);
+
+- Invoice line-item drilldown (service dates, clinicians, hours, costs):
+    SELECT
+        i.invoice_number,
+        i.student_name,
+        i.service_month,
+        i.invoice_date,
+        ili.service_date,
+        ili.clinician,
+        ili.service_code,
+        ili.hours,
+        ili.cost
+    FROM invoice_line_items ili
+    JOIN invoices i ON i.id = ili.invoice_id
+    WHERE i.district_key = :district_key
+      AND LOWER(i.student_name) LIKE LOWER('%chloe taylor%')
+    ORDER BY i.invoice_date, ili.service_date, i.invoice_number;
+
 Important invariants:
 - Every invoice row belongs to exactly one district via invoices.district_key.
 - Multiple vendors may share the same district_key to submit invoices to that district.
@@ -800,6 +831,22 @@ def run_logic_model(
                 ),
             }
         )
+
+    if router_decision and router_decision.get("mode") == "invoice_details":
+        mn = router_decision.get("month_names") or []
+        if mn:
+            current_month = mn[-1]
+            routed_messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        "INVOICE-DETAIL STRICT MONTH OVERRIDE:\n"
+                        f"- Only return invoice details for service_month = '{current_month}'.\n"
+                        "- Do NOT merge multiple months.\n"
+                        "- Ignore fused conversation history for month detection.\n"
+                    ),
+                }
+            )
 
     completion = client.chat.completions.create(
         model=model,

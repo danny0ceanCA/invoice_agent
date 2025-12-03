@@ -438,6 +438,20 @@ class MultiTurnConversationManager:
             if any(keyword in lower_message for keyword in summary_keywords):
                 return _reset_thread_and_return()
 
+        has_active_topic = state.original_query is not None
+
+        invoice_detail_followup = has_active_topic and any(
+            term in lower_message
+            for term in [
+                "invoice detail",
+                "invoice details",
+                "line item",
+                "line items",
+                "drill down",
+                "drilldown",
+            ]
+        )
+
         followup_markers = [
             "now",
             "also",
@@ -450,10 +464,13 @@ class MultiTurnConversationManager:
             "and for her",
             "and for them",
         ]
-        if not time_only_followup and not any(marker in lower_message for marker in followup_markers):
+        if (
+            not time_only_followup
+            and not invoice_detail_followup
+            and not any(marker in lower_message for marker in followup_markers)
+        ):
             return _reset_thread_and_return()
 
-        has_active_topic = state.original_query is not None
         is_list_followup = (
             self._refers_to_prior_list(user_message, state) if has_active_topic else False
         )
