@@ -832,6 +832,22 @@ def run_logic_model(
             }
         )
 
+    if router_decision and router_decision.get("mode") == "invoice_details":
+        mn = router_decision.get("month_names") or []
+        if mn:
+            current_month = mn[-1]
+            routed_messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        "INVOICE-DETAIL STRICT MONTH OVERRIDE:\n"
+                        f"- Only return invoice details for service_month = '{current_month}'.\n"
+                        "- Do NOT merge multiple months.\n"
+                        "- Ignore fused conversation history for month detection.\n"
+                    ),
+                }
+            )
+
     completion = client.chat.completions.create(
         model=model,
         messages=routed_messages,
