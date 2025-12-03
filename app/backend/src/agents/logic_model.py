@@ -110,110 +110,87 @@ mv_district_daily_coverage
 - purpose: District daily hours, cost, #students, #clinicians.
 - columns: district_key TEXT, service_date DATE, total_hours REAL, total_cost REAL, num_students INTEGER, num_clinicians INTEGER
 
-MATERIALIZED VIEW PRIORITY & EXAMPLES:
-- Materialized view selection is driven solely by RouterDecision.mode.
-- Use the following mapping from RouterDecision.mode to the primary materialized view:
-  - When RouterDecision.mode == "student_monthly":
-      ALWAYS use mv_student_monthly_hours_cost.
-  - When RouterDecision.mode == "provider_monthly":
-      ALWAYS use mv_provider_monthly_hours_cost.
-  - When RouterDecision.mode == "student_provider_breakdown":
-      ALWAYS use mv_student_provider_monthly.
-  - When RouterDecision.mode == "district_summary" or "district_monthly":
-      ALWAYS use mv_district_monthly_hours_cost.
-  - When RouterDecision.mode == "vendor_monthly":
-      ALWAYS use mv_vendor_monthly_hours_cost.
-  - When RouterDecision.mode == "top_invoices":
-      ALWAYS use mv_invoice_summary.
-- If RouterDecision.mode does not match any of the above, fall back to the general rules below and to base tables when necessary.
-- Prefer prebuilt materialized views for aggregated monthly/daily metrics to avoid re-aggregating invoice_line_items.
-- Only fall back to base tables when the MV lacks the needed granularity or dimension.
-- Student monthly trends: use mv_student_monthly_hours_cost for per-student hours/cost by month.
-  Example:
-    SELECT service_year, service_month, total_hours, total_cost
-    FROM mv_student_monthly_hours_cost
-    WHERE district_key = :district_key
-      AND student = LOWER(:student_name)
-    ORDER BY service_year, service_month_num;
-- Provider monthly trends: use mv_provider_monthly_hours_cost for clinician hours/cost by month.
-- Student × provider monthly breakdown: use mv_student_provider_monthly for per-student, per-clinician monthly totals.
-- District × service_code monthly: use mv_district_service_code_monthly for service_code totals per month.
-- Invoice-level summaries: use mv_invoice_summary for invoice totals (hours, cost, num_students, num_clinicians).
-- Student yearly summary: use mv_student_year_summary for yearly totals per student.
-- Provider caseload monthly: use mv_provider_caseload_monthly for clinician caseload (num_students) and hours per month.
-- District / vendor monthly: mv_district_monthly_hours_cost for district totals; mv_vendor_monthly_hours_cost for vendor monthly totals.
-- Service_code breakdowns: mv_student_service_code_monthly for student × service_code; mv_provider_service_code_monthly for clinician × service_code.
-- Daily views: mv_student_daily_hours (student), mv_provider_daily_hours (clinician), mv_district_daily_coverage (district coverage).
-- Service intensity: mv_student_service_intensity_monthly for service_days and avg_hours_per_day per student per month.
-- General rule: if the query is about aggregated monthly or daily metrics covered by these views, use the MV directly, filter by district_key/time range/entity, and only join invoice_line_items when the user needs row-level detail absent from the MV.
+MATERIALIZED VIEW PRIORITY & EXAMPLES (DRIVEN BY RouterDecision.mode):
 
-Provider and line-item joins you SHOULD be comfortable using:
-- Provider hours or cost by month:
-    SELECT
-        LOWER(ili.clinician) AS clinician,
-        LOWER(i.service_month) AS service_month,
-        SUM(ili.hours) AS total_hours,
-        SUM(ili.cost) AS total_cost
-    FROM invoice_line_items ili
-    JOIN invoices i ON i.id = ili.invoice_id
-    WHERE i.district_key = :district_key
-      AND LOWER(i.service_month) = LOWER('July')
-    GROUP BY LOWER(ili.clinician), LOWER(i.service_month)
-    ORDER BY LOWER(i.service_month), LOWER(ili.clinician);
+RouterDecision.mode is the ONLY control for choosing between materialized views and base tables.
 
-- Invoice line-item drilldown (service dates, clinicians, hours, costs):
-    SELECT
-        i.invoice_number,
-        i.student_name,
-        i.service_month,
-        i.invoice_date,
-        ili.service_date,
-        ili.clinician,
-        ili.service_code,
-        ili.hours,
-        ili.cost
-    FROM invoice_line_items ili
-    JOIN invoices i ON i.id = ili.invoice_id
-    WHERE i.district_key = :district_key
-      AND LOWER(i.student_name) LIKE LOWER('%chloe taylor%')
-    ORDER BY i.invoice_date, ili.service_date, i.invoice_number;
+SQL_TEMPLATE_HINT is not used for MV selection in this system and MUST be ignored.
 
-Important invariants:
-- Every invoice row belongs to exactly one district via invoices.district_key.
-- Multiple vendors may share the same district_key to submit invoices to that district.
-- Vendors may hold multiple district_keys (serve multiple districts).
-- There is NO column called amount_due, invoice_total, balance_due, due_amount, invoice_amount, etc.
-- The ONLY correct invoice money field is invoices.total_cost.
+When RouterDecision.mode == "student_monthly":
 
-When building SQL, the model MUST prioritise queries that:
-- Use invoices.district_key = :district_key for tenant scoping.
-- Use invoices.student_name for student lookups.
-- Join vendors only when searching by vendor name.
-- Treat service_month as free-form TEXT (e.g. "November", "December").
-- Extract years or month numbers using strftime on invoice_date.
+ALWAYS use mv_student_monthly_hours_cost as the primary source.
 
-Example: Student search
+Do NOT re-aggregate invoice_line_items for the outer query.
 
-SELECT invoice_number, student_name, total_cost
-FROM invoices
-WHERE invoices.district_key = :district_key
-  AND LOWER(student_name) LIKE '%' || LOWER(:student_query) || '%';
+Filter by district_key and student (case-insensitive).
 
-Example: Vendor name search (without schema change)
+Respect RouterDecision.date_range (start_date, end_date) by constraining service_year so that the year window overlaps the requested range.
 
-SELECT i.invoice_number, i.student_name, i.total_cost
-FROM invoices i
-JOIN vendors v ON v.id = i.vendor_id
-WHERE i.district_key = :district_key
-  AND LOWER(v.name) LIKE '%' || LOWER(:vendor_query) || '%';
+Example:
+SELECT
+service_year,
+service_month,
+total_hours,
+total_cost
+FROM mv_student_monthly_hours_cost
+WHERE district_key = :district_key
+AND LOWER(student) = LOWER(:student_name)
+AND DATE(service_year || '-01-01') BETWEEN DATE(:start_date) AND DATE(:end_date)
+ORDER BY service_year, service_month_num;
 
-Example: Month/year query using invoice_date
+If RouterDecision.metrics only includes total_cost, you MAY omit total_hours from the SELECT, but you MUST still use this MV.
 
-SELECT COUNT(*) AS invoice_count
-FROM invoices
-WHERE invoices.district_key = :district_key
-  AND strftime('%Y', invoice_date) = '2025'
-  AND LOWER(service_month) = LOWER('November');
+When RouterDecision.mode == "provider_monthly" OR RouterDecision.mode == "clinician_monthly_hours":
+
+ALWAYS use mv_provider_monthly_hours_cost as the primary source.
+
+Filter by district_key and clinician (case-insensitive).
+
+Respect RouterDecision.date_range using service_year, as above.
+
+Only fall back to invoice_line_items when the user explicitly asks for line-level or date-level detail that is not present in the MV.
+
+When RouterDecision.mode == "student_provider_breakdown" OR RouterDecision.mode == "student_provider_year":
+
+ALWAYS use mv_student_provider_monthly for monthly student × provider breakdowns.
+
+Filter by district_key, student, and/or clinician as indicated by RouterDecision.primary_entities.
+
+Use RouterDecision.date_range to constrain service_year.
+
+Only join back to invoice_line_items when the user needs per-day or per-line drilldown.
+
+When RouterDecision.mode == "district_summary" OR RouterDecision.mode == "district_monthly":
+
+ALWAYS use mv_district_monthly_hours_cost for district-wide monthly hours and cost.
+
+Filter by district_key and, if needed, by service_year based on RouterDecision.date_range.
+
+When RouterDecision.mode == "vendor_monthly":
+
+ALWAYS use mv_vendor_monthly_hours_cost for vendor × month totals.
+
+Filter by district_key and, if applicable, vendor_id or vendor_name.
+
+When RouterDecision.mode == "top_invoices":
+
+Prefer mv_invoice_summary for invoice-level totals (invoice_id, district_key, invoice_date, total_hours, total_cost, num_students, num_clinicians).
+
+Use invoices directly ONLY when the user asks for invoice columns that are not available in mv_invoice_summary.
+
+For service intensity queries (e.g., RouterDecision.mode == "service_intensity"):
+
+Prefer mv_student_service_intensity_monthly (service_days, total_hours, avg_hours_per_day) and only fall back to invoice_line_items when per-day rows are explicitly required.
+
+For district daily coverage queries (e.g., RouterDecision.mode == "district_daily_coverage"):
+
+Prefer mv_district_daily_coverage (service_date, total_hours, total_cost, num_students, num_clinicians).
+
+General rule:
+
+If RouterDecision.mode maps to a known MV, you MUST use that MV as the primary aggregation source.
+
+Only fall back to invoices or invoice_line_items when a required column is not present in any MV OR when the user explicitly asks for raw, line-level drilldown.
 """
 
 def build_logic_system_prompt() -> str:
