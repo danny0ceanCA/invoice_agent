@@ -95,3 +95,52 @@ failures. 【F:app/backend/src/agents/district_analytics_agent.py†L1703-L1864�
 For simpler utility usage outside the full agent workflow, `app/backend/src/api/analytics_agent.py`
 provides a helper `run_sql(query)` that enforces the same read-only restriction and runs the
 statement with SQLAlchemy, returning rows as dictionaries. 【F:app/backend/src/api/analytics_agent.py†L86-L102】
+
+## District analytics agent model stack
+
+Natural Language Variability (NLV) – Normalizes raw user queries into a structured intent
+JSON, enforcing strict JSON-only output, synonym handling (e.g., provider→clinician),
+school-year/time normalization rules anchored to TODAY, and ambiguity flags that drive
+later clarification.
+
+Entity Resolution – Refines the NLV intent against known students, vendors, and
+clinicians, fuzzily matching names, converting any “provider” references to clinicians,
+and flagging ambiguous or missing entities that require clarification.
+
+SQL Planner – Produces a semantic query plan (not SQL) describing entity focus, time
+window, metrics, grouping, and trend needs; normalizes school-year/YTD phrasing, maps
+natural-language report types to plan kinds, and enforces clinician/provider normalization
+for downstream SQL builders.
+
+SQL Router – Converts the semantic plan plus multi-turn context into a high-level
+RouterDecision (e.g., student_monthly, provider_breakdown, top_invoices), inferring
+mode/filters, preserving active topics, and detecting when invoice detail or provider
+breakdowns are needed.
+
+Validator – Safety check for the logic-layer AnalyticsIR, whitelisting simple list/table
+responses, blocking HTML/SQL keywords, enforcing schema constraints on rows/entities/time
+windows, and sanitizing problematic content while returning a validity report.
+
+Insight Generator – Transforms a validated AnalyticsIR into up to four plain-English
+insights, avoiding SQL/HTML leakage, and defaulting to empty insights when the result set
+is empty or in a clarification state.
+
+Together, these models form the multi-stage workflow: NLV structures the intent → Entity
+Resolution grounds it to district data → SQL Planner drafts a semantic plan → SQL Router
+chooses the execution mode → Validator sanity-checks logic output → Insight Generator
+summarizes results for the end user.
+
+app/backend/src/agents/logic_model.py — Defines the analytics agent’s logic-model prompt
+and helper functions for building the system prompt used when generating SQL/IR logic. It
+includes detailed schema hints and SQL patterns for invoices, vendors, and line items,
+along with strict tenant-scoping guidance.
+
+multi_turn_model.py (repo root) — Implements the multi-turn conversation manager,
+including the ConversationState dataclass for tracking slots, history, topics, and period
+context, plus Redis-backed state persistence and user-message processing with reset
+handling.
+
+app/backend/src/agents/rendering_model.py — Provides the rendering-stage system prompt and
+run_rendering_model function that converts the analytics IR and optional insights into
+user-facing text/HTML via an OpenAI chat completion, with safeguards for entity ambiguity
+and list-intent handling.
