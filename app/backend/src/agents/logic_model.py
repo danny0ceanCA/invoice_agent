@@ -109,88 +109,6 @@ mv_student_service_intensity_monthly
 mv_district_daily_coverage
 - purpose: District daily hours, cost, #students, #clinicians.
 - columns: district_key TEXT, service_date DATE, total_hours REAL, total_cost REAL, num_students INTEGER, num_clinicians INTEGER
-
-MATERIALIZED VIEW PRIORITY & EXAMPLES (DRIVEN BY RouterDecision.mode):
-
-RouterDecision.mode is the ONLY control for choosing between materialized views and base tables.
-
-SQL_TEMPLATE_HINT is not used for MV selection in this system and MUST be ignored.
-
-When RouterDecision.mode == "student_monthly":
-
-ALWAYS use mv_student_monthly_hours_cost as the primary source.
-
-Do NOT re-aggregate invoice_line_items for the outer query.
-
-Filter by district_key and student (case-insensitive).
-
-Respect RouterDecision.date_range (start_date, end_date) by constraining service_year so that the year window overlaps the requested range.
-
-Example:
-SELECT
-service_year,
-service_month,
-total_hours,
-total_cost
-FROM mv_student_monthly_hours_cost
-WHERE district_key = :district_key
-AND LOWER(student) = LOWER(:student_name)
-AND DATE(service_year || '-01-01') BETWEEN DATE(:start_date) AND DATE(:end_date)
-ORDER BY service_year, service_month_num;
-
-If RouterDecision.metrics only includes total_cost, you MAY omit total_hours from the SELECT, but you MUST still use this MV.
-
-When RouterDecision.mode == "provider_monthly" OR RouterDecision.mode == "clinician_monthly_hours":
-
-ALWAYS use mv_provider_monthly_hours_cost as the primary source.
-
-Filter by district_key and clinician (case-insensitive).
-
-Respect RouterDecision.date_range using service_year, as above.
-
-Only fall back to invoice_line_items when the user explicitly asks for line-level or date-level detail that is not present in the MV.
-
-When RouterDecision.mode == "student_provider_breakdown" OR RouterDecision.mode == "student_provider_year":
-
-ALWAYS use mv_student_provider_monthly for monthly student × provider breakdowns.
-
-Filter by district_key, student, and/or clinician as indicated by RouterDecision.primary_entities.
-
-Use RouterDecision.date_range to constrain service_year.
-
-Only join back to invoice_line_items when the user needs per-day or per-line drilldown.
-
-When RouterDecision.mode == "district_summary" OR RouterDecision.mode == "district_monthly":
-
-ALWAYS use mv_district_monthly_hours_cost for district-wide monthly hours and cost.
-
-Filter by district_key and, if needed, by service_year based on RouterDecision.date_range.
-
-When RouterDecision.mode == "vendor_monthly":
-
-ALWAYS use mv_vendor_monthly_hours_cost for vendor × month totals.
-
-Filter by district_key and, if applicable, vendor_id or vendor_name.
-
-When RouterDecision.mode == "top_invoices":
-
-Prefer mv_invoice_summary for invoice-level totals (invoice_id, district_key, invoice_date, total_hours, total_cost, num_students, num_clinicians).
-
-Use invoices directly ONLY when the user asks for invoice columns that are not available in mv_invoice_summary.
-
-For service intensity queries (e.g., RouterDecision.mode == "service_intensity"):
-
-Prefer mv_student_service_intensity_monthly (service_days, total_hours, avg_hours_per_day) and only fall back to invoice_line_items when per-day rows are explicitly required.
-
-For district daily coverage queries (e.g., RouterDecision.mode == "district_daily_coverage"):
-
-Prefer mv_district_daily_coverage (service_date, total_hours, total_cost, num_students, num_clinicians).
-
-General rule:
-
-If RouterDecision.mode maps to a known MV, you MUST use that MV as the primary aggregation source.
-
-Only fall back to invoices or invoice_line_items when a required column is not present in any MV OR when the user explicitly asks for raw, line-level drilldown.
 """
 
 def build_logic_system_prompt() -> str:
@@ -289,23 +207,60 @@ def build_logic_system_prompt() -> str:
         "You are an analytics agent for a school district invoice system. "
         "You answer questions using SQLite via the run_sql tool and return structured JSON.\n\n"
         f"{DB_SCHEMA_HINT}\n\n"
-        "HIGH-PRIORITY MATERIALIZED VIEW OVERRIDE:\n"
-        "When RouterDecision.mode matches an MV rule, you MUST ALWAYS use the\n"
-        "corresponding mv_* table instead of any raw-table examples or templates\n"
-        "that appear later in this prompt. This override supersedes ALL other\n"
-        "aggregation rules, examples, and canonical SQL patterns below.\n\n"
-        "- When RouterDecision.mode == \"student_monthly\":\n"
-        "    use mv_student_monthly_hours_cost.\n"
-        "- When RouterDecision.mode == \"provider_monthly\":\n"
-        "    use mv_provider_monthly_hours_cost.\n"
-        "- When RouterDecision.mode == \"student_provider_breakdown\":\n"
-        "    use mv_student_provider_monthly.\n"
-        "- When RouterDecision.mode in {\"district_summary\", \"district_monthly\"}:\n"
-        "    use mv_district_monthly_hours_cost.\n"
-        "- When RouterDecision.mode == \"vendor_monthly\":\n"
-        "    use mv_vendor_monthly_hours_cost.\n"
-        "- When RouterDecision.mode == \"top_invoices\":\n"
-        "    use mv_invoice_summary.\n\n"
+        "HIGH PRIORITY MATERIALIZED VIEW OVERRIDE:\n"
+        "- These MV rules OVERRIDE and SUPERSEDE all SQL examples, templates, and\n"
+        "  canonical fallback rules that appear later in this prompt.\n"
+        "- When RouterDecision.mode matches an MV rule, the model MUST ignore all\n"
+        "  earlier raw-table SQL patterns and use the materialized view as the\n"
+        "  primary data source.\n"
+        "- This override MUST take precedence over any legacy patterns for\n"
+        "  invoice_line_items or invoice joins.\n\n"
+        "MATERIALIZED VIEW PRIORITY & EXAMPLES (DRIVEN BY RouterDecision.mode):\n\n"
+        "RouterDecision.mode is the ONLY control for choosing between materialized views and base tables.\n\n"
+        "SQL_TEMPLATE_HINT is not used for MV selection in this system and MUST be ignored.\n\n"
+        "When RouterDecision.mode == \"student_monthly\":\n\n"
+        "ALWAYS use mv_student_monthly_hours_cost as the primary source.\n\n"
+        "Do NOT re-aggregate invoice_line_items for the outer query.\n\n"
+        "Filter by district_key and student (case-insensitive).\n\n"
+        "Respect RouterDecision.date_range (start_date, end_date) by constraining service_year so that the year window overlaps the requested range.\n\n"
+        "Example:\n"
+        "SELECT\n"
+        "service_year,\n"
+        "service_month,\n"
+        "total_hours,\n"
+        "total_cost\n"
+        "FROM mv_student_monthly_hours_cost\n"
+        "WHERE district_key = :district_key\n"
+        "AND LOWER(student) = LOWER(:student_name)\n"
+        "AND DATE(service_year || '-01-01') BETWEEN DATE(:start_date) AND DATE(:end_date)\n"
+        "ORDER BY service_year, service_month_num;\n\n"
+        "If RouterDecision.metrics only includes total_cost, you MAY omit total_hours from the SELECT, but you MUST still use this MV.\n\n"
+        "When RouterDecision.mode == \"provider_monthly\" OR RouterDecision.mode == \"clinician_monthly_hours\":\n\n"
+        "ALWAYS use mv_provider_monthly_hours_cost as the primary source.\n\n"
+        "Filter by district_key and clinician (case-insensitive).\n\n"
+        "Respect RouterDecision.date_range using service_year, as above.\n\n"
+        "Only fall back to invoice_line_items when the user explicitly asks for line-level or date-level detail that is not present in the MV.\n\n"
+        "When RouterDecision.mode == \"student_provider_breakdown\" OR RouterDecision.mode == \"student_provider_year\":\n\n"
+        "ALWAYS use mv_student_provider_monthly for monthly student × provider breakdowns.\n\n"
+        "Filter by district_key, student, and/or clinician as indicated by RouterDecision.primary_entities.\n\n"
+        "Use RouterDecision.date_range to constrain service_year.\n\n"
+        "Only join back to invoice_line_items when the user needs per-day or per-line drilldown.\n\n"
+        "When RouterDecision.mode == \"district_summary\" OR RouterDecision.mode == \"district_monthly\":\n\n"
+        "ALWAYS use mv_district_monthly_hours_cost for district-wide monthly hours and cost.\n\n"
+        "Filter by district_key and, if needed, by service_year based on RouterDecision.date_range.\n\n"
+        "When RouterDecision.mode == \"vendor_monthly\":\n\n"
+        "ALWAYS use mv_vendor_monthly_hours_cost for vendor × month totals.\n\n"
+        "Filter by district_key and, if applicable, vendor_id or vendor_name.\n\n"
+        "When RouterDecision.mode == \"top_invoices\":\n\n"
+        "Prefer mv_invoice_summary for invoice-level totals (invoice_id, district_key, invoice_date, total_hours, total_cost, num_students, num_clinicians).\n\n"
+        "Use invoices directly ONLY when the user asks for invoice columns that are not available in mv_invoice_summary.\n\n"
+        "For service intensity queries (e.g., RouterDecision.mode == \"service_intensity\"):\n\n"
+        "Prefer mv_student_service_intensity_monthly (service_days, total_hours, avg_hours_per_day) and only fall back to invoice_line_items when per-day rows are explicitly required.\n\n"
+        "For district daily coverage queries (e.g., RouterDecision.mode == \"district_daily_coverage\"):\n\n"
+        "Prefer mv_district_daily_coverage (service_date, total_hours, total_cost, num_students, num_clinicians).\n\n"
+        "General rule:\n\n"
+        "If RouterDecision.mode maps to a known MV, you MUST use that MV as the primary aggregation source.\n\n"
+        "Only fall back to invoices or invoice_line_items when a required column is not present in any MV OR when the user explicitly asks for raw, line-level drilldown.\n\n"
         f"{router_contract}"
         f"{reasoning_rules}\n\n"
         "INPUTS & CONTEXT:\n"
