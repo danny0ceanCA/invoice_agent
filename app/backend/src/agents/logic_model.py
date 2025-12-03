@@ -737,10 +737,17 @@ def run_logic_model(
             ]
 
             if isinstance(month_names, list) and month_names:
+                # Month-scoped provider breakdown:
+                # Use service_month only and DO NOT add invoice_date BETWEEN,
+                # to avoid over-filtering when the planner also supplied a
+                # date_range for the same month.
                 month = str(month_names[0])
                 filters.append(f"LOWER(i.service_month) = LOWER('{month}')")
-
-            if isinstance(start, str) and isinstance(end, str):
+            elif isinstance(start, str) and isinstance(end, str):
+                # No explicit month in RouterDecision:
+                # use invoice_date BETWEEN only for true school-year / explicit
+                # calendar range queries (e.g., student_provider_year or
+                # date-range provider breakdown).
                 filters.append(f"i.invoice_date BETWEEN '{start}' AND '{end}'")
 
             where_clause = "  WHERE " + "\n        AND ".join(filters)
