@@ -684,6 +684,9 @@ def run_logic_model(
     router_decision: dict[str, Any] | None = None,
 ):
     """Execute the logic model using the existing OpenAI client pattern."""
+    has_tool_results = any(
+        isinstance(m, dict) and m.get("role") == "tool" for m in messages
+    )
     # ------------------------------------------------------------------
     # HARD OVERRIDE: student provider breakdown / provider-year
     #
@@ -706,7 +709,7 @@ def run_logic_model(
     #       • month_names[0] → service_month filter
     #       • date_range.start_date/end_date → invoice_date filter
     # ------------------------------------------------------------------
-    if router_decision:
+    if router_decision and not has_tool_results:
         mode = router_decision.get("mode")
         primary_type = router_decision.get("primary_entity_type")
         primary_entities = router_decision.get("primary_entities") or []
@@ -715,9 +718,12 @@ def run_logic_model(
         month_names = router_decision.get("month_names") or []
 
         if (
-            primary_type == "student"
-            and primary_entities
-            and (mode in {"student_provider_breakdown", "student_provider_year"} or needs_provider_breakdown)
+            primary_entities
+            and primary_type != "vendor"
+            and (
+                mode in {"student_provider_breakdown", "student_provider_year"}
+                or needs_provider_breakdown
+            )
         ):
             student = primary_entities[0]
             start = date_range.get("start_date")
