@@ -48,6 +48,68 @@ You are querying a SQLite database for a school district invoice system.
 - cost FLOAT                            -- line-item amount
 - service_date VARCHAR(32)
 
+### materialized views (SQLite prototypes, mirrored as Postgres MATERIALIZED VIEWs)
+
+mv_student_monthly_hours_cost
+- purpose: Student hours + cost per month (per district, year, month).
+- columns: district_key TEXT, student TEXT, service_year INTEGER, service_month_num INTEGER, service_month TEXT, total_hours REAL, total_cost REAL
+
+mv_provider_monthly_hours_cost
+- purpose: Clinician hours + cost per month.
+- columns: district_key TEXT, clinician TEXT, service_year INTEGER, service_month_num INTEGER, service_month TEXT, total_hours REAL, total_cost REAL
+
+mv_student_provider_monthly
+- purpose: For each student, monthly breakdown by clinician (hours + cost).
+- columns: district_key TEXT, student TEXT, clinician TEXT, service_year INTEGER, service_month_num INTEGER, service_month TEXT, total_hours REAL, total_cost REAL
+
+mv_district_service_code_monthly
+- purpose: District totals by service_code per month.
+- columns: district_key TEXT, service_code TEXT, service_year INTEGER, service_month_num INTEGER, service_month TEXT, total_hours REAL, total_cost REAL
+
+mv_invoice_summary
+- purpose: Invoice-level totals (hours, cost, invoice_date, num_students, num_clinicians).
+- columns: invoice_id INTEGER, district_key TEXT, invoice_date DATE, total_hours REAL, total_cost REAL, num_students INTEGER, num_clinicians INTEGER
+
+mv_student_year_summary
+- purpose: Yearly totals per student (per district, year).
+- columns: district_key TEXT, student TEXT, service_year INTEGER, total_hours REAL, total_cost REAL
+
+mv_provider_caseload_monthly
+- purpose: Clinician caseload (#students) + hours per month.
+- columns: district_key TEXT, clinician TEXT, service_year INTEGER, service_month_num INTEGER, service_month TEXT, num_students INTEGER, total_hours REAL, total_cost REAL
+
+mv_district_monthly_hours_cost
+- purpose: District hours + cost per month.
+- columns: district_key TEXT, service_year INTEGER, service_month_num INTEGER, service_month TEXT, total_hours REAL, total_cost REAL
+
+mv_vendor_monthly_hours_cost
+- purpose: Vendor hours + cost per month (per district, vendor).
+- columns: district_key TEXT, vendor_id INTEGER, vendor_name TEXT, service_year INTEGER, service_month_num INTEGER, service_month TEXT, total_hours REAL, total_cost REAL
+
+mv_student_service_code_monthly
+- purpose: Student × service_code hours + cost per month.
+- columns: district_key TEXT, student TEXT, service_code TEXT, service_year INTEGER, service_month_num INTEGER, service_month TEXT, total_hours REAL, total_cost REAL
+
+mv_provider_service_code_monthly
+- purpose: Clinician × service_code hours + cost per month.
+- columns: district_key TEXT, clinician TEXT, service_code TEXT, service_year INTEGER, service_month_num INTEGER, service_month TEXT, total_hours REAL, total_cost REAL
+
+mv_student_daily_hours
+- purpose: Daily hours + cost per student.
+- columns: district_key TEXT, student TEXT, service_date DATE, total_hours REAL, total_cost REAL
+
+mv_provider_daily_hours
+- purpose: Daily hours + cost per clinician.
+- columns: district_key TEXT, clinician TEXT, service_date DATE, total_hours REAL, total_cost REAL
+
+mv_student_service_intensity_monthly
+- purpose: Student service_days, hours, and avg_hours_per_day per month.
+- columns: district_key TEXT, student TEXT, service_year INTEGER, service_month_num INTEGER, service_month TEXT, service_days INTEGER, total_hours REAL, avg_hours_per_day REAL
+
+mv_district_daily_coverage
+- purpose: District daily hours, cost, #students, #clinicians.
+- columns: district_key TEXT, service_date DATE, total_hours REAL, total_cost REAL, num_students INTEGER, num_clinicians INTEGER
+
 Provider and line-item joins you SHOULD be comfortable using:
 - Provider hours or cost by month:
     SELECT
@@ -405,6 +467,27 @@ def build_logic_system_prompt() -> str:
         "    When no entities satisfy strict monotonicity, return the largest movers\n"
         "    by net_change (positive for increasing queries, negative for decreasing).\n"
         "    IR.text must note the fallback.\n\n"
+        "MATERIALIZED VIEW PRIORITY & EXAMPLES:\n"
+        "- Prefer prebuilt materialized views for aggregated monthly/daily metrics to avoid re-aggregating invoice_line_items.\n"
+        "- Only fall back to base tables when the MV lacks the needed granularity or dimension.\n"
+        "- Student monthly trends: use mv_student_monthly_hours_cost for per-student hours/cost by month.\n"
+        "  Example:\n"
+        "    SELECT service_year, service_month, total_hours, total_cost\n"
+        "    FROM mv_student_monthly_hours_cost\n"
+        "    WHERE district_key = :district_key\n"
+        "      AND student = LOWER(:student_name)\n"
+        "    ORDER BY service_year, service_month_num;\n"
+        "- Provider monthly trends: use mv_provider_monthly_hours_cost for clinician hours/cost by month.\n"
+        "- Student × provider monthly breakdown: use mv_student_provider_monthly for per-student, per-clinician monthly totals.\n"
+        "- District × service_code monthly: use mv_district_service_code_monthly for service_code totals per month.\n"
+        "- Invoice-level summaries: use mv_invoice_summary for invoice totals (hours, cost, num_students, num_clinicians).\n"
+        "- Student yearly summary: use mv_student_year_summary for yearly totals per student.\n"
+        "- Provider caseload monthly: use mv_provider_caseload_monthly for clinician caseload (num_students) and hours per month.\n"
+        "- District / vendor monthly: mv_district_monthly_hours_cost for district totals; mv_vendor_monthly_hours_cost for vendor monthly totals.\n"
+        "- Service_code breakdowns: mv_student_service_code_monthly for student × service_code; mv_provider_service_code_monthly for clinician × service_code.\n"
+        "- Daily views: mv_student_daily_hours (student), mv_provider_daily_hours (clinician), mv_district_daily_coverage (district coverage).\n"
+        "- Service intensity: mv_student_service_intensity_monthly for service_days and avg_hours_per_day per student per month.\n"
+        "- General rule: if the query is about aggregated monthly or daily metrics covered by these views, use the MV directly, filter by district_key/time range/entity, and only join invoice_line_items when the user needs row-level detail absent from the MV.\n\n"
         "SQL SAFETY RULES (STRICT):\n"
         "- NEVER reference invoice_line_items.service_month (that column does not exist).\n"
         "- NEVER reference non-existent columns such as: amount_due, invoice_amount, balance_due, vendor_name (unless explicitly selected), or invoice_line_items.month.\n"
