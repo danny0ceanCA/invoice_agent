@@ -184,7 +184,7 @@ def route_sql(
     if isinstance(month_names, str):
         month_names = [month_names]
 
-    return RouterDecision(
+    router_decision = RouterDecision(
         mode=mode,
         primary_entity_type=primary_type,
         primary_entities=primary_entities or [],
@@ -196,6 +196,11 @@ def route_sql(
         notes=[],
         date_range=date_range,
     )
+
+    print("[MV-DEBUG] ROUTER_DECISION MODE:", router_decision.mode)
+    print("[MV-DEBUG] ROUTER SQL_TEMPLATE_HINT:", "SQL_TEMPLATE_HINT:")
+
+    return router_decision
 
 
 def build_sql_router_system_prompt() -> str:

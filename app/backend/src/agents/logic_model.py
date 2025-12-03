@@ -931,6 +931,8 @@ def run_logic_model(
                 }
             )
 
+    print("[MV-DEBUG] ROUTER_DECISION:", router_decision)
+
     completion = client.chat.completions.create(
         model=model,
         messages=routed_messages,
