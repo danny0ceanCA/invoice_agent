@@ -6,7 +6,7 @@ from typing import Any, List
 import structlog
 from openai import OpenAI
 
-from agents.domain_config_loader import load_domain_config
+from .domain_config_loader import load_domain_config
 
 
 LOGGER = structlog.get_logger(__name__)

@@ -8,7 +8,7 @@ from typing import Any
 from datetime import date
 
 from openai import OpenAI
-from agents.domain_config_loader import load_domain_config
+from .domain_config_loader import load_domain_config
 
 
 def build_nlv_system_prompt() -> str:

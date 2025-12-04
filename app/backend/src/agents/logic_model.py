@@ -10,7 +10,7 @@ import json
 from types import SimpleNamespace
 from typing import Any, Sequence
 
-from agents.domain_config_loader import load_domain_config
+from .domain_config_loader import load_domain_config
 from openai import OpenAI
 
 DB_SCHEMA_HINT = """
