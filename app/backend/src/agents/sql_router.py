@@ -6,6 +6,8 @@ from typing import Any, List
 import structlog
 from openai import OpenAI
 
+from agents.domain_config_loader import load_domain_config
+
 
 LOGGER = structlog.get_logger(__name__)
 
@@ -46,6 +48,9 @@ def route_sql(
     intent = normalized_intent or {}
     mt = multi_turn_state or {}
 
+    config = load_domain_config()
+    router_modes = config.get("router_modes", {})
+
     primary_type = plan.get("primary_entity_type")
     primary_entities = (
         plan.get("primary_entities") or ents.get(primary_type + "s", []) if primary_type else []
@@ -59,8 +64,38 @@ def route_sql(
     date_range = plan.get("date_range") if isinstance(plan.get("date_range"), dict) else None
     metrics = plan.get("metrics") or []
 
-    # Flags
     q_lower = user_query.lower()
+    matched_modes: list[str] = []
+    if isinstance(router_modes, dict):
+        for mode_key, cfg in router_modes.items():
+            triggers = cfg.get("triggers", []) if isinstance(cfg, dict) else []
+            for trigger in triggers:
+                if isinstance(trigger, str) and trigger.lower() in q_lower:
+                    matched_modes.append(mode_key)
+
+    prioritized_modes = [
+        "invoice_details",
+        "top_invoices",
+        "student_provider_breakdown",
+        "student_monthly",
+        "district_monthly",
+        "vendor_monthly",
+        "provider_caseload_monthly",
+    ]
+
+    triggered_mode = None
+    if matched_modes:
+        triggered_mode = matched_modes[0]
+        for candidate in matched_modes:
+            if candidate in prioritized_modes:
+                current_index = prioritized_modes.index(triggered_mode) if triggered_mode in prioritized_modes else len(prioritized_modes)
+                candidate_index = prioritized_modes.index(candidate)
+                if candidate_index < current_index:
+                    triggered_mode = candidate
+            else:
+                continue
+
+    # Flags
     top_invoices_intent = any(
         kw in q_lower
         for kw in [
@@ -89,6 +124,8 @@ def route_sql(
     ) and not top_invoices_intent
 
     # Modes
+    mode = triggered_mode
+
     if top_invoices_intent or plan.get("kind") == "top_invoices":
         mode = "top_invoices"
         primary_type = None
@@ -102,11 +139,11 @@ def route_sql(
             mode = "student_provider_breakdown"
         else:
             mode = "provider_breakdown"
-    elif primary_type == "student":
+    elif not mode and primary_type == "student":
         mode = "student_monthly"
-    elif primary_type == "vendor":
+    elif not mode and primary_type == "vendor":
         mode = "vendor_monthly"
-    else:
+    elif not mode:
         mode = plan.get("kind") or "district_summary"
 
     # Multi-turn: preserve active filters when plan doesn't override
@@ -206,7 +243,17 @@ def route_sql(
 def build_sql_router_system_prompt() -> str:
     """System prompt for AI-driven routing of semantic SQL plans."""
 
-    return """
+    config = load_domain_config()
+    router_modes = config.get("router_modes", {})
+
+    return f"""
+ROUTER_MODES CONFIGURATION (read-only):
+{json.dumps(router_modes, indent=2)}
+
+Use the JSON router_modes triggers to interpret user intent. 
+Do not override RouterDecision fallback logic when JSON triggers 
+do not match.
+
 You are the SQL routing model for the district analytics agent.
 
 Your task is to map a semantic SQL plan, normalized intent, entities, and the
