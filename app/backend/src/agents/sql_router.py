@@ -50,6 +50,7 @@ def route_sql(
 
     config = load_domain_config()
     router_modes = config.get("router_modes", {})
+    print("[DOMAIN-CONFIG-DEBUG][ROUTER] Loaded router_modes:", list(router_modes.keys()))
 
     primary_type = plan.get("primary_entity_type")
     primary_entities = (
@@ -94,6 +95,9 @@ def route_sql(
                     triggered_mode = candidate
             else:
                 continue
+
+    print("[DOMAIN-CONFIG-DEBUG][ROUTER] matched_modes:", matched_modes)
+    print("[DOMAIN-CONFIG-DEBUG][ROUTER] triggered_mode:", triggered_mode)
 
     # Flags
     top_invoices_intent = any(
