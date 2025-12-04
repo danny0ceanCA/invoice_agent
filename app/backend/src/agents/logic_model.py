@@ -119,7 +119,9 @@ def build_logic_system_prompt() -> str:
     # ambiguity/IR-only guidance for the logic stage.
     config = load_domain_config()
     materialized_views = config.get("materialized_views", {})
+    print("[DOMAIN-CONFIG-DEBUG][LOGIC] Loaded MV names:", list(materialized_views.keys()))
     mode_to_mv_map = config.get("mode_to_mv_map", {})
+    print("[DOMAIN-CONFIG-DEBUG][LOGIC] Mode→MV map keys:", list(mode_to_mv_map.keys()))
     router_modes = config.get("router_modes", {})
     config_snippet = (
         "MV_CONFIG:\n"
@@ -877,6 +879,8 @@ def run_logic_model(
         config = load_domain_config()
         mode_to_mv_map = config.get("mode_to_mv_map", {})
         mv_name = mode_to_mv_map.get(router_decision.get("mode"))
+        print("[DOMAIN-CONFIG-DEBUG][LOGIC] router_mode:", router_decision.get("mode"))
+        print("[DOMAIN-CONFIG-DEBUG][LOGIC] MV chosen:", mv_name)
 
     router_instructions = _build_router_guidance(router_decision)
     routed_messages = list(messages)
@@ -916,6 +920,8 @@ def run_logic_model(
                     f"LOWER(clinician) LIKE LOWER('%{primary_entity}%')"
                 )
 
+        print("[DOMAIN-CONFIG-DEBUG][LOGIC] Running MV query using:", mv_name)
+        print("[DOMAIN-CONFIG-DEBUG][LOGIC] MV filters:", mv_filters)
         where_clause = "\nWHERE " + "\n  AND ".join(mv_filters) if mv_filters else ""
         sql = f"""
 SELECT * FROM {mv_name}{where_clause}
