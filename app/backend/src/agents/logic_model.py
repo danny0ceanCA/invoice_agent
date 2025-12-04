@@ -872,10 +872,41 @@ def run_logic_model(
 
             return SimpleNamespace(content="", tool_calls=[tool_call])
 
+    mv_name = None
+    if router_decision:
+        config = load_domain_config()
+        mode_to_mv_map = config.get("mode_to_mv_map", {})
+        mv_name = mode_to_mv_map.get(router_decision.get("mode"))
+
     router_instructions = _build_router_guidance(router_decision)
     routed_messages = list(messages)
     if router_instructions:
         routed_messages.append({"role": "system", "content": router_instructions})
+
+    override_modes = {
+        "student_provider_breakdown",
+        "student_provider_year",
+        "provider_breakdown",
+        "invoice_details",
+        "top_invoices",
+    }
+
+    if (
+        mv_name
+        and router_decision
+        and not has_tool_results
+        and router_decision.get("mode") not in override_modes
+    ):
+        routed_messages.append(
+            {
+                "role": "system",
+                "content": (
+                    "MATERIALIZED VIEW ROUTING:\n"
+                    f"- Use materialized view {mv_name} as the primary FROM source for this query.\n"
+                    "- Apply RouterDecision filters to this view unless columns are missing and a fallback is required."
+                ),
+            }
+        )
 
     # The core issue:
     # The logic model may run multiple tool calls per iteration (e.g., summary + detail).
