@@ -897,6 +897,46 @@ def run_logic_model(
         and not has_tool_results
         and router_decision.get("mode") not in override_modes
     ):
+        mv_filters = ["district_key = :district_key"]
+        primary_entities = router_decision.get("primary_entities") or []
+        primary_type = router_decision.get("primary_entity_type")
+
+        if primary_entities:
+            primary_entity = primary_entities[0]
+            if primary_type == "student":
+                mv_filters.append(
+                    f"LOWER(student) LIKE LOWER('%{primary_entity}%')"
+                )
+            elif primary_type == "vendor":
+                mv_filters.append(
+                    f"LOWER(vendor_name) LIKE LOWER('%{primary_entity}%')"
+                )
+            elif primary_type == "provider":
+                mv_filters.append(
+                    f"LOWER(clinician) LIKE LOWER('%{primary_entity}%')"
+                )
+
+        where_clause = "\nWHERE " + "\n  AND ".join(mv_filters) if mv_filters else ""
+        sql = f"""
+SELECT * FROM {mv_name}{where_clause}
+"""
+
+        tool_call = SimpleNamespace(
+            id="call_mv_query",
+            type="function",
+            function=SimpleNamespace(
+                name="run_sql", arguments=json.dumps({"query": sql})
+            ),
+        )
+
+        return SimpleNamespace(content="", tool_calls=[tool_call])
+
+    if (
+        mv_name
+        and router_decision
+        and not has_tool_results
+        and router_decision.get("mode") not in override_modes
+    ):
         routed_messages.append(
             {
                 "role": "system",
