@@ -22,6 +22,12 @@ def build_nlv_system_prompt() -> str:
     plan_kinds = config.get("plan_kinds", {})
     time_windows = config.get("time_windows", {})
 
+    print("[DOMAIN-CONFIG-DEBUG][NLV] Loaded domain_config.json")
+    print("[DOMAIN-CONFIG-DEBUG][NLV] entities keys:", list(entities.keys()))
+    print("[DOMAIN-CONFIG-DEBUG][NLV] metrics keys:", list(metrics.keys()))
+    print("[DOMAIN-CONFIG-DEBUG][NLV] plan_kinds keys:", list(plan_kinds.keys()))
+    print("[DOMAIN-CONFIG-DEBUG][NLV] time_windows keys:", list(time_windows.keys()))
+
     domain_snippet = (
         "DOMAIN CONFIGURATION (read-only)\n"
         f"ENTITIES: {json.dumps(entities, indent=2)}\n"
