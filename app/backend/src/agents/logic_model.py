@@ -911,7 +911,7 @@ def run_logic_model(
                 mv_filters.append(
                     f"LOWER(vendor_name) LIKE LOWER('%{primary_entity}%')"
                 )
-            elif primary_type == "provider":
+            elif primary_type == "clinician":
                 mv_filters.append(
                     f"LOWER(clinician) LIKE LOWER('%{primary_entity}%')"
                 )
