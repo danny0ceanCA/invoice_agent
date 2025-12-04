@@ -9,11 +9,17 @@ from typing import Any, Mapping
 from openai import OpenAI
 from jinja2 import Environment, FileSystemLoader
 
+from .domain_config_loader import load_domain_config
+
 
 def build_sql_planner_system_prompt() -> str:
     """System prompt for the SQL planner stage."""
 
-    return """
+    config = load_domain_config()
+    plan_kinds = config.get("plan_kinds", {}) if isinstance(config, dict) else {}
+    plan_kinds_json = json.dumps(plan_kinds, indent=2)
+
+    base_prompt = """
 You are the SQL Planning Model for the CareSpend / SCUSD District Analytics Agent.
 
 Your role is SEMANTIC PLANNING ONLY.
@@ -120,57 +126,12 @@ PROVIDER / CLINICIAN NORMALIZATION
 ===============================================================
 MAPPING NATURAL LANGUAGE → PLAN KIND
 
-STUDENT REPORTS
+Use the provided PLAN_KINDS configuration to interpret the user's analytic intent. plan_kinds defines semantic categories, synonyms, and expected entity roles.
 
-"monthly spend for <student>" → student_monthly_spend
+PLAN_KINDS:
+"""
 
-"monthly hours for <student>" → student_monthly_hours
-
-"YTD spend for <student>" → student_ytd_spend
-
-"YTD hours for <student>" → student_ytd_hours
-
-"all invoices for <student>" → student_invoices
-
-VENDOR REPORTS
-
-"monthly spend for <vendor>" → vendor_monthly_spend
-
-"YTD spend for <vendor>" → vendor_ytd_spend
-
-"invoices for <vendor>" → vendor_invoices
-
-CLINICIAN REPORTS
-
-"highest hours for clinicians" → clinician_hours_ranking
-
-"monthly hours for clinicians" → clinician_monthly_hours
-
-DISTRICT REPORTS
-
-"district-wide monthly spend" → district_monthly_spend
-
-"district-wide monthly hours" → district_monthly_hours
-
-"district YTD spend" → district_ytd_spend
-
-TOP INVOICES
-
-"highest invoices", "most expensive invoices", "top invoices", "biggest invoices", "highest cost invoices", or "top N invoices" →
-plan.kind="top_invoices"
-plan.metrics=["total_cost"]
-plan.group_by=["invoice"]
-
-COMPARISON REPORTS
-
-"compare X and Y" → comparison
-primary_entities=[X,Y]
-group_by=["month"]
-
-TREND REPORTS
-
-“increasing”, “decreasing”, “trend”, “over time” →
-needs_trend_detection=true
+    closing_prompt = """
 
 ===============================================================
 AMBIGUITY RULES (STRICT)
@@ -221,6 +182,8 @@ SCHOOL YEAR SQL RULES:
 ==============================================================
 END OF RULES
 """
+
+    return f"{base_prompt}{plan_kinds_json}{closing_prompt}"
 
 
 _TEMPLATES_DIR = Path(__file__).parent / "sql_templates"
@@ -300,7 +263,34 @@ def run_sql_planner_model(
 ) -> dict[str, Any]:
     """Execute the SQL planner model and return a semantic plan."""
 
-    vendor_intent_kinds = {"vendor_monthly_spend", "vendor_hours", "compare_vendors"}
+    inferred_plan_kind = None
+    try:
+        config = load_domain_config()
+        plan_kinds = config.get("plan_kinds", {}) if isinstance(config, dict) else {}
+        print("[DOMAIN-CONFIG-DEBUG][PLANNER] Loaded plan_kinds:", list(plan_kinds.keys()))
+        print("[DOMAIN-CONFIG-DEBUG][PLANNER] inferred_plan_kind:", inferred_plan_kind)
+        print("[DOMAIN-CONFIG-DEBUG][PLANNER] Example synonyms:", {
+            k: v.get("intent_synonyms", [])[:2] for k, v in list(plan_kinds.items())[:3]
+        })
+    except Exception:
+        plan_kinds = {}
+
+    query_lower = user_query.lower() if isinstance(user_query, str) else ""
+    if isinstance(plan_kinds, dict) and query_lower:
+        for plan_kind, plan_kind_config in plan_kinds.items():
+            synonyms = []
+            if isinstance(plan_kind_config, dict):
+                intent_synonyms = plan_kind_config.get("intent_synonyms")
+                if isinstance(intent_synonyms, list):
+                    synonyms = intent_synonyms
+
+            for synonym in synonyms:
+                if isinstance(synonym, str) and synonym.lower() in query_lower:
+                    inferred_plan_kind = plan_kind
+                    break
+
+            if inferred_plan_kind:
+                break
 
     messages = [
         {"role": "system", "content": system_prompt},
@@ -312,6 +302,7 @@ def run_sql_planner_model(
                     "normalized_intent": normalized_intent or {},
                     "entities": entities or {},
                     "context": user_context or {},
+                    "inferred_plan_kind": inferred_plan_kind,
                 }
             ),
         },
@@ -346,6 +337,18 @@ def run_sql_planner_model(
     plan = payload.get("plan")
     entities = entities or {}
     normalized_intent = normalized_intent or {}
+
+    plan_kind_value = plan.get("kind") if isinstance(plan, dict) else None
+    plan_kind_missing = not isinstance(plan_kind_value, str) or plan_kind_value == ""
+    plan_kind_in_config = isinstance(plan_kinds, dict) and isinstance(plan_kind_value, str) and plan_kind_value in plan_kinds
+
+    if inferred_plan_kind is not None:
+        if plan_kind_missing:
+            plan = plan if isinstance(plan, dict) else {}
+            plan["kind"] = inferred_plan_kind
+        elif not plan_kind_in_config:
+            plan = plan if isinstance(plan, dict) else {}
+            plan["kind"] = inferred_plan_kind
 
     time_period = (
         normalized_intent.get("time_period")
@@ -409,31 +412,18 @@ def run_sql_planner_model(
     payload["clarification_needed"] = clar_needed
     payload["requires_clarification"] = bool(clar_needed)
 
-    vendor_entities = (
-        entities.get("vendors")
-        if isinstance(entities.get("vendors"), list)
-        else []
-    )
-    student_entities = (
-        entities.get("students")
-        if isinstance(entities.get("students"), list)
-        else []
-    )
-
-    intent_value = normalized_intent.get("intent") if isinstance(normalized_intent, dict) else None
-    intent_vendor_scoped = bool(
-        isinstance(intent_value, str)
-        and intent_value in vendor_intent_kinds
-    )
-    intent_primary_entity_type = (
-        normalized_intent.get("primary_entity_type")
-        if isinstance(normalized_intent, dict)
-        else None
-    )
-    normalized_vendor_scope = intent_vendor_scoped or intent_primary_entity_type == "vendor"
-    vendor_filter_allowed = normalized_vendor_scope and bool(vendor_entities)
-
     if isinstance(plan, dict):
+        vendor_entities = (
+            entities.get("vendors")
+            if isinstance(entities.get("vendors"), list)
+            else []
+        )
+        student_entities = (
+            entities.get("students")
+            if isinstance(entities.get("students"), list)
+            else []
+        )
+
         time_range = (
             normalized_intent.get("time_range")
             if isinstance(normalized_intent, dict)
@@ -458,18 +448,8 @@ def run_sql_planner_model(
 
         primary_entity_type = plan.get("primary_entity_type")
 
-        if vendor_filter_allowed:
-            plan["primary_entity_type"] = "vendor"
+        if primary_entity_type == "vendor":
             plan["primary_entities"] = list(vendor_entities)
-
-        # If vendor filtering is not allowed, strip any vendor scope.
-        if not vendor_filter_allowed and primary_entity_type == "vendor":
-            if student_entities:
-                plan["primary_entity_type"] = "student"
-                plan["primary_entities"] = list(student_entities)
-            else:
-                plan["primary_entity_type"] = None
-                plan["primary_entities"] = []
 
         if plan.get("primary_entity_type") == "student":
             plan["primary_entities"] = [
@@ -482,7 +462,7 @@ def run_sql_planner_model(
             for vendor_key in ("vendor_name", "vendor", "vendors"):
                 plan.pop(vendor_key, None)
 
-        if not vendor_filter_allowed:
+        if plan.get("primary_entity_type") != "vendor":
             for vendor_key in ("vendor_name", "vendor", "vendors"):
                 plan.pop(vendor_key, None)
 

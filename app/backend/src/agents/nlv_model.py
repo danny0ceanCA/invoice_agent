@@ -8,12 +8,40 @@ from typing import Any
 from datetime import date
 
 from openai import OpenAI
+from .domain_config_loader import load_domain_config
 
 
 def build_nlv_system_prompt() -> str:
     """System prompt for the NLV model that normalizes raw queries."""
 
-    return """
+    config = load_domain_config()
+
+    entities = config.get("entities", {}).get("types", {})
+    metrics = config.get("metrics", {})
+    analytics_kinds = config.get("analytics_kinds", {})
+    plan_kinds = config.get("plan_kinds", {})
+    time_windows = config.get("time_windows", {})
+
+    print("[DOMAIN-CONFIG-DEBUG][NLV] Loaded domain_config.json")
+    print("[DOMAIN-CONFIG-DEBUG][NLV] entities keys:", list(entities.keys()))
+    print("[DOMAIN-CONFIG-DEBUG][NLV] metrics keys:", list(metrics.keys()))
+    print("[DOMAIN-CONFIG-DEBUG][NLV] plan_kinds keys:", list(plan_kinds.keys()))
+    print("[DOMAIN-CONFIG-DEBUG][NLV] time_windows keys:", list(time_windows.keys()))
+
+    domain_snippet = (
+        "DOMAIN CONFIGURATION (read-only)\n"
+        f"ENTITIES: {json.dumps(entities, indent=2)}\n"
+        f"METRICS: {json.dumps(metrics, indent=2)}\n"
+        f"ANALYTICS_KINDS: {json.dumps(analytics_kinds, indent=2)}\n"
+        f"PLAN_KINDS: {json.dumps(plan_kinds, indent=2)}\n"
+        f"TIME_WINDOWS: {json.dumps(time_windows, indent=2)}\n"
+        "\n"
+        "Use this configuration to interpret entity types, metrics, "
+        "time windows, analytics kinds, and semantic plan kinds.\n"
+        "\n"
+    )
+
+    base_prompt = """
 You are the Natural Language Variability (NLV) stage for a district analytics agent.
 Your sole job is to interpret a raw user query and emit a structured intent JSON.
 
@@ -78,7 +106,7 @@ STRICT FORMATTING
 ====================================================================================
 🌟 CRITICAL: TODAY'S DATE CONTEXT (DO NOT REMOVE)
 ====================================================================================
-- You MUST anchor all relative time expressions using TODAY = {{TODAY}}  
+- You MUST anchor all relative time expressions using TODAY = {{TODAY}}
   (the backend will replace {{TODAY}} with an ISO date like 2025-12-01).
 
 - NEVER hallucinate or guess years. ALWAYS compute relative periods from TODAY.
@@ -100,9 +128,9 @@ SCHOOL YEAR NORMALIZATION — DEFINITIVE RULESET
         July 1 (N-1) → June 30 (N)
 
 • If the user gives an explicit school year:
-        "2025 school year" → school_year=2025  
-        start_date=2024-07-01  
-        end_date=2025-06-30  
+        "2025 school year" → school_year=2025
+        start_date=2024-07-01
+        end_date=2025-06-30
 
 • If TODAY ∈ [July 1 .. Dec 31]:
         school_year = year(TODAY) + 1
@@ -110,7 +138,7 @@ SCHOOL YEAR NORMALIZATION — DEFINITIVE RULESET
 • If TODAY ∈ [Jan 1 .. June 30]:
         school_year = year(TODAY)
 
-• “this school year”, “current school year”, “this SY”, “this year”  
+• “this school year”, “current school year”, “this SY”, “this year”
   MUST ALWAYS apply the above rule.
 
 • ALWAYS emit:
@@ -153,6 +181,8 @@ ABSOLUTE OUTPUT INSTRUCTIONS
 - All date fields MUST be ISO yyyy-mm-dd.
 - Replace {{TODAY}} before responding.
 """
+
+    return domain_snippet + base_prompt
 
 
 def _default_payload() -> dict[str, Any]:
