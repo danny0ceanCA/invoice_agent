@@ -557,6 +557,11 @@ class Workflow:
         )
         _record_stage_duration(context, "nlv_model", start_time)
 
+        LOGGER.info(
+            "nlv_normalized_intent",
+            normalized_intent=normalized_intent,
+        )
+
         known_entities = _load_district_entities(self.engine, context.district_key)
 
         start_time = perf_counter()
