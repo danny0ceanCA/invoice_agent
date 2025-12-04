@@ -263,8 +263,6 @@ def run_sql_planner_model(
 ) -> dict[str, Any]:
     """Execute the SQL planner model and return a semantic plan."""
 
-    vendor_intent_kinds = {"vendor_monthly_spend", "vendor_hours", "compare_vendors"}
-
     inferred_plan_kind = None
     try:
         config = load_domain_config()
@@ -335,6 +333,18 @@ def run_sql_planner_model(
     entities = entities or {}
     normalized_intent = normalized_intent or {}
 
+    plan_kind_value = plan.get("kind") if isinstance(plan, dict) else None
+    plan_kind_missing = not isinstance(plan_kind_value, str) or plan_kind_value == ""
+    plan_kind_in_config = isinstance(plan_kinds, dict) and isinstance(plan_kind_value, str) and plan_kind_value in plan_kinds
+
+    if inferred_plan_kind is not None:
+        if plan_kind_missing:
+            plan = plan if isinstance(plan, dict) else {}
+            plan["kind"] = inferred_plan_kind
+        elif not plan_kind_in_config:
+            plan = plan if isinstance(plan, dict) else {}
+            plan["kind"] = inferred_plan_kind
+
     time_period = (
         normalized_intent.get("time_period")
         if isinstance(normalized_intent, dict)
@@ -397,31 +407,18 @@ def run_sql_planner_model(
     payload["clarification_needed"] = clar_needed
     payload["requires_clarification"] = bool(clar_needed)
 
-    vendor_entities = (
-        entities.get("vendors")
-        if isinstance(entities.get("vendors"), list)
-        else []
-    )
-    student_entities = (
-        entities.get("students")
-        if isinstance(entities.get("students"), list)
-        else []
-    )
-
-    intent_value = normalized_intent.get("intent") if isinstance(normalized_intent, dict) else None
-    intent_vendor_scoped = bool(
-        isinstance(intent_value, str)
-        and intent_value in vendor_intent_kinds
-    )
-    intent_primary_entity_type = (
-        normalized_intent.get("primary_entity_type")
-        if isinstance(normalized_intent, dict)
-        else None
-    )
-    normalized_vendor_scope = intent_vendor_scoped or intent_primary_entity_type == "vendor"
-    vendor_filter_allowed = normalized_vendor_scope and bool(vendor_entities)
-
     if isinstance(plan, dict):
+        vendor_entities = (
+            entities.get("vendors")
+            if isinstance(entities.get("vendors"), list)
+            else []
+        )
+        student_entities = (
+            entities.get("students")
+            if isinstance(entities.get("students"), list)
+            else []
+        )
+
         time_range = (
             normalized_intent.get("time_range")
             if isinstance(normalized_intent, dict)
@@ -446,18 +443,8 @@ def run_sql_planner_model(
 
         primary_entity_type = plan.get("primary_entity_type")
 
-        if vendor_filter_allowed:
-            plan["primary_entity_type"] = "vendor"
+        if primary_entity_type == "vendor":
             plan["primary_entities"] = list(vendor_entities)
-
-        # If vendor filtering is not allowed, strip any vendor scope.
-        if not vendor_filter_allowed and primary_entity_type == "vendor":
-            if student_entities:
-                plan["primary_entity_type"] = "student"
-                plan["primary_entities"] = list(student_entities)
-            else:
-                plan["primary_entity_type"] = None
-                plan["primary_entities"] = []
 
         if plan.get("primary_entity_type") == "student":
             plan["primary_entities"] = [
@@ -470,7 +457,7 @@ def run_sql_planner_model(
             for vendor_key in ("vendor_name", "vendor", "vendors"):
                 plan.pop(vendor_key, None)
 
-        if not vendor_filter_allowed:
+        if plan.get("primary_entity_type") != "vendor":
             for vendor_key in ("vendor_name", "vendor", "vendors"):
                 plan.pop(vendor_key, None)
 
