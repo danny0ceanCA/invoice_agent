@@ -9,11 +9,17 @@ from typing import Any, Mapping
 from openai import OpenAI
 from jinja2 import Environment, FileSystemLoader
 
+from .domain_config_loader import load_domain_config
+
 
 def build_sql_planner_system_prompt() -> str:
     """System prompt for the SQL planner stage."""
 
-    return """
+    config = load_domain_config()
+    plan_kinds = config.get("plan_kinds", {}) if isinstance(config, dict) else {}
+    plan_kinds_json = json.dumps(plan_kinds, indent=2)
+
+    base_prompt = """
 You are the SQL Planning Model for the CareSpend / SCUSD District Analytics Agent.
 
 Your role is SEMANTIC PLANNING ONLY.
@@ -120,57 +126,12 @@ PROVIDER / CLINICIAN NORMALIZATION
 ===============================================================
 MAPPING NATURAL LANGUAGE → PLAN KIND
 
-STUDENT REPORTS
+Use the provided PLAN_KINDS configuration to interpret the user's analytic intent. plan_kinds defines semantic categories, synonyms, and expected entity roles.
 
-"monthly spend for <student>" → student_monthly_spend
+PLAN_KINDS:
+"""
 
-"monthly hours for <student>" → student_monthly_hours
-
-"YTD spend for <student>" → student_ytd_spend
-
-"YTD hours for <student>" → student_ytd_hours
-
-"all invoices for <student>" → student_invoices
-
-VENDOR REPORTS
-
-"monthly spend for <vendor>" → vendor_monthly_spend
-
-"YTD spend for <vendor>" → vendor_ytd_spend
-
-"invoices for <vendor>" → vendor_invoices
-
-CLINICIAN REPORTS
-
-"highest hours for clinicians" → clinician_hours_ranking
-
-"monthly hours for clinicians" → clinician_monthly_hours
-
-DISTRICT REPORTS
-
-"district-wide monthly spend" → district_monthly_spend
-
-"district-wide monthly hours" → district_monthly_hours
-
-"district YTD spend" → district_ytd_spend
-
-TOP INVOICES
-
-"highest invoices", "most expensive invoices", "top invoices", "biggest invoices", "highest cost invoices", or "top N invoices" →
-plan.kind="top_invoices"
-plan.metrics=["total_cost"]
-plan.group_by=["invoice"]
-
-COMPARISON REPORTS
-
-"compare X and Y" → comparison
-primary_entities=[X,Y]
-group_by=["month"]
-
-TREND REPORTS
-
-“increasing”, “decreasing”, “trend”, “over time” →
-needs_trend_detection=true
+    closing_prompt = """
 
 ===============================================================
 AMBIGUITY RULES (STRICT)
@@ -221,6 +182,8 @@ SCHOOL YEAR SQL RULES:
 ==============================================================
 END OF RULES
 """
+
+    return f"{base_prompt}{plan_kinds_json}{closing_prompt}"
 
 
 _TEMPLATES_DIR = Path(__file__).parent / "sql_templates"
@@ -302,6 +265,30 @@ def run_sql_planner_model(
 
     vendor_intent_kinds = {"vendor_monthly_spend", "vendor_hours", "compare_vendors"}
 
+    inferred_plan_kind = None
+    try:
+        config = load_domain_config()
+        plan_kinds = config.get("plan_kinds", {}) if isinstance(config, dict) else {}
+    except Exception:
+        plan_kinds = {}
+
+    query_lower = user_query.lower() if isinstance(user_query, str) else ""
+    if isinstance(plan_kinds, dict) and query_lower:
+        for plan_kind, plan_kind_config in plan_kinds.items():
+            synonyms = []
+            if isinstance(plan_kind_config, dict):
+                intent_synonyms = plan_kind_config.get("intent_synonyms")
+                if isinstance(intent_synonyms, list):
+                    synonyms = intent_synonyms
+
+            for synonym in synonyms:
+                if isinstance(synonym, str) and synonym.lower() in query_lower:
+                    inferred_plan_kind = plan_kind
+                    break
+
+            if inferred_plan_kind:
+                break
+
     messages = [
         {"role": "system", "content": system_prompt},
         {
@@ -312,6 +299,7 @@ def run_sql_planner_model(
                     "normalized_intent": normalized_intent or {},
                     "entities": entities or {},
                     "context": user_context or {},
+                    "inferred_plan_kind": inferred_plan_kind,
                 }
             ),
         },
