@@ -267,6 +267,11 @@ def run_sql_planner_model(
     try:
         config = load_domain_config()
         plan_kinds = config.get("plan_kinds", {}) if isinstance(config, dict) else {}
+        print("[DOMAIN-CONFIG-DEBUG][PLANNER] Loaded plan_kinds:", list(plan_kinds.keys()))
+        print("[DOMAIN-CONFIG-DEBUG][PLANNER] inferred_plan_kind:", inferred_plan_kind)
+        print("[DOMAIN-CONFIG-DEBUG][PLANNER] Example synonyms:", {
+            k: v.get("intent_synonyms", [])[:2] for k, v in list(plan_kinds.items())[:3]
+        })
     except Exception:
         plan_kinds = {}
 
