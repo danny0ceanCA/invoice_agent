@@ -1,0 +1,62 @@
+{"id":"0001","question":"Show monthly spend for Addison Johnson."}
+{"id":"0002","question":"Show monthly hours for Addison Johnson."}
+{"id":"0003","question":"Show year-to-date spend for Addison Perez."}
+{"id":"0004","question":"Show year-to-date hours for Addison Perez."}
+{"id":"0005","question":"Which students have the highest total spend this school year?"}
+{"id":"0006","question":"Which students have the highest total hours this school year?"}
+{"id":"0007","question":"Show students with increased hours compared to last month."}
+{"id":"0008","question":"Show students with decreased hours compared to last month."}
+{"id":"0009","question":"Which students started receiving services this school year?"}
+{"id":"0010","question":"Which students stopped receiving services this school year?"}
+{"id":"0011","question":"Show total spend for all students by month."}
+{"id":"0012","question":"Show total hours for all students by month."}
+{"id":"0013","question":"Compare Addison Johnson and Alexander Brown by monthly spend."}
+{"id":"0014","question":"Compare Addison Johnson and Alexander Brown by monthly hours."}
+{"id":"0015","question":"Show all invoices for Alexander Jones."}
+{"id":"0016","question":"Show services delivered to Alexander Thomas over a date range."}
+
+{"id":"0017","question":"Show monthly spend for Action Supportive Care."}
+{"id":"0018","question":"Show monthly hours for Action Supportive Care."}
+{"id":"0019","question":"Show year-to-date spend for Action Supportive Care."}
+{"id":"0020","question":"Which vendors have the highest total spend this school year?"}
+{"id":"0021","question":"Which vendors have the highest total hours this school year?"}
+{"id":"0022","question":"Compare Action Supportive Care and SCUSD Accounts Payable by monthly spend."}
+{"id":"0023","question":"Compare Action Supportive Care and SCUSD Accounts Payable by monthly hours."}
+{"id":"0024","question":"Show vendors with increasing spend over the last three months."}
+{"id":"0025","question":"Show vendors with decreasing spend over the last three months."}
+{"id":"0026","question":"Show all invoices for Action Supportive Care."}
+{"id":"0027","question":"Show services provided by Action Supportive Care over a date range."}
+{"id":"0028","question":"Which vendors are serving the most students?"}
+{"id":"0029","question":"Which vendors are providing the most hours?"}
+
+{"id":"0030","question":"Show monthly hours for Addison Price."}
+{"id":"0031","question":"Show monthly cost for Addison Price."}
+{"id":"0032","question":"Show year-to-date hours for Aiden Jenkins."}
+{"id":"0033","question":"Show year-to-date cost for Aiden Jenkins."}
+{"id":"0034","question":"Which clinicians have the highest total hours this school year?"}
+{"id":"0035","question":"Which clinicians have the highest total cost this school year?"}
+{"id":"0036","question":"Show hours by clinician type for this school year."}
+{"id":"0037","question":"Show cost by clinician type for this school year."}
+{"id":"0038","question":"Compare clinician types by monthly hours."}
+{"id":"0039","question":"Compare clinician types by monthly cost."}
+{"id":"0040","question":"Compare Amelia Sanders and Aubrey Garcia by monthly hours."}
+{"id":"0041","question":"Compare Amelia Sanders and Aubrey Garcia by monthly cost."}
+{"id":"0042","question":"Show clinicians with increasing hours over the last three months."}
+{"id":"0043","question":"Show clinicians with decreasing hours over the last three months."}
+{"id":"0044","question":"Show all services delivered by Amelia Sanders over a date range."}
+
+{"id":"0045","question":"Show total district spend by month for this school year."}
+{"id":"0046","question":"Show total district hours by month for this school year."}
+{"id":"0047","question":"Show year-to-date district spend."}
+{"id":"0048","question":"Show year-to-date district hours."}
+{"id":"0049","question":"Show district spend trend over the school year."}
+{"id":"0050","question":"Show district hours trend over the school year."}
+{"id":"0051","question":"Which month had the highest district spend this school year?"}
+{"id":"0052","question":"Which month had the lowest district spend this school year?"}
+{"id":"0053","question":"What is the district's average monthly spend this school year?"}
+{"id":"0054","question":"What is the district's average monthly hours this school year?"}
+{"id":"0055","question":"Compare district spend for july and august."}
+{"id":"0056","question":"Compare district hours for july and august."}
+{"id":"0057","question":"Show total district spend for september."}
+{"id":"0058","question":"Show total district hours for october."}
+{"id":"0059","question":"Show district spend since the start of the 2025 school year."}

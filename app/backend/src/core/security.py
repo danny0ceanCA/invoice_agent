@@ -210,7 +210,13 @@ def _resolve_user(session: Session, payload: dict[str, Any]) -> User:
         return user
 
     # Lookup by email (with namespaced support)
-    email = payload.get("email") or payload.get("https://invoice-api/email")
+    # Extract email from Auth0 namespaced or standard claims
+    email = (
+            payload.get("email")
+            or payload.get("https://invoice-api/email")
+            or payload.get("https://invoice-api//email")
+            or payload.get("https://invoice-api/email/")
+    )
 
     if email:
         user = session.query(User).filter(User.email == email).one_or_none()

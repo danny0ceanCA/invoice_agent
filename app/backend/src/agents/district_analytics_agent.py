@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import json
 import re
+import json
 from dataclasses import dataclass, field
 from html import escape
+from time import perf_counter
 from typing import Any, Mapping, Sequence
 
 import structlog
@@ -18,86 +19,26 @@ from app.backend.src.core.config import get_settings
 from app.backend.src.core.memory import ConversationMemory, RedisConversationMemory
 from app.backend.src.db import get_engine
 from app.backend.src.services.s3 import get_s3_client
+from multi_turn_model import MultiTurnConversationManager
+from .business_rule_model import build_business_rule_system_prompt, run_business_rule_model
+from .entity_resolution_model import (
+    build_entity_resolution_system_prompt,
+    run_entity_resolution_model,
+)
+from .insight_model import build_insight_system_prompt, run_insight_model
+from .ir import AnalyticsEntities, AnalyticsIR, _coerce_rows, _payload_to_ir
+from .logic_model import build_logic_system_prompt, run_logic_model
+from .nlv_model import build_nlv_system_prompt, run_nlv_model
+from .rendering_model import build_rendering_system_prompt, run_rendering_model
+from .sql_router import build_sql_router_system_prompt, run_sql_router_model
+from .sql_planner_model import build_sql_planner_system_prompt, run_sql_planner_model
+from .validator_model import build_validator_system_prompt, run_validator_model
 
 LOGGER = structlog.get_logger(__name__)
 
-DEFAULT_MODEL = "gpt-4.1-mini-2025-04-14"
+DEFAULT_MODEL = "gpt-4.1-mini"  # used for all supporting models
+LOGIC_MODEL = "gpt-5.1"  # only for logic_model
 MAX_ITERATIONS = 8
-
-DB_SCHEMA_HINT = """
-You are querying a SQLite database for a school district invoice system.
-
-### invoices
-- id INTEGER PRIMARY KEY
-- vendor_id INTEGER NOT NULL
-- upload_id INTEGER
-- student_name VARCHAR(255)
-- invoice_number VARCHAR(128)
-- invoice_code VARCHAR(64)
-- service_month VARCHAR(32)
-- invoice_date DATETIME
-- total_hours FLOAT
-- total_cost FLOAT                      -- THIS is the invoice money amount
-- status VARCHAR(50)
-- pdf_s3_key VARCHAR(512)
-- district_key VARCHAR(64)              -- tenancy boundary: which district owns the invoice
-- created_at DATETIME
-
-### vendors
-- id INTEGER PRIMARY KEY
-- name VARCHAR(255)
-- contact_email VARCHAR(255)
-- district_key VARCHAR(64)              -- used by vendors to register access to a district
-
-### invoice_line_items
-- id INTEGER PRIMARY KEY
-- invoice_id INTEGER NOT NULL
-- student VARCHAR(255)
-- clinician VARCHAR(255)
-- service_code VARCHAR(50)
-- hours FLOAT
-- rate FLOAT
-- cost FLOAT                            -- line-item amount
-- service_date VARCHAR(32)
-
-Important invariants:
-- Every invoice row belongs to exactly one district via invoices.district_key.
-- Multiple vendors may share the same district_key to submit invoices to that district.
-- Vendors may hold multiple district_keys (serve multiple districts).
-- There is NO column called amount_due, invoice_total, balance_due, due_amount, invoice_amount, etc.
-- The ONLY correct invoice money field is invoices.total_cost.
-
-When building SQL, the model MUST prioritise queries that:
-- Use invoices.district_key = :district_key for tenant scoping.
-- Use invoices.student_name for student lookups.
-- Join vendors only when searching by vendor name.
-- Treat service_month as free-form TEXT (e.g. "November", "December").
-- Extract years or month numbers using strftime on invoice_date.
-
-Example: Student search
-
-SELECT invoice_number, student_name, total_cost
-FROM invoices
-WHERE invoices.district_key = :district_key
-  AND LOWER(student_name) LIKE '%' || LOWER(:student_query) || '%';
-
-Example: Vendor name search (without schema change)
-
-SELECT i.invoice_number, i.student_name, i.total_cost
-FROM invoices i
-JOIN vendors v ON v.id = i.vendor_id
-WHERE i.district_key = :district_key
-  AND LOWER(v.name) LIKE '%' || LOWER(:vendor_query) || '%';
-
-Example: Month/year query using invoice_date
-
-SELECT COUNT(*) AS invoice_count
-FROM invoices
-WHERE invoices.district_key = :district_key
-  AND strftime('%Y', invoice_date) = '2025'
-  AND LOWER(service_month) = LOWER('November');
-"""
-
 
 class AgentResponse(BaseModel):
     """Standardised response payload returned to the caller."""
@@ -105,9 +46,16 @@ class AgentResponse(BaseModel):
     text: str
     html: str
     rows: list[dict[str, Any]] | None = None
+    timings: dict[str, Any] | None = None
+    class Config:
+        extra = "allow"
 
 
-def normalize_sql_for_postgres(sql: str) -> str:
+
+def normalize_sql_for_postgres(sql: str, engine=None) -> str:
+    # LOCAL TESTING MODE — do not rewrite strftime() to EXTRACT()
+    return sql
+
     """
     Normalize analytics SQL that may contain SQLite-specific functions so it
     runs cleanly on PostgreSQL.
@@ -151,6 +99,9 @@ class AgentContext:
     last_error: str | None = None
     session_id: str | None = None
     memory: ConversationMemory | None = None
+    last_sql: str | None = None
+    timings: dict[str, float] = field(default_factory=dict)
+    started_at: float = field(default_factory=perf_counter)
 
     @property
     def district_id(self) -> int | None:
@@ -196,6 +147,89 @@ class Tool:
         return self.handler(context, arguments)
 
 
+def _record_stage_duration(context: AgentContext, stage: str, start_time: float) -> None:
+    """Track the elapsed time for an individual model stage."""
+
+    try:
+        elapsed = perf_counter() - start_time
+    except Exception:  # pragma: no cover - defensive
+        return
+
+    previous = context.timings.get(stage, 0.0)
+    context.timings[stage] = previous + elapsed
+
+
+def _build_timing_summary(context: AgentContext) -> dict[str, Any] | None:
+    """Summarise total runtime and per-stage durations for the response payload."""
+
+    if not context.started_at:
+        return None
+
+    total_elapsed = perf_counter() - context.started_at
+    summary: dict[str, Any] = {"total_seconds": round(total_elapsed, 3)}
+
+    if context.timings:
+        summary["stages"] = {
+            name: round(duration, 3) for name, duration in context.timings.items()
+        }
+
+    return summary
+
+
+# ----------------------------------------------------------------------
+# CLEAN, SINGLE DEFINITION — list-intent detection
+# ----------------------------------------------------------------------
+def _is_list_intent(query: str) -> bool:
+    """
+    Detect whether the user is explicitly asking for a list of students,
+    vendors, clinicians, or any general listing-style request.
+    """
+    text = (query or "").lower().strip()
+    if not text:
+        return False
+
+    direct_phrases = [
+        "student list",
+        "list students",
+        "list of students",
+        "list the students",
+        "show students",
+        "show me the student list",
+        "give me the student list",
+        "give me list of students",
+        "students list",
+        "list all students",
+        "show all students",
+    ]
+    if any(phrase in text for phrase in direct_phrases):
+        return True
+
+    # Generic "list of ..." patterns
+    if re.search(r"\blist\s+of\s+students\b", text):
+        return True
+
+    # Other entity types (optional expansion):
+    if "list vendors" in text or "list clinicians" in text:
+        return True
+
+    # Final fallback
+    return False
+
+
+# ----------------------------------------------------------------------
+# FIX: clean helper for name extraction (tolerant of punctuation)
+# ----------------------------------------------------------------------
+def _extract_name_after_for(text: str) -> str | None:
+    """
+    Extract a student name after 'for ...' patterns.
+    Strips punctuation like '?', '!', ','.
+    """
+    m = re.search(r"\bfor\s+([A-Za-z]+(?:\s+[A-Za-z]+)+)", text, flags=re.IGNORECASE)
+    if not m:
+        return None
+    return m.group(1).strip().rstrip(".,?!")
+
+
 def _extract_active_filters_from_history(history: list[dict[str, str]]) -> dict[str, str]:
     """
     Inspect assistant messages in Redis-backed history and extract the last
@@ -208,6 +242,28 @@ def _extract_active_filters_from_history(history: list[dict[str, str]]) -> dict[
     active: dict[str, str] = {}
     if not history:
         return active
+
+    # ------------------------------------------------------------------
+    # FIX: If ANY prior user message (not just last) was list-intent,
+    #      CLEAR the sticky filter permanently.
+    # ------------------------------------------------------------------
+    for message in reversed(history):
+        if message.get("role") != "user":
+            continue
+        content = (message.get("content") or "").strip()
+        if _is_list_intent(content):
+            return {}
+
+    # ------------------------------------------------------------------
+    # FIX: If user ever explicitly named a new student recently,
+    #      this overrides any old sticky filter.
+    # ------------------------------------------------------------------
+    for message in reversed(history):
+        if message.get("role") != "user":
+            continue
+        name = _extract_name_after_for(message.get("content") or "")
+        if name:
+            return {}  # explicit name overrides sticky filter
 
     # Walk history from newest to oldest, looking for assistant messages
     # with an ACTIVE_STUDENT_FILTER tag.
@@ -247,14 +303,11 @@ def _extract_active_filters_from_history(history: list[dict[str, str]]) -> dict[
             #   "monthly spend for avery smith"
             #   "give me invoice details for July for Carter Sanchez"
             #
-            # This regex captures one or more words after "for ".
-            m = re.search(r"\bfor\s+([A-Za-z]+(?:\s+[A-Za-z]+)+)", content, flags=re.IGNORECASE)
-            if m:
-                name = m.group(1).strip()
-                if name:
-                    # Use the raw name; SQL already uses LOWER() for matching.
-                    active["student"] = name
-                    return active
+            name = _extract_name_after_for(content)
+            if name:
+                # Use the raw name; SQL already uses LOWER() for matching.
+                active["student"] = name
+                return active
 
     return active
 
@@ -265,33 +318,43 @@ def _maybe_apply_active_student_filter(raw_query: str, active_filters: dict[str,
     and the current query does NOT explicitly change scope, rewrite the query text to
     include that student so the model receives an explicit filter.
     """
+    # Hard skip: if list intent, never rewrite
+    if _is_list_intent(raw_query):
+        return raw_query
+
     active_student = (active_filters.get("student") or "").strip()
     if not active_student:
         return raw_query
 
     q_lower = raw_query.lower()
 
-    # If the user explicitly asks for "all students" / "entire district" / similar,
-    # do NOT apply the sticky filter.
-    if "all students" in q_lower or "entire district" in q_lower or "district" in q_lower:
+    # Skip for district, global, vendor, clinician scopes
+    district_scope_terms = ["all students", "entire district", "district", "district-wide"]
+    provider_terms = ["vendor", "vendors", "clinician", "clinicians", "provider", "providers"]
+
+    if any(term in q_lower for term in district_scope_terms):
+        return raw_query
+    if any(term in q_lower for term in provider_terms):
         return raw_query
 
-    # If the query already explicitly mentions this student, don't modify it.
-    if active_student.lower() in q_lower:
+    # If query explicitly names a student, DO NOT override
+    explicit_name = _extract_name_after_for(raw_query)
+    if explicit_name:
+        return raw_query
+    if "for student" in q_lower or "student " in q_lower:
         return raw_query
 
-    # Only apply the sticky filter for queries that look like detail/summary follow-ups.
-    trigger_phrases = [
-        "invoice detail",
-        "invoice details",
-        "monthly spend",
-        "monthly summary",
-        "invoice totals",
-        "invoice summary",
-        "details for",
-        "invoice info",
-        "only show me",
-        "only for",
+    analytics_keywords = [
+        "invoice",
+        "spend",
+        "summary",
+        "total",
+        "totals",
+        "hours",
+        "billed",
+        "billing",
+        "cost",
+        "charges",
     ]
     month_words = [
         "january",
@@ -307,18 +370,37 @@ def _maybe_apply_active_student_filter(raw_query: str, active_filters: dict[str,
         "november",
         "december",
     ]
-    has_month = any(m in q_lower for m in month_words)
 
-    if not any(p in q_lower for p in trigger_phrases) and not has_month:
+    has_analytics_signal = any(k in q_lower for k in analytics_keywords) or any(
+        m in q_lower for m in month_words
+    )
+
+    # If the query does not look like an analytics follow-up, avoid rewriting it.
+    if not has_analytics_signal:
         return raw_query
 
-    # If the user already wrote a "for student ..." pattern, don't overwrite it.
-    if "for student" in q_lower:
+    follow_up_markers = [
+        "now",
+        "also",
+        "again",
+        "too",
+        "as well",
+        "another",
+        "next",
+        "what about",
+        "how about",
+        "then",
+        "same",
+        "continue",
+    ]
+    has_follow_up_marker = any(marker in q_lower for marker in follow_up_markers)
+    if not has_follow_up_marker:
         return raw_query
 
-    # Rewrite by appending an explicit student clause in natural language.
-    # Example: "give me invoice details for September"
-    # becomes: "give me invoice details for September for student Chloe Taylor"
+    # Avoid narrowing queries that reference multiple students.
+    if "students" in q_lower:
+        return raw_query
+
     rewritten_query = raw_query.rstrip() + f" for student {active_student}"
     LOGGER.debug(
         "sticky_student_filter_applied",
@@ -329,19 +411,105 @@ def _maybe_apply_active_student_filter(raw_query: str, active_filters: dict[str,
     return rewritten_query
 
 
+def _load_district_entities(engine: Engine, district_key: str | None) -> dict[str, list[str]]:
+    """Load district-scoped entities for students, vendors, and clinicians."""
+
+    empty_entities: dict[str, list[str]] = {"students": [], "vendors": [], "clinicians": []}
+    if not district_key:
+        return empty_entities
+
+    try:
+        with engine.connect() as conn:
+            students = [
+                row.student_name
+                for row in conn.execute(
+                    sql_text(
+                        """
+                        SELECT DISTINCT student_name
+                        FROM invoices
+                        WHERE district_key = :district_key
+                          AND student_name IS NOT NULL
+                        ORDER BY student_name;
+                        """
+                    ),
+                    {"district_key": district_key},
+                )
+            ]
+
+            vendors = [
+                row.name
+                for row in conn.execute(
+                    sql_text(
+                        """
+                        SELECT DISTINCT name
+                        FROM vendors
+                        WHERE district_key = :district_key
+                          AND name IS NOT NULL
+                        ORDER BY name;
+                        """
+                    ),
+                    {"district_key": district_key},
+                )
+            ]
+
+            clinicians = [
+                row.clinician
+                for row in conn.execute(
+                    sql_text(
+                        """
+                        SELECT DISTINCT ili.clinician
+                        FROM invoice_line_items ili
+                        JOIN invoices i ON i.id = ili.invoice_id
+                        WHERE i.district_key = :district_key
+                          AND ili.clinician IS NOT NULL
+                        ORDER BY ili.clinician;
+                        """
+                    ),
+                    {"district_key": district_key},
+                )
+            ]
+    except Exception as exc:  # pragma: no cover - defensive
+        LOGGER.warning("district_entity_load_failed", error=str(exc))
+        return empty_entities
+
+    return {
+        "students": list(students),
+        "vendors": list(vendors),
+        "clinicians": list(clinicians),
+    }
+
+
 class Workflow:
     """Coordinates model reasoning and tool usage."""
 
     def __init__(
         self,
-        system_prompt: str,
         *,
+        nlv_system_prompt: str,
+        entity_resolution_system_prompt: str,
+        sql_planner_system_prompt: str,
+        router_system_prompt: str,
+        logic_system_prompt: str,
+        rendering_system_prompt: str,
+        validator_system_prompt: str,
+        insight_system_prompt: str,
+        business_rule_system_prompt: str,
         max_iterations: int = MAX_ITERATIONS,
         memory: ConversationMemory | None = None,
+        engine: Engine | None = None,
     ) -> None:
-        self.system_prompt = system_prompt
+        self.nlv_system_prompt = nlv_system_prompt
+        self.entity_resolution_system_prompt = entity_resolution_system_prompt
+        self.sql_planner_system_prompt = sql_planner_system_prompt
+        self.router_system_prompt = router_system_prompt
+        self.logic_system_prompt = logic_system_prompt
+        self.rendering_system_prompt = rendering_system_prompt
+        self.validator_system_prompt = validator_system_prompt
+        self.insight_system_prompt = insight_system_prompt
+        self.business_rule_system_prompt = business_rule_system_prompt
         self.max_iterations = max_iterations
         self.memory = memory
+        self.engine = engine
 
     def execute(self, agent: "Agent", query: str, user_context: dict[str, Any]) -> AgentResponse:
         session_id = _build_session_id(user_context)
@@ -355,14 +523,276 @@ class Workflow:
             except Exception as exc:  # pragma: no cover - defensive
                 LOGGER.warning("analytics_memory_load_failed", error=str(exc))
 
-        # Apply sticky student filter by inspecting history and, if we find an
-        # ACTIVE_STUDENT_FILTER tag, rewriting the incoming query so the model
-        # sees the student explicitly.
-        active_filters = _extract_active_filters_from_history(history)
-        if active_filters:
-            query = _maybe_apply_active_student_filter(query, active_filters)
+        # Multi-turn fusion: incorporate follow-up context into a fused query
+        multi_turn_state: dict[str, Any] | None = None
+        if agent.multi_turn_manager and session_id:
+            try:
+                fusion = agent.multi_turn_manager.process_user_message(session_id, query)
+                fused = fusion.get("fused_query")
+                if isinstance(fusion, Mapping):
+                    state = fusion.get("state")
+                    if isinstance(state, Mapping):
+                        multi_turn_state = dict(state)
+                if isinstance(fused, str) and fused.strip():
+                    query = fused.strip()
+                else:
+                    query = query.strip()
+            except Exception as exc:
+                LOGGER.warning("multi_turn_fusion_failed", error=str(exc))
+                query = query.strip()
 
-        messages: list[dict[str, Any]] = [{"role": "system", "content": self.system_prompt}]
+        # Sticky student filters are disabled in favor of multi-turn active_topic.
+        # active_filters = _extract_active_filters_from_history(history)
+        # if active_filters:
+        #     query = _maybe_apply_active_student_filter(query, active_filters)
+
+        start_time = perf_counter()
+        normalized_intent = run_nlv_model(
+            user_query=query,
+            user_context=context.user_context,
+            client=agent.client,
+            model=agent.nlv_model,
+            system_prompt=self.nlv_system_prompt,
+            temperature=agent.nlv_temperature,
+        )
+        _record_stage_duration(context, "nlv_model", start_time)
+
+        LOGGER.info(
+            "nlv_normalized_intent",
+            normalized_intent=normalized_intent,
+        )
+
+        known_entities = _load_district_entities(self.engine, context.district_key)
+
+        start_time = perf_counter()
+        entity_result = run_entity_resolution_model(
+            user_query=query,
+            normalized_intent=normalized_intent,
+            user_context=context.user_context,
+            known_entities=known_entities,
+            client=agent.client,
+            model=agent.entity_model,
+            system_prompt=self.entity_resolution_system_prompt,
+            temperature=agent.entity_temperature,
+        )
+        _record_stage_duration(context, "entity_resolution_model", start_time)
+
+        resolved_intent = entity_result.get("normalized_intent") or normalized_intent
+        resolved_entities = entity_result.get("entities") or {}
+
+        combined_requires_clarification = bool(
+            normalized_intent.get("requires_clarification")
+            or entity_result.get("requires_clarification")
+        )
+        combined_clarification = (
+            (normalized_intent.get("clarification_needed") or [])
+            + (entity_result.get("clarification_needed") or [])
+        )
+
+        if combined_requires_clarification:
+            missing = combined_clarification
+            note = (
+                "Missing info: " + ", ".join(missing)
+                if missing
+                else "Clarification required."
+            )
+            payload: dict[str, Any] = {"text": note, "rows": None}
+            if isinstance(resolved_entities, Mapping):
+                payload["entities"] = resolved_entities
+            logic_ir = _payload_to_ir(payload, context.last_rows)
+
+            start_time = perf_counter()
+            br_result = run_business_rule_model(
+                ir=logic_ir,
+                entities=resolved_entities,
+                plan=None,
+                client=agent.client,
+                model=agent.business_rule_model,
+                system_prompt=self.business_rule_system_prompt,
+                temperature=agent.business_rule_temperature,
+            )
+            _record_stage_duration(context, "business_rule_model", start_time)
+            br_ir_dict = br_result.get("ir") if isinstance(br_result.get("ir"), dict) else None
+            effective_ir = _payload_to_ir(br_ir_dict, context.last_rows) if br_ir_dict else logic_ir
+
+            start_time = perf_counter()
+            validator_result = run_validator_model(
+                ir=effective_ir,
+                client=agent.client,
+                model=agent.validator_model,
+                system_prompt=self.validator_system_prompt,
+                temperature=agent.validator_temperature,
+            )
+            _record_stage_duration(context, "validator_model", start_time)
+            is_valid = bool(validator_result.get("valid", True))
+
+            if not is_valid:
+                fallback_text = (
+                    "I’m having trouble safely interpreting this analytics request. "
+                    "Please rephrase or narrow your question."
+                )
+                safe_ir = AnalyticsIR(
+                    text=fallback_text,
+                    rows=None,
+                    html=None,
+                    entities=None,
+                )
+                start_time = perf_counter()
+                render_payload = run_rendering_model(
+                user_query=context.query,
+                ir=safe_ir,
+                insights=[],
+                client=agent.client,
+                model=agent.render_model,
+                system_prompt=self.rendering_system_prompt,
+                temperature=agent.render_temperature,
+                )
+                _record_stage_duration(context, "rendering_model", start_time)
+                return _finalise_response(render_payload, context)
+
+            start_time = perf_counter()
+            insight_result = run_insight_model(
+                ir=effective_ir,
+                client=agent.client,
+                model=agent.insight_model,
+                system_prompt=self.insight_system_prompt,
+                temperature=agent.insight_temperature,
+            )
+            _record_stage_duration(context, "insight_model", start_time)
+            insights = insight_result.get("insights") or []
+
+            start_time = perf_counter()
+            render_payload = run_rendering_model(
+                user_query=context.query,
+                ir=effective_ir,
+                insights=insights,
+                client=agent.client,
+                model=agent.render_model,
+                system_prompt=self.rendering_system_prompt,
+                temperature=agent.render_temperature,
+            )
+            _record_stage_duration(context, "rendering_model", start_time)
+            return _finalise_response(render_payload, context)
+
+        start_time = perf_counter()
+        sql_plan_result = run_sql_planner_model(
+            user_query=query,
+            normalized_intent=resolved_intent,
+            entities=resolved_entities,
+            user_context=context.user_context,
+            client=agent.client,
+            model=agent.sql_planner_model,
+            system_prompt=self.sql_planner_system_prompt,
+            temperature=agent.sql_planner_temperature,
+        )
+        _record_stage_duration(context, "sql_planner_model", start_time)
+
+        plan = sql_plan_result.get("plan")
+        plan_requires_clarification = bool(sql_plan_result.get("requires_clarification"))
+        plan_clarification_needed = sql_plan_result.get("clarification_needed") or []
+
+        if plan_requires_clarification:
+            missing = plan_clarification_needed
+            note = (
+                "Missing info: " + ", ".join(missing)
+                if missing
+                else "Clarification required."
+            )
+            payload = {"text": note, "rows": None}
+            if isinstance(resolved_entities, Mapping):
+                payload["entities"] = resolved_entities
+            logic_ir = _payload_to_ir(payload, context.last_rows)
+
+            start_time = perf_counter()
+            br_result = run_business_rule_model(
+                ir=logic_ir,
+                entities=resolved_entities,
+                plan=plan,
+                client=agent.client,
+                model=agent.business_rule_model,
+                system_prompt=self.business_rule_system_prompt,
+                temperature=agent.business_rule_temperature,
+            )
+            _record_stage_duration(context, "business_rule_model", start_time)
+            br_ir_dict = br_result.get("ir") if isinstance(br_result.get("ir"), dict) else None
+            effective_ir = _payload_to_ir(br_ir_dict, context.last_rows) if br_ir_dict else logic_ir
+
+            start_time = perf_counter()
+            validator_result = run_validator_model(
+                ir=effective_ir,
+                client=agent.client,
+                model=agent.validator_model,
+                system_prompt=self.validator_system_prompt,
+                temperature=agent.validator_temperature,
+            )
+            _record_stage_duration(context, "validator_model", start_time)
+            is_valid = bool(validator_result.get("valid", True))
+
+            if not is_valid:
+                fallback_text = (
+                    "I’m having trouble safely interpreting this analytics request. "
+                    "Please rephrase or narrow your question."
+                )
+                safe_ir = AnalyticsIR(
+                    text=fallback_text,
+                    rows=None,
+                    html=None,
+                    entities=None,
+                )
+                start_time = perf_counter()
+                render_payload = run_rendering_model(
+                user_query=context.query,
+                ir=safe_ir,
+                insights=[],
+                client=agent.client,
+                model=agent.render_model,
+                system_prompt=self.rendering_system_prompt,
+                temperature=agent.render_temperature,
+                )
+                _record_stage_duration(context, "rendering_model", start_time)
+                return _finalise_response(render_payload, context)
+
+            start_time = perf_counter()
+            insight_result = run_insight_model(
+                ir=effective_ir,
+                client=agent.client,
+                model=agent.insight_model,
+                system_prompt=self.insight_system_prompt,
+                temperature=agent.insight_temperature,
+            )
+            _record_stage_duration(context, "insight_model", start_time)
+            insights = insight_result.get("insights") or []
+
+            start_time = perf_counter()
+            render_payload = run_rendering_model(
+                user_query=context.query,
+                ir=effective_ir,
+                insights=insights,
+                client=agent.client,
+                model=agent.render_model,
+                system_prompt=self.rendering_system_prompt,
+                temperature=agent.render_temperature,
+            )
+            _record_stage_duration(context, "rendering_model", start_time)
+            return _finalise_response(render_payload, context)
+
+        start_time = perf_counter()
+        router_decision = run_sql_router_model(
+            user_query=query,
+            sql_plan=plan,
+            entities=resolved_entities,
+            normalized_intent=resolved_intent,
+            multi_turn_state=multi_turn_state,
+            client=agent.client,
+            model=agent.router_model,
+            system_prompt=self.router_system_prompt,
+            temperature=agent.router_temperature,
+        )
+        _record_stage_duration(context, "sql_router_model", start_time)
+
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": self.logic_system_prompt}
+        ]
 
         if history:
             messages.extend(history)
@@ -373,21 +803,14 @@ class Workflow:
                 "content": json.dumps(
                     {
                         "query": query,
+                        "normalized_intent": resolved_intent,
+                        "entities": resolved_entities,
+                        "sql_plan": plan,
                         "context": context.user_context,
                     }
                 ),
             }
         )
-
-        def _extract_student_name(user_query: str) -> str | None:
-            """Return a best-effort student name match from the query."""
-
-            import re
-
-            match = re.findall(r"[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+", user_query)
-            if match:
-                return match[0]
-            return None
 
         for iteration in range(self.max_iterations):
             LOGGER.debug("agent_iteration_start", iteration=iteration)
@@ -497,161 +920,16 @@ class Workflow:
 
                         return _finalise_response(payload, context)
 
-            if "student list" in normalized_query and "ytd" in normalized_query:
-                sql = """
-                SELECT DISTINCT student_name
-                FROM invoices
-                WHERE district_key = :district_key
-                  AND strftime('%Y', invoice_date) = strftime('%Y','now')
-                ORDER BY student_name
-                """
-
-                try:
-                    run_sql_tool = agent.lookup_tool("run_sql")
-                except RuntimeError:
-                    LOGGER.warning("run_sql_tool_unavailable_for_student_list", query=query)
-                else:
-                    try:
-                        rows = run_sql_tool.invoke(context, {"query": sql})
-                    except Exception as exc:  # pragma: no cover - defensive
-                        context.last_error = str(exc)
-                        payload = {
-                            "text": f"Failed to fetch YTD student list: {exc}",
-                            "rows": None,
-                            "html": None,
-                        }
-                    else:
-                        context.last_rows = rows
-                        if rows:
-                            text = f"Found {len(rows)} student{'' if len(rows) == 1 else 's'} for the current year."
-                        else:
-                            text = "No students found for the current year."
-                        payload = {"text": text, "rows": rows}
-
-                    return _finalise_response(payload, context)
-
-            student_list_phrases = [
-                "list of students",
-                "student list",
-                "students ytd",
-                "all students",
-                "students in our system",
-                "students by year",
-            ]
-
-            if any(phrase in normalized_query for phrase in student_list_phrases):
-                sql = """
-                SELECT DISTINCT student_name
-                FROM invoices
-                WHERE district_key = :district_key
-                ORDER BY student_name
-                """
-
-                try:
-                    run_sql_tool = agent.lookup_tool("run_sql")
-                except RuntimeError:
-                    LOGGER.warning(
-                        "run_sql_tool_unavailable_for_student_list", query=query
-                    )
-                else:
-                    try:
-                        rows = run_sql_tool.invoke(context, {"query": sql})
-                    except Exception as exc:  # pragma: no cover - defensive
-                        context.last_error = str(exc)
-                        payload = {
-                            "text": f"Failed to fetch student list: {exc}",
-                            "rows": None,
-                            "html": None,
-                        }
-                    else:
-                        context.last_rows = rows
-                        if rows:
-                            text = (
-                                f"Found {len(rows)} student{'' if len(rows) == 1 else 's'}"
-                            )
-                        else:
-                            text = "No students found."
-                        payload = {"text": text, "rows": rows}
-
-                    return _finalise_response(payload, context)
-
-            student_name = _extract_student_name(query)
-            if student_name and context.district_key:
-                # STUDENT-ONLY SHORTCUT:
-                # This shortcut is safe when the query is essentially just the student's
-                # name (e.g., "Avery Smith") and does NOT mention months or other filters.
-                # If the query mentions a month (e.g., "July") or the word "month", we
-                # skip the shortcut so the model can construct a full student+month query.
-                q_lower = query.lower()
-                month_words = [
-                    "january",
-                    "february",
-                    "march",
-                    "april",
-                    "may",
-                    "june",
-                    "july",
-                    "august",
-                    "september",
-                    "october",
-                    "november",
-                    "december",
-                ]
-                mentions_month = "month" in q_lower or any(m in q_lower for m in month_words)
-
-                if mentions_month:
-                    # Example: "Jayden Ramsey and the month is for July"
-                    # -> let the model + tools build:
-                    #    WHERE student_name LIKE '%jayden ramsey%'
-                    #      AND LOWER(service_month) = LOWER('july')
-                    # instead of returning all months.
-                    pass
-                else:
-                    safe_name = student_name.replace("'", "''")
-                    sql = (
-                        "SELECT invoice_number, student_name, total_cost, "
-                        "service_month, status "
-                        "FROM invoices "
-                        "WHERE invoices.district_key = :district_key "
-                        "AND LOWER(invoices.student_name) LIKE LOWER('%{name}%') "
-                        "ORDER BY invoice_date DESC, total_cost DESC;"
-                    ).format(name=safe_name)
-
-                    try:
-                        run_sql_tool = agent.lookup_tool("run_sql")
-                    except RuntimeError:
-                        LOGGER.warning("run_sql_tool_unavailable_for_student", query=query)
-                    else:
-                        try:
-                            rows = run_sql_tool.invoke(context, {"query": sql})
-                        except Exception as exc:  # pragma: no cover - defensive
-                            context.last_error = str(exc)
-                            payload = {
-                                "text": f"Failed to fetch invoices for {student_name}: {exc}",
-                                "rows": None,
-                                "html": None,
-                            }
-                        else:
-                            context.last_rows = rows
-                            if rows:
-                                text = (
-                                    f"Fetched {len(rows)} invoice"
-                                    f"{'s' if len(rows) != 1 else ''} for {student_name}."
-                                )
-                            else:
-                                text = f"No invoices found for {student_name}."
-                            payload = {"text": text, "rows": rows}
-
-                        return _finalise_response(payload, context)
-
-            completion = agent.client.chat.completions.create(
-                model=agent.model,
+            start_time = perf_counter()
+            message = run_logic_model(
+                agent.client,
+                model=agent.logic_model,
                 messages=messages,
                 tools=[tool.schema() for tool in agent.tools],
-                tool_choice="auto",
-                temperature=0.1,
+                temperature=agent.logic_temperature,
+                router_decision=router_decision.to_dict(),
             )
-            message = completion.choices[0].message
+            _record_stage_duration(context, "logic_model", start_time)
             tool_calls = message.tool_calls or []
             assistant_message: dict[str, Any] = {
                 "role": "assistant",
@@ -762,22 +1040,110 @@ class Workflow:
                 fallback_payload = {"text": text, "rows": context.last_rows, "html": None}
                 return _finalise_response(fallback_payload, context)
 
-            if isinstance(payload, Mapping):
-                return _finalise_response(payload, context)
+            logic_ir = _payload_to_ir(payload, context.last_rows)
 
-            if isinstance(payload, str):
-                fallback_payload = {"text": payload, "rows": context.last_rows, "html": None}
-                return _finalise_response(fallback_payload, context)
+            # ------------------------------------------------------------------
+            # ENFORCEMENT: INVOICE DETAILS ALWAYS RETURNS SQL DETAIL ROWS
+            # If router_decision.mode == "invoice_details", override IR.rows
+            # with the actual SQL result from the last run_sql tool call.
+            # This prevents the LLM from returning null/empty rows.
+            # ------------------------------------------------------------------
+            try:
+                # SAFELY determine router mode (dataclass or dict)
+                if router_decision:
+                    if hasattr(router_decision, "mode"):
+                        # RouterDecision dataclass
+                        mode = router_decision.mode
+                    elif isinstance(router_decision, dict):
+                        # dict fallback (older versions)
+                        mode = router_decision.get("mode")
+                    else:
+                        mode = None
+                else:
+                    mode = None
 
-            if isinstance(payload, list):
-                rows = _coerce_rows(payload)
-                if rows is not None:
-                    fallback_payload = {"text": "", "rows": rows, "html": None}
-                    return _finalise_response(fallback_payload, context)
+                if mode == "invoice_details":
+                    if context.last_rows:
+                        logic_ir.rows = context.last_rows
+                        logic_ir.text = logic_ir.text or ""  # Ensure text is non-null
+                        LOGGER.debug(
+                            "invoice_details_enforced_rows",
+                            row_count=len(context.last_rows)
+                        )
+                    else:
+                        LOGGER.debug(
+                            "invoice_details_no_rows_found",
+                            note="context.last_rows was empty"
+                        )
+            except Exception as exc:
+                LOGGER.warning("invoice_details_enforcement_failed", error=str(exc))
 
-            text = str(payload).strip()
-            fallback_payload = {"text": text, "rows": context.last_rows, "html": None}
-            return _finalise_response(fallback_payload, context)
+            br_result = run_business_rule_model(
+                ir=logic_ir,
+                entities=resolved_entities,
+                plan=plan,
+                client=agent.client,
+                model=agent.business_rule_model,
+                system_prompt=self.business_rule_system_prompt,
+                temperature=agent.business_rule_temperature,
+            )
+            br_ir_dict = br_result.get("ir") if isinstance(br_result.get("ir"), dict) else None
+            effective_ir = _payload_to_ir(br_ir_dict, context.last_rows) if br_ir_dict else logic_ir
+
+            validator_result = run_validator_model(
+                ir=effective_ir,
+                client=agent.client,
+                model=agent.validator_model,
+                system_prompt=self.validator_system_prompt,
+                temperature=agent.validator_temperature,
+            )
+            is_valid = bool(validator_result.get("valid", True))
+
+            if not is_valid:
+                fallback_text = (
+                    "I’m having trouble safely applying district rules to this analysis. "
+                    "Please rephrase or narrow your question."
+                )
+                safe_ir = AnalyticsIR(
+                    text=fallback_text,
+                    rows=None,
+                    html=None,
+                    entities=None,
+                )
+                render_payload = run_rendering_model(
+                user_query=context.query,
+                ir=safe_ir,
+                insights=[],
+                client=agent.client,
+                model=agent.render_model,
+                system_prompt=self.rendering_system_prompt,
+                temperature=agent.render_temperature,
+                )
+                return _finalise_response(render_payload, context)
+
+            start_time = perf_counter()
+            insight_result = run_insight_model(
+                ir=effective_ir,
+                client=agent.client,
+                model=agent.insight_model,
+                system_prompt=self.insight_system_prompt,
+                temperature=agent.insight_temperature,
+            )
+            _record_stage_duration(context, "insight_model", start_time)
+            insights = insight_result.get("insights") or []
+
+            start_time = perf_counter()
+            render_payload = run_rendering_model(
+                user_query=context.query,
+                ir=effective_ir,
+                insights=insights,
+                client=agent.client,
+                model=agent.render_model,
+                system_prompt=self.rendering_system_prompt,
+                temperature=agent.render_temperature,
+            )
+            _record_stage_duration(context, "rendering_model", start_time)
+            return _finalise_response(render_payload, context)
 
         raise RuntimeError("Agent workflow exceeded iteration limit.")
 
@@ -789,15 +1155,56 @@ class Agent:
         self,
         *,
         client: OpenAI,
-        model: str,
+        nlv_model: str,
+        entity_model: str,
+        sql_planner_model: str,
+        router_model: str,
+        logic_model: str,
+        render_model: str,
+        validator_model: str,
+        insight_model: str,
+        business_rule_model: str,
         workflow: Workflow,
         tools: Sequence[Tool],
+        nlv_temperature: float = 0.1,
+        entity_temperature: float = 0.1,
+        sql_planner_temperature: float = 0.1,
+        router_temperature: float = 0.1,
+        logic_temperature: float = 0.1,
+        render_temperature: float = 0.1,
+        validator_temperature: float = 0.1,
+        insight_temperature: float = 0.1,
+        business_rule_temperature: float = 0.1,
     ) -> None:
         self.client = client
-        self.model = model
+        self.nlv_model = nlv_model
+        self.entity_model = entity_model
+        self.sql_planner_model = sql_planner_model
+        self.router_model = router_model
+        self.logic_model = logic_model
+        self.render_model = render_model
+        self.validator_model = validator_model
+        self.insight_model = insight_model
+        self.business_rule_model = business_rule_model
+        self.nlv_temperature = nlv_temperature
+        self.entity_temperature = entity_temperature
+        self.sql_planner_temperature = sql_planner_temperature
+        self.router_temperature = router_temperature
+        self.logic_temperature = logic_temperature
+        self.render_temperature = render_temperature
+        self.validator_temperature = validator_temperature
+        self.insight_temperature = insight_temperature
+        self.business_rule_temperature = business_rule_temperature
         self.workflow = workflow
         self.tools = list(tools)
         self._tool_lookup = {tool.name: tool for tool in self.tools}
+        self.multi_turn_manager: MultiTurnConversationManager | None = None
+        try:
+            redis_client = getattr(self.workflow.memory, "client", None)
+            if redis_client:
+                self.multi_turn_manager = MultiTurnConversationManager(redis_client)
+        except Exception as exc:  # pragma: no cover - defensive
+            LOGGER.warning("multi_turn_manager_init_failed", error=str(exc))
 
     def lookup_tool(self, name: str) -> Tool:
         if name not in self._tool_lookup:
@@ -1106,12 +1513,6 @@ def _strip_sensitive_columns(rows: list[dict[str, Any]]) -> list[dict[str, Any]]
     return sanitized
 
 
-def _coerce_rows(candidate: Any) -> list[dict[str, Any]] | None:
-    if isinstance(candidate, list) and all(isinstance(item, Mapping) for item in candidate):
-        return [dict(item) for item in candidate]  # type: ignore[arg-type]
-    return None
-
-
 def _remember_interaction(context: AgentContext, response: AgentResponse) -> None:
     if not context.memory or not context.session_id:
         return
@@ -1241,9 +1642,28 @@ def _summarize_response(response: AgentResponse) -> str:
 
 
 def _build_session_id(user_context: Mapping[str, Any] | None) -> str | None:
+    """
+    Build a session_id for multi-turn memory.
+
+    NEW BEHAVIOR (Option A):
+    - If the frontend passes a `session_id` inside user_context,
+      we use that as the authoritative session key. This ensures
+      every browser page load starts a fresh conversation.
+
+    FALLBACK:
+    - If no session_id is supplied, fall back to the original
+      user_id + district_key method.
+    """
     if not user_context:
         return None
 
+    # Option A — Frontend-controlled session ID
+    if "session_id" in user_context and user_context["session_id"]:
+        sid = str(user_context["session_id"])
+        LOGGER.debug("session_id_from_frontend", session_id=sid)
+        return sid
+
+    # Fallback to old behavior
     parts: list[str] = []
     user_id = user_context.get("user_id")
     district_key = user_context.get("district_key")
@@ -1256,7 +1676,9 @@ def _build_session_id(user_context: Mapping[str, Any] | None) -> str | None:
     if not parts:
         return None
 
-    return "|".join(parts)
+    sid = "|".join(parts)
+    LOGGER.debug("session_id_fallback", session_id=sid)
+    return sid
 
 
 def _finalise_response(payload: Mapping[str, Any], context: AgentContext) -> AgentResponse:
@@ -1305,13 +1727,22 @@ def _finalise_response(payload: Mapping[str, Any], context: AgentContext) -> Age
     else:
         html = html_value or _safe_html(text_value)
 
+    timing_summary = _build_timing_summary(context)
+
     # If HTML exists, keep both: conversational text + visuals.
     # 'text' should be a short explanation, not a duplication of the table.
     if html:
-        response = AgentResponse(text=text_value or "", html=html, rows=rows)
+        response = AgentResponse(
+            text=text_value or "", html=html, rows=rows, timings=timing_summary
+        )
     else:
         # Otherwise return text-only version
-        response = AgentResponse(text=text_value or "", html=html, rows=rows)
+        response = AgentResponse(
+            text=text_value or "", html=html, rows=rows, timings=timing_summary
+        )
+
+    # ATTACH SQL (THIS IS THE IMPORTANT PART)
+    setattr(response, "debug_sql", context.last_sql)
 
     _remember_interaction(context, response)
     return response
@@ -1503,6 +1934,9 @@ def _build_run_sql_tool(engine: Engine) -> Tool:
             sql=normalized_sql,
             row_count=len(rows),
         )
+
+        context.last_sql = normalized_sql
+
         return rows
 
     return Tool(name="run_sql", description=description, input_schema=schema, handler=handler)
@@ -1565,530 +1999,6 @@ def _build_list_s3_tool() -> Tool:
     return Tool(name="list_s3", description=description, input_schema=schema, handler=handler)
 
 
-def _build_system_prompt() -> str:
-    memory_rules = (
-        "\n"
-        "MEMORY & CONTEXT RULES:\n"
-        "- You have access to conversation history loaded from Redis.\n"
-        "- Use this memory to interpret follow-up queries, pronouns, and references to 'these students', 'these invoices', 'these providers', 'same ones', etc.\n"
-        "- Treat the last returned row set (students, invoices, providers, vendors, months) as the active working set unless the user explicitly changes scope.\n"
-        "- When the user refers to 'these students', 'those invoices', or similar, you MUST restrict your SQL to the entities in the most recent relevant result set.\n"
-        "- If multiple prior results could match an ambiguous phrase, you must ask a clarifying question in plain English (inside the 'text' field) and NOT run SQL until the user clarifies.\n"
-        "\n"
-        "ACTIVE FILTER SCOPES (STUDENT & CLINICIAN):\n"
-        "- When the last result set clearly reflects a filter on one or more students (e.g., a table where all rows have the same student_name, such as 'Jack Garcia'),\n"
-        "  you MUST treat those students as the active student filter for subsequent queries.\n"
-        "- This means that follow-up questions that do not name a different student and do not say \"all students\" or \"entire district\" MUST remain scoped to the same student(s).\n"
-        "- Example:\n"
-        "    User: \"Give me monthly spend for Jack Garcia.\"\n"
-        "    Agent (SQL): SELECT LOWER(service_month) AS service_month, SUM(total_cost) AS total_cost\n"
-        "                 FROM invoices\n"
-        "                 WHERE LOWER(student_name) LIKE LOWER('%jack garcia%')\n"
-        "                 GROUP BY LOWER(service_month);\n"
-        "    User: \"Now give me invoice details for August.\"\n"
-        "    Agent (SQL): SELECT invoice_number, student_name, total_cost, service_month, invoice_date, status\n"
-        "                 FROM invoices\n"
-        "                 WHERE LOWER(student_name) LIKE LOWER('%jack garcia%')\n"
-        "                   AND LOWER(service_month) = LOWER('august')\n"
-        "                 ORDER BY invoice_date, invoice_number;\n"
-        "- In this example, the Jack Garcia filter MUST persist automatically into the August invoice-details query.\n"
-        "- Do NOT drop the student filter between queries unless the user explicitly changes scope (e.g., \"show all students\", \"for the district\", or names a different student).\n"
-        "\n"
-        "- Apply the same principle for clinician/provider filters when the user explicitly frames the query as provider-centric (e.g., 'monthly spend by clinician X').\n"
-        "- However, when a name can refer to both a student and a clinician, ALWAYS prefer student interpretation unless the user explicitly says 'clinician', 'provider', or similar.\n"
-        "\n"
-        "- If both an active student filter and an explicit new filter are present in the follow-up question, obey the explicit new filter.\n"
-        "- If the user wants to clear the active filter, they can say things like 'for all students', 'for the whole district', or 'ignore the previous filters'; in that case, do NOT apply the earlier student/clinician filter.\n"
-        "- When an ACTIVE_STUDENT_FILTER tag is present (for example 'Jack Garcia'), you MUST treat that full value as the canonical student name for SQL filters.\n"
-        "- While this active filter is in effect, you MUST use the full name pattern in SQL, e.g.:\n"
-        "    WHERE LOWER(invoices.student_name) LIKE LOWER('%jack garcia%')\n"
-        "  or\n"
-        "    WHERE LOWER(invoice_line_items.student) LIKE LOWER('%jack garcia%')\n"
-        "  and you MUST NOT broaden the filter to partial tokens such as '%jack%' or '%garcia%'.\n"
-        "- Follow-up questions that refer to 'Jack', 'this student', 'they', etc. MUST stay scoped to the same full-name active student, unless the user explicitly names a different student or asks for 'all students' / 'entire district'.\n"
-        "- If the user FIRST introduces a name in an ambiguous way (e.g., just 'Jack') and more than one student could match, you should NOT run SQL immediately; instead, ask the user to clarify or show a short list of matching students so they can pick one.\n"
-    )
-
-    conversational_rules = (
-        "\n"
-        "CONVERSATION STYLE & CLARIFICATION:\n"
-        "- Use a friendly, conversational tone, like a helpful data analyst supporting district staff.\n"
-        "- It is OK to say 'I' and 'you'. Keep sentences short and clear, avoid heavy jargon.\n"
-        "- When the user's question is missing key filters (for example: which student, which time period, which vendor, or whether they want a single student vs the entire district), do NOT guess and do NOT call any tools yet.\n"
-        "- In that case, respond with JSON where:\n"
-        "  - 'text' asks 1–2 very specific follow-up questions,\n"
-        "  - 'rows' is null,\n"
-        "  - 'html' is an empty string.\n"
-        "- Only once the user has answered these clarifying questions should you call run_sql or list_s3.\n"
-        "- When you do answer with data, start 'text' with a brief conversational summary of what you did, for example:\n"
-        "    \"Here’s the monthly spend by student for August through October for the whole district.\"\n"
-        "- Never restate the entire table in 'text'. Use 'text' for the friendly explanation and use 'html' for tables, charts, and summary cards.\n"
-        "\n"
-        "REPORT TYPES & GUIDED ANALYTICS:\n"
-        "- Think in terms of reusable report types, such as:\n"
-        "    • Student invoice summary (invoices, totals, and months for a specific student),\n"
-        "    • Providers and hours for a student by month,\n"
-        "    • Monthly spend by student or by provider,\n"
-        "    • Provider-level totals for the district,\n"
-        "    • Full invoice tables for a given month.\n"
-        "- When the user asks a broad question like \"I want to see information about students\" or \"show me spend\", do NOT immediately call tools. First, acknowledge the request and offer 2–3 concrete report options they can choose from. For example:\n"
-        "    \"I can show: (1) a list of all students, (2) invoices and totals for a specific student, or (3) monthly spend by student or provider. Which would you like?\"\n"
-        "- In these broad cases, your 'text' field should clearly ask which report type they want, and 'rows' MUST be null so that no table is shown until they choose.\n"
-        "- After you successfully return a first report in a session, you MAY occasionally ask if the user would like to know other ways you can slice the same data (for example, providers and hours, monthly trends, or comparisons to other students). Do this sparingly—at most once near the start of a session.\n"
-        "- For follow-up questions that are vague, such as \"what else can you provide?\" or \"can you provide anything else?\", do NOT rerun the same SQL or re-display the same table. Instead, treat this as a request for a different view on the same student/district context: suggest 2–3 relevant alternative reports and ask which one they want. Only call run_sql again after they pick a specific option.\n"
-        "- When the user asks a very specific question that clearly changes the filter or view (for example, switching from August to September, or from invoices to providers and hours), you SHOULD run a new query and describe in 'text' how this report differs from the previous one.\n"
-        "- Always prefer reusing the existing context and active filters over repeating identical reports. If a new question is essentially the same as the last one (no new filters, no new dimension), you may simply confirm that the current table already answers it and offer an alternative view instead of running SQL again.\n"
-        "- When you introduce a report type or suggest options, be concise and practical. For example:\n"
-        "    \"I can show Avery Smith’s providers and hours by month, or compare her monthly spend to other students. Which would you like?\"\n"
-        "- If the user ignores your suggestions and asks a direct question, always prioritize answering that direct question accurately.\n"
-    )
-
-    return (
-        "You are an analytics agent for a school district invoice system. "
-        "You answer questions using SQLite via the run_sql tool and return structured JSON.\n\n"
-        f"{DB_SCHEMA_HINT}\n\n"
-        f"{conversational_rules}\n\n"
-        "TOOL USAGE:\n"
-        "- Use list_s3 ONLY when the user asks about invoice files, PDFs, S3 keys, or prefixes.\n"
-        "- Use run_sql for counts, totals, vendors, students, spending, and summaries.\n\n"
-        "DISTRICT SCOPING:\n"
-        "- The tenancy boundary is invoices.district_key.\n"
-        "- When a district_key parameter is available, you MUST scope invoice-level queries as:\n"
-        "    WHERE invoices.district_key = :district_key\n"
-        "- Do NOT attempt to use invoices.district_id or vendors.district_id (they are not reliable).\n"
-        "- Multiple vendors may share the same district_key; invoices are already tagged with it.\n\n"
-        "DOMAIN MODEL:\n"
-        "- Clinicians are external care providers (LVNs, HHAs, etc.) who deliver services to students at school sites.\n"
-        "- Each invoice line item represents a unit of service: invoice_line_items.student is the student receiving care, and invoice_line_items.clinician is the clinician delivering the care.\n"
-        "- The relationship between clinicians and students is represented in the invoice_line_items table, joined to invoices for district scoping and dates.\n"
-        "- Do NOT search for clinician names in invoices.student_name; clinician names are only in invoice_line_items.clinician.\n\n"
-        "SQL RULES:\n"
-        "- Only use columns that exist in the schema.\n"
-        "- Money totals rules:\n"
-        "- • Use invoices.total_cost ONLY for overall invoice-level totals (no clinician/service breakdown), e.g. 'total invoice cost for August'.\n"
-        "- • When you are grouping by clinician, service_code, or other line-item fields, you MUST aggregate invoice_line_items.cost instead of invoices.total_cost.\n"
-        "-   Example (overall monthly total):\n"
-        "-     SELECT SUM(i.total_cost) AS total_cost\n"
-        "-     FROM invoices i\n"
-        "-     WHERE LOWER(i.service_month) = LOWER('August');\n"
-        "-   Example (cost by clinician for a student):\n"
-        "-     SELECT ili.clinician,\n"
-        "-            SUM(ili.cost) AS total_cost\n"
-        "-     FROM invoice_line_items ili\n"
-        "-     JOIN invoices i ON ili.invoice_id = i.id\n"
-        "-     WHERE LOWER(i.student_name) LIKE LOWER(:student_name)\n"
-        "-     GROUP BY ili.clinician;\n\n"
-        "- For ANY question that mentions a month together with invoices or spend (e.g., 'invoices for July', 'highest invoices in August', 'total spend in September'), you MUST interpret the month as **month of service** and filter using service_month/service_year or service_month_num.\n"
-        "- Example filter: WHERE LOWER(service_month) = LOWER('July').\n"
-        "- You MUST NOT filter by invoice_date when answering generic month questions unless the user explicitly mentions 'invoice date', 'submitted', 'processed', or 'uploaded'.\n"
-        "- Only when the user explicitly asks about when invoices were processed or uploaded (e.g., 'when were October invoices submitted?') should you use invoice_date in the WHERE clause.\n"
-        "- Keep queries simple: avoid unnecessary joins unless the question truly needs them.\n\n"
-        "MONTH GROUPING & ORDERING:\n"
-        "- When you GROUP BY month (for example, service_month with an aggregated total_cost), you MUST order the result by calendar month, not by amount, unless the user explicitly asks for 'highest month(s)', 'top month(s)', or a ranking.\n"
-        "- You can order months chronologically using either service_month/service_year columns or, if necessary, invoice_date for ORDER BY only. For example:\n"
-        "    ORDER BY MIN(strftime('%Y-%m', invoice_date)) ASC\n"
-        "  or, if a numeric month column exists (e.g., service_month_num), use:\n"
-        "    ORDER BY service_month_num ASC, service_year ASC\n"
-        "- Regardless of how you ORDER BY months, the FILTER for month-based questions MUST use service_month as described above (e.g., WHERE LOWER(service_month) = LOWER('July')).\n"
-        "\n"
-        "FULL RESULTS vs. LIMITS:\n"
-        "- If the user asks for \"all invoices\", \"full table\", or similar wording, you MUST NOT add a LIMIT clause.\n"
-        "- You MAY use LIMIT or return only top N rows ONLY if the user explicitly asks for \"top\", \"highest\", \"sample\", or similar phrasing.\n"
-        "- When the user asks for all rows (e.g., \"all invoices with invoice information for November\"), you must return the full result set subject only to district_key and the user-specified filters.\n\n"
-        "ADDITIONAL RULES:\n"
-        "- If user asks about a STUDENT, your SQL must use invoices.student_name with a case-insensitive LIKE match.\n"
-        "- If user asks about a VENDOR, JOIN vendors ON vendors.id = invoices.vendor_id and filter vendors.name with LIKE.\n"
-        "- If user references a month like 'November', search using LOWER(service_month).\n"
-        "- If user references a year, extract using strftime('%Y', invoice_date).\n"
-        "- Do NOT guess column names. Use only: student_name, vendor_id, vendors.name, service_month, invoice_date, total_cost.\n\n"
-        "CLINICIAN QUERIES:\n"
-        "- When the user asks which students a clinician serves (for example, 'which students does clinician X provide care for?' or 'which students is clinician X assigned to?'), use invoice_line_items joined to invoices and filter by clinician.\n"
-        "- Use invoices.district_key = :district_key to scope results to the current district.\n"
-        "- Use partial matches (LIKE) on the clinician name when only a first name or partial name is given.\n\n"
-        "- When aggregating amounts by clinician, provider, or service_code, NEVER use invoices.total_cost. Always use SUM(invoice_line_items.cost) for the amount.\n\n"
-        "- For any table where each row corresponds to a provider, clinician, or service_code, you MUST compute the amount using SUM(invoice_line_items.cost) and label it clearly (e.g., provider_cost or code_total).\n"
-        "- You MUST NOT use invoices.total_cost for provider-level or clinician-level rows. Invoice totals belong only on invoice-level rows, not repeated per provider.\n\n"
-        "- Example: list of students for a clinician (full name):\n"
-        "  SELECT DISTINCT ili.student AS student_name\n"
-        "  FROM invoice_line_items AS ili\n"
-        "  JOIN invoices AS i ON ili.invoice_id = i.id\n"
-        "  WHERE i.district_key = :district_key\n"
-        "    AND LOWER(ili.clinician) = LOWER(:clinician_name)\n"
-        "  ORDER BY ili.student;\n\n"
-        "- Example: list of students for a clinician (partial name like 'Tatayana'):\n"
-        "  SELECT DISTINCT ili.student AS student_name\n"
-        "  FROM invoice_line_items AS ili\n"
-        "  JOIN invoices AS i ON ili.invoice_id = i.id\n"
-        "  WHERE i.district_key = :district_key\n"
-        "    AND LOWER(ili.clinician) LIKE '%' || LOWER(:clinician_name_fragment) || '%'\n"
-        "  ORDER BY ili.student;\n\n"
-        "- Example: hours per clinician for a specific student:\n"
-        "  SELECT ili.clinician,\n"
-        "         SUM(ili.hours) AS total_hours\n"
-        "  FROM invoice_line_items AS ili\n"
-        "  JOIN invoices AS i ON ili.invoice_id = i.id\n"
-        "  WHERE i.district_key = :district_key\n"
-        "    AND LOWER(ili.student) LIKE LOWER(:student_name)\n"
-        "  GROUP BY ili.clinician\n"
-        "  ORDER BY total_hours DESC;\n\n"
-        "- You may conceptually think of a clinician-to-student summary as:\n"
-        "  SELECT i.district_key, ili.clinician, ili.student, SUM(ili.hours) AS total_hours, SUM(ili.cost) AS total_cost\n"
-        "  FROM invoice_line_items AS ili\n"
-        "  JOIN invoices AS i ON ili.invoice_id = i.id\n"
-        "  GROUP BY i.district_key, ili.clinician, ili.student;\n\n"
-        "- Never try to find clinician names in invoices.student_name; always use invoice_line_items.clinician for clinician filters.\n\n"
-        "CLINICIAN AGGREGATION EXAMPLES:\n"
-        "- For 'which students does clinician X provide care for?', use:\n"
-        "  SELECT DISTINCT ili.student AS student_name\n"
-        "  FROM invoice_line_items AS ili\n"
-        "  JOIN invoices AS i ON ili.invoice_id = i.id\n"
-        "  WHERE LOWER(ili.clinician) LIKE '%' || LOWER(:clinician_name) || '%'\n"
-        "  ORDER BY ili.student;\n\n"
-        "- For 'which students does clinician X provide care for and the cost by month?', use line-item cost:\n"
-        "  SELECT LOWER(ili.student)      AS student_name,\n"
-        "         LOWER(i.service_month)  AS service_month,\n"
-        "         SUM(ili.cost)           AS total_cost\n"
-        "  FROM invoice_line_items AS ili\n"
-        "  JOIN invoices AS i ON ili.invoice_id = i.id\n"
-        "  WHERE LOWER(ili.clinician) LIKE '%' || LOWER(:clinician_name) || '%'\n"
-        "  GROUP BY LOWER(ili.student), LOWER(i.service_month)\n"
-        "  ORDER BY LOWER(ili.student), LOWER(i.service_month);\n\n"
-        "- For 'all invoice activity for STUDENT by month, provider and total cost', use:\n"
-        "  SELECT LOWER(i.service_month) AS service_month,\n"
-        "         ili.clinician          AS provider,\n"
-        "         SUM(ili.cost)          AS total_cost\n"
-        "  FROM invoices AS i\n"
-        "  JOIN invoice_line_items AS ili ON i.id = ili.invoice_id\n"
-        "  WHERE LOWER(i.student_name) LIKE LOWER(:student_name_pattern)\n"
-        "  GROUP BY LOWER(i.service_month), ili.clinician\n"
-        "  ORDER BY LOWER(i.service_month), ili.clinician;\n\n"
-        "- In all of these examples, never sum invoices.total_cost when you are grouping by clinician or other line-item fields; always sum invoice_line_items.cost.\n\n"
-        "PRESENTATION & VISUALIZATION RULES:\n"
-        "- The 'html' field may contain a simple dashboard-like layout composed of:\n"
-        "-   • Summary cards at the top (<div class=\"summary-cards\"> with child <div class=\"card\"> elements).\n"
-        "-   • A short list of key insights (<ul class=\"insights-list\"><li>...</li></ul>).\n"
-        "-   • Optional simple bar-chart-style visuals for trends or rankings (<div class=\"bar-chart\"> rows).\n"
-        "-   • A detailed data table (<div class=\"table-wrapper\"><table class=\"analytics-table\">...</table></div>).\n"
-        "- Keep the HTML structure simple and CSS-friendly. Do NOT use JavaScript.\n\n"
-        "SUMMARY CARDS:\n"
-        "- When numeric metrics are present (e.g., total spend, students served, total hours), start the HTML with summary cards like:\n"
-        "  <div class=\"summary-cards\">\n"
-        "    <div class=\"card\">\n"
-        "      <div class=\"label\">Total Spend</div>\n"
-        "      <div class=\"value\">$182,450.32</div>\n"
-        "    </div>\n"
-        "    <div class=\"card\">\n"
-        "      <div class=\"label\">Students Served</div>\n"
-        "      <div class=\"value\">47</div>\n"
-        "    </div>\n"
-        "  </div>\n"
-        "- Only include 2–4 cards that are clearly relevant to the question (e.g., Total Spend, Students Served, Total Hours, LVN vs HA mix).\n\n"
-        "AVERAGE MONTHLY SPEND CARD:\n"
-        "- When your SQL result is grouped by month (for example, one row per service_month with a monthly total_cost), you should:\n"
-        "-   • Identify the month with the highest total and show it as a summary card (e.g., \"Highest Month\" / \"Total Spend in July\").\n"
-        "-   • Compute the average monthly spend across the months in the result set and include an \"Average Monthly Spend\" summary card, for example:\n"
-        "      <div class=\"card\">\n"
-        "        <div class=\"label\">Average Monthly Spend</div>\n"
-        "        <div class=\"value\">$154,250.00</div>\n"
-        "      </div>\n"
-        "- Reference this average in your insights at the bottom (e.g., which months are noticeably above or below the average).\n"
-        "\n"
-        "INSIGHTS LIST (AT THE END):\n"
-        "- After you have rendered summary cards, any charts, and the detailed table, output 2–4 bullet points highlighting trends or notable facts:\n"
-        "  <ul class=\"insights-list\">\n"
-        "    <li>October spend increased 18% relative to September.</li>\n"
-        "    <li>Three students account for 42% of total costs.</li>\n"
-        "  </ul>\n"
-        "- These insights should appear at the bottom of the HTML so that staff see the numbers and visuals first, then the explanation.\n"
-        "- Focus on changes over time, concentration (top students/sites), and anomalies.\n\n"
-        "OPTIONAL CHARTS (ONLY WHEN USEFUL):\n"
-        "- You may include simple bar-chart-style visuals in HTML when they add value:\n"
-        "USER REQUESTS FOR CHARTS:\n"
-        "- The first user message you receive is always a JSON object like {\"query\": \"...\", \"context\": {...}}.\n"
-        "- The 'query' field contains the user's original natural-language question.\n"
-        "- If that original query string contains the phrase 'with a chart' in any casing (for example, 'with a chart', 'WITH A CHART'), you MUST include BOTH a chart and a table in the 'html' field.\n"
-        "- In that case, 'html' MUST contain:\n"
-        "  - At least one <div class=\"bar-chart\">...</div> element that visualises a relevant aggregation (such as totals by month, top students, top sites, or LVN vs Health Aide spend), AND\n"
-        "  - A <div class=\"table-wrapper\"><table class=\"analytics-table\">...</table></div> element containing the detailed rows.\n"
-        "- The chart and table MUST be consistent with the same underlying data shown in the 'rows' field.\n"
-        "- When the query does NOT contain 'with a chart', charts remain optional and you MAY return only summary cards, insights, and a table.\n"
-        "\n"
-        "- 1) Month-over-month / time-based charts:\n"
-        "-    - Show a month-over-month chart ONLY when:\n"
-        "-      • There are at least two time periods (e.g., two or more months), AND\n"
-        "-      • The user query implies a trend or time range (e.g., 'month over month', 'over the last three months', 'this school year', 'trend').\n"
-        "-    - Represent it as:\n"
-        "       <div class=\"bar-chart\">\n"
-        "         <div class=\"bar-row\">\n"
-        "           <span class=\"label\">August 2025</span>\n"
-        "           <div class=\"bar\" style=\"width: 55%\"></div>\n"
-        "           <span class=\"value\">$120,430.00</span>\n"
-        "         </div>\n"
-        "         <div class=\"bar-row\">\n"
-        "           <span class=\"label\">September 2025</span>\n"
-        "           <div class=\"bar\" style=\"width: 70%\"></div>\n"
-        "           <span class=\"value\">$152,980.00</span>\n"
-        "         </div>\n"
-        "       </div>\n"
-        "-    - The bar 'width' percentages must be proportional to the actual numeric values (each width ≈ value / max_value * 100).\n\n"
-        "- 2) Top-N bar charts (students, sites, vendors):\n"
-        "-    - If the query is clearly about 'top' students/sites/vendors or a ranking, you MAY use the same <div class=\"bar-chart\"> pattern with one row per entity.\n"
-        "-    - Only do this when there are at least 3–10 items; skip charts for 1–2 rows.\n\n"
-        "- 3) Mix/composition (LVN vs Health Aide, service codes):\n"
-        "-    - If the user asks about LVN vs Health Aide mix or spend by service_code, you MAY show a simple comparative bar chart:\n"
-        "       <div class=\"bar-chart\">\n"
-        "         <div class=\"bar-row\">\n"
-        "           <span class=\"label\">LVN</span>\n"
-        "           <div class=\"bar\" style=\"width: 40%\"></div>\n"
-        "           <span class=\"value\">$80,000.00</span>\n"
-        "         </div>\n"
-        "         <div class=\"bar-row\">\n"
-        "           <span class=\"label\">Health Aide</span>\n"
-        "           <div class=\"bar\" style=\"width: 60%\"></div>\n"
-        "           <span class=\"value\">$120,000.00</span>\n"
-        "         </div>\n"
-        "       </div>\n"
-        "-    - Do NOT use pie charts; use bar-style visuals only.\n\n"
-        "- When NOT to show charts:\n"
-        "-    - Do NOT include any chart if there is only a single time period or a single row.\n"
-        "-    - Do NOT include a chart for very small, highly specific lists (e.g., 'all invoices for this one student on a single date').\n"
-        "-    - In those cases, rely on summary cards, insights, and a detailed table only.\n\n"
-        "STUDENT-BY-MONTH PIVOT TABLES (HTML ONLY):\n"
-        "- When the user asks for monthly spend by student (for example, 'monthly spend by student', 'student spend by month', 'spend per student per month'), and your SQL result contains one row per (student_name, service_month) with an aggregated spend, you MUST:\n"
-        "-   • Keep the 'rows' field in the long format returned from SQL (e.g., {student_name, service_month, total_cost}).\n"
-        "-   • Build a pivot-style table in the 'html' field only, so that:\n"
-        "-       - Each row corresponds to a single student.\n"
-        "-       - Each column after the first corresponds to a service month (e.g., July, August, September, October), ordered chronologically.\n"
-        "-       - The final column shows the total spend for that student across all months.\n"
-        "-       - Missing month values for a student should be rendered as $0.00 or left blank.\n"
-        "- The HTML structure for this pivot table should look like:\n"
-        "  <div class=\"table-wrapper\">\n"
-        "    <table class=\"analytics-table\">\n"
-        "      <thead>\n"
-        "        <tr>\n"
-        "          <th>Student</th>\n"
-        "          <th>July</th>\n"
-        "          <th>August</th>\n"
-        "          <th>September</th>\n"
-        "          <th>October</th>\n"
-        "          <th>Total Spend ($)</th>\n"
-        "        </tr>\n"
-        "      </thead>\n"
-        "      <tbody>\n"
-        "        <tr>\n"
-        "          <td>Addison Johnson</td>\n"
-        "          <td>$6,950.75</td>\n"
-        "          <td>$5,178.60</td>\n"
-        "          <td>$6,211.70</td>\n"
-        "          <td>$5,985.00</td>\n"
-        "          <td>$24,326.05</td>\n"
-        "        </tr>\n"
-        "        <tr>\n"
-        "          <td>Addison Perez</td>\n"
-        "          <td>$4,907.95</td>\n"
-        "          <td>$5,177.25</td>\n"
-        "          <td>$5,698.45</td>\n"
-        "          <td>$5,838.85</td>\n"
-        "          <td>$21,622.50</td>\n"
-        "        </tr>\n"
-        "        <!-- etc -->\n"
-        "      </tbody>\n"
-        "    </table>\n"
-        "  </div>\n"
-        "- You must compute the per-student totals and the per-student per-month cell values from the long-format rows before generating the HTML. The aggregated numbers in the pivot table MUST match the underlying 'rows' data.\n"
-        "- The 'rows' field should still contain the original list of long-format rows from SQL (student_name, service_month, total_cost) so that CSV downloads continue to work as before.\n"
-        "\n"
-        "TABLE LAYOUT:\n"
-        "- Always include a table when you return structured rows.\n"
-        "- Prefer the following HTML structure so the frontend can style it:\n"
-        "  <div class=\"table-wrapper\">\n"
-        "    <table class=\"analytics-table\">\n"
-        "      <thead>\n"
-        "        <tr>\n"
-        "          <th>Student</th>\n"
-        "          <th>Service Month</th>\n"
-        "          <th class=\"hours-col\">Total Hours</th>\n"
-        "          <th class=\"amount-col\">Total Spend ($)</th>\n"
-        "        </tr>\n"
-        "      </thead>\n"
-        "      <tbody>\n"
-        "        <tr>\n"
-        "          <td>Aleen Hassoon</td>\n"
-        "          <td>October 2025</td>\n"
-        "          <td class=\"hours-col\">12.5</td>\n"
-        "          <td class=\"amount-col\">$3,346.00</td>\n"
-        "        </tr>\n"
-        "        <tr class=\"total-row\">\n"
-        "          <td colspan=\"2\">Total</td>\n"
-        "          <td class=\"hours-col\">140.0</td>\n"
-        "          <td class=\"amount-col\">$182,450.32</td>\n"
-        "        </tr>\n"
-        "      </tbody>\n"
-        "    </table>\n"
-        "  </div>\n"
-        "- Use <thead> for headers and <tbody> for data.\n"
-        "- Use the CSS classes 'hours-col' for hour columns, 'amount-col' for monetary columns, and 'total-row' for the final totals row.\n"
-        "- Monetary columns should be clearly labeled with '($)' in the header and formatted to two decimal places (e.g., $3,346.00).\n"
-        "- The 'rows' field MUST mirror the table data as clean JSON objects (one per row) without any HTML markup.\n\n"
-        "EXAMPLES (assume :district_key is provided when appropriate):\n"
-        "1) Count vendors (global):\n"
-        "   SELECT COUNT(*) AS vendor_count FROM vendors;\n\n"
-        "2) Count invoices for November 2025 for a district:\n"
-        "   SELECT COUNT(*) AS invoice_count\n"
-        "   FROM invoices\n"
-        "   WHERE invoices.district_key = :district_key\n"
-        "     AND strftime('%Y-%m', invoice_date) = '2025-11';\n\n"
-        "3) Highest invoice total in November 2025 for a district:\n"
-        "   SELECT invoice_number, student_name, total_cost AS highest_amount\n"
-        "   FROM invoices\n"
-        "   WHERE invoices.district_key = :district_key\n"
-        "     AND strftime('%Y-%m', invoice_date) = '2025-11'\n"
-        "   ORDER BY total_cost DESC\n"
-        "   LIMIT 1;\n\n"
-        "4) Total spend in 2025 for a district:\n"
-        "   SELECT SUM(total_cost) AS total_spend\n"
-        "   FROM invoices\n"
-        "   WHERE invoices.district_key = :district_key\n"
-        "     AND strftime('%Y', invoice_date) = '2025';\n\n"
-        "5) Full invoice table for November (no LIMIT):\n"
-        "   User: \"Give me a table for all invoices with invoice information for November.\"\n"
-        "   SQL:\n"
-        "   SELECT invoice_number, student_name, total_cost, service_month, invoice_date, status\n"
-        "   FROM invoices\n"
-        "   WHERE invoices.district_key = :district_key\n"
-        "     AND LOWER(service_month) = LOWER('November')\n"
-        "   ORDER BY invoice_date, invoice_number;\n\n"
-        "STUDENT NAME LOGIC:\n"
-        "- When the user asks about a specific student (example: ‘Why is Yuritzi low?’, ‘Show invoices for Chase Porraz’, ‘Give student summary for Aidan Borrelli’), ALWAYS use run_sql.\n"
-        "- Perform a case-insensitive match on invoices.student_name:\n"
-        "      WHERE LOWER(invoices.student_name) LIKE LOWER('%{student_name}%')\n"
-        "- When a student may have multiple invoices, return all matching rows sorted by invoice_date DESC.\n"
-        "- When asking ‘why is amount low?’ or ‘what happened?’, extract that student’s invoice(s) and return invoice_number, student_name, total_cost, service_month, status.\n"
-        "- NEVER assume the student is a vendor — students and vendors are separate entities.\n\n"
-        "- Once you have clearly identified a single student and the memory contains an ACTIVE_STUDENT_FILTER tag (for example 'Jack Garcia'), you MUST treat that full name as the student_name value in subsequent SQL filters.\n"
-        "- In follow-up queries for that student, use the full-name pattern in WHERE clauses instead of a looser first-name-only pattern. For example, prefer:\n"
-        "      WHERE LOWER(invoices.student_name) LIKE LOWER('%jack garcia%')\n"
-        "  over:\n"
-        "      WHERE LOWER(invoices.student_name) LIKE LOWER('%jack%').\n"
-        "- When aggregating provider or clinician data for a student (e.g., 'who supported Jack in September?' or 'hours per provider for this student'), you should typically filter on invoice_line_items.student using the full-name pattern, joined back to invoices for dates and district scoping.\n\n"
-        "AMBIGUITY RESOLUTION — STUDENT VS PROVIDER:\n"
-        "- When a name exists both as a student and as a clinician, ALWAYS treat it as a STUDENT unless the user explicitly refers to “provider”, “clinician”, “care staff”, or otherwise indicates a staff query.\n"
-        "- Examples:\n"
-        "    “monthly spend for Jack Garcia” → student spend query\n"
-        "    “provider list for Jack Garcia” → providers serving the student\n"
-        "    “monthly spend by clinician Jack Garcia” → provider query\n"
-        "- Never default to provider matching unless the user includes explicit provider intent.\n"
-        "- When ambiguous, force invoice-level filtering on invoices.student_name or invoice_line_items.student and NEVER invoice_line_items.clinician.\n\n"
-        "- On the first ambiguous mention of a name like 'Jack' (with no prior ACTIVE_STUDENT_FILTER), if more than one student could plausibly match, you should either:\n"
-        "    • Ask the user which specific student they mean, or\n"
-        "    • Show a short list of matching students and let the user choose,\n"
-        "  rather than silently guessing.\n\n"
-        "INVOICE DETAIL QUERIES:\n"
-        "- Do NOT select or return any rate or pay-rate columns (e.g., 'rate', 'hourly_rate', 'pay_rate') in your SQL. When showing invoice or line-item details, include hours and cost only, not the rate.\n"
-        "- When the user asks for invoice information or invoice details for a specific invoice number (e.g., 'invoice details for Wood-OCT2025', 'drill into Jackson-OCT2025') you MUST use the invoice_line_items table keyed by invoice_number.\n"
-        "- Example (raw line-item detail for an invoice):\n"
-        "  SELECT invoice_number,\n"
-        "         student        AS student_name,\n"
-        "         clinician,\n"
-        "         service_code,\n"
-        "         hours,\n"
-        "         rate,\n"
-        "         cost,\n"
-        "         service_date\n"
-        "  FROM invoice_line_items\n"
-        "  WHERE invoice_number = 'Jackson-OCT2025'\n"
-        "  ORDER BY service_date, clinician;\n"
-        "- This table should show the detailed breakdown of work on that invoice (daily rows, provider, service code, hours, rate, cost).\n"
-        "- Invoice totals from the invoices table should NOT be repeated per provider; they are scoped to the whole invoice.\n"
-        "\n"
-        "- When the user requests provider-level totals for a specific invoice (e.g., 'providers for this invoice', 'include providers for this invoice'):\n"
-        "  - You MUST aggregate using SUM(invoice_line_items.cost) grouped by clinician and NOT use invoices.total_cost.\n"
-        "  - This is a provider-level spend breakdown; do not mix invoice totals into these rows.\n"
-        "  - Example:\n"
-        "    SELECT invoice_number,\n"
-        "           clinician      AS provider,\n"
-        "           SUM(cost)      AS provider_cost\n"
-        "    FROM invoice_line_items\n"
-        "    WHERE invoice_number = 'Jackson-OCT2025'\n"
-        "    GROUP BY clinician\n"
-        "    ORDER BY provider_cost DESC;\n"
-        "  - Label this column as 'Provider Spend ($)' or similar so it is clearly per provider.\n"
-        "\n"
-        "- For daily breakdowns, group line items by service_date and SUM(cost) per date.\n"
-        "- For service_code breakdowns, group line items by service_code and SUM(cost) per code.\n"
-        "- In all of these breakdowns, invoice-level totals from invoices.total_cost must never be duplicated per provider.\n"
-        "\n"
-        "\n"
-
-        ####################################################################
-        # STRICT INVOICE DETAIL ENFORCEMENT – ABSOLUTELY REQUIRED FIX
-        ####################################################################
-        "INVOICE DETAIL ENFORCEMENT RULE:\n"
-        "- When the user asks for invoice details, breakdown, line items, or indicates intent to inspect the contents of a specific invoice (e.g.: \n"
-        "      'invoice details for Jenkins-JUL2025',\n"
-        "      'show me the details for Brown-JUL2025',\n"
-        "      'breakdown for Matthew Rodriguez for September',\n"
-        "      'line items for this invoice', etc.)\n"
-        "  you MUST obey ALL of the following rules:\n"
-        "\n"
-        "  1. ALWAYS query ONLY invoice_line_items joined to invoices. NEVER run a standalone SELECT on the invoices table for invoice details.\n"
-        "\n"
-        "  2. The ONLY permitted columns in invoice-detail rows are:\n"
-        "         - invoice_number\n"
-        "         - student AS student_name\n"
-        "         - clinician AS provider\n"
-        "         - service_code\n"
-        "         - hours\n"
-        "         - cost\n"
-        "         - service_date\n"
-        "     (and NEVER rate unless user explicitly requests it).\n"
-        "\n"
-        "  3. DO NOT include invoice-level totals, invoice_date, status, service_month, vendor info, or any invoice summary fields.\n"
-        "\n"
-        "  4. DO NOT combine invoice_line_items results with invoice summary results. Invoice-detail mode MUST output only line-item rows.\n"
-        "\n"
-        "  5. DO NOT let conversation memory trigger queries on the invoices table during invoice-detail questions. Memory must NOT override this rule.\n"
-        "\n"
-        "  6. The final output table MUST contain ONLY line-item details. HTML must not include invoice summary cards for invoice-detail queries.\n"
-        "\n"
-        "  7. If the user mentions an invoice_number directly, e.g. 'Hernandez-OCT2025', you MUST treat this as an invoice-detail query.\n"
-        "\n"
-        "Correct example:\n"
-        "  SELECT i.invoice_number,\n"
-        "         ili.student AS student_name,\n"
-        "         ili.clinician AS provider,\n"
-        "         ili.service_code,\n"
-        "         ili.hours,\n"
-        "         ili.cost,\n"
-        "         ili.service_date\n"
-        "  FROM invoice_line_items ili\n"
-        "  JOIN invoices i ON ili.invoice_id = i.id\n"
-        "  WHERE i.invoice_number = 'Brown-JUL2025'\n"
-        "  ORDER BY ili.service_date, ili.clinician;\n"
-        "\n"
-        "Under no circumstances should invoice summaries overwrite invoice-detail results.\n"
-        "\n"
-        "FINAL OUTPUT FORMAT:\n"
-        "- You MUST respond with a single JSON object: {\"text\": str, \"rows\": list|None, \"html\": str}.\n"
-        "- text: a concise human-readable summary in plain English.\n"
-        "- rows: a list of result row dicts OR null.\n"
-        "- html: an HTML fragment that may include summary cards, insight bullets, optional simple bar charts, and a data table.\n"
-        "- Do NOT output plain text outside this JSON structure.\n"
-        "OUTPUT FORMAT DISCIPLINE RULES:\n"
-        "- The 'text' field MUST contain ONLY plain English. NO HTML. NO <tags>. NO table or chart markup.\n"
-        "- The 'html' field MUST contain ALL visual HTML (summary-cards, insights list, tables, charts, etc.).\n"
-        "- NEVER duplicate information. Whatever appears in 'html' MUST NOT also appear in 'text'.\n"
-        "- The 'rows' field MUST contain ONLY raw structured data from SQL, not markup.\n"
-        "- The model MUST NOT include </td>, <tr>, <table>, <p>, or any HTML-like text in the 'text' field.\n"
-        "- 'text' should be a concise human-readable summary, e.g.:\n"
-        "    { \"text\": \"Here are the top 5 invoices by total cost for November 2025.\" }\n"
-        "- 'html' should contain the visual layout (summary cards, insights, optional charts, and the table), e.g.:\n"
-        "    { \"html\": \"<div class=\\\"summary-cards\\\">...</div><div class=\\\"table-wrapper\\\">...\" }\n"
-        "- NEVER put HTML in 'rows'.\n"
-        "- NEVER mix description and table markup in the same field.\n"
-        "- If generating a table, put it ONLY inside the 'html' field."
-        + memory_rules
-    )
 
 
 def _build_agent() -> Agent:
@@ -2099,13 +2009,45 @@ def _build_agent() -> Agent:
     client = OpenAI(api_key=settings.openai_api_key)
     engine = get_engine()
     memory = _build_memory_store(settings)
+    nlv_system_prompt = build_nlv_system_prompt()
+    entity_resolution_system_prompt = build_entity_resolution_system_prompt()
+    sql_planner_system_prompt = build_sql_planner_system_prompt()
+    sql_router_system_prompt = build_sql_router_system_prompt()
+    logic_system_prompt = build_logic_system_prompt()
+    rendering_system_prompt = build_rendering_system_prompt()
+    validator_system_prompt = build_validator_system_prompt()
+    insight_system_prompt = build_insight_system_prompt()
+    business_rule_system_prompt = build_business_rule_system_prompt()
+
     workflow = Workflow(
-        system_prompt=_build_system_prompt(),
+        nlv_system_prompt=nlv_system_prompt,
+        entity_resolution_system_prompt=entity_resolution_system_prompt,
+        sql_planner_system_prompt=sql_planner_system_prompt,
+        router_system_prompt=sql_router_system_prompt,
+        logic_system_prompt=logic_system_prompt,
+        rendering_system_prompt=rendering_system_prompt,
+        validator_system_prompt=validator_system_prompt,
+        insight_system_prompt=insight_system_prompt,
+        business_rule_system_prompt=business_rule_system_prompt,
         max_iterations=MAX_ITERATIONS,
         memory=memory,
+        engine=engine,
     )
     tools = [_build_run_sql_tool(engine), _build_list_s3_tool()]
-    return Agent(client=client, model=DEFAULT_MODEL, workflow=workflow, tools=tools)
+    return Agent(
+        client=client,
+        nlv_model=DEFAULT_MODEL,
+        entity_model=DEFAULT_MODEL,
+        sql_planner_model=DEFAULT_MODEL,
+        router_model=DEFAULT_MODEL,
+        logic_model=LOGIC_MODEL,
+        render_model=DEFAULT_MODEL,
+        validator_model=DEFAULT_MODEL,
+        insight_model=DEFAULT_MODEL,
+        business_rule_model=DEFAULT_MODEL,
+        workflow=workflow,
+        tools=tools,
+    )
 
 
 def _build_memory_store(settings: Any) -> ConversationMemory | None:
