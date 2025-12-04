@@ -10,6 +10,7 @@ import json
 from types import SimpleNamespace
 from typing import Any, Sequence
 
+from agents.domain_config_loader import load_domain_config
 from openai import OpenAI
 
 DB_SCHEMA_HINT = """
@@ -116,6 +117,10 @@ def build_logic_system_prompt() -> str:
     # not on user-facing presentation or HTML rendering.
     # This pass strengthens natural-language variability handling and explicit
     # ambiguity/IR-only guidance for the logic stage.
+    config = load_domain_config()
+    materialized_views = config.get("materialized_views", {})
+    mode_to_mv_map = config.get("mode_to_mv_map", {})
+    router_modes = config.get("router_modes", {})
     router_contract = (
         "\n"
         "ROUTER CONTRACT:\n"
