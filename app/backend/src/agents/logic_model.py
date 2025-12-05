@@ -136,7 +136,7 @@ def build_logic_system_prompt() -> str:
         "\n"
         "ROUTER CONTRACT:\n"
         "- A RouterDecision JSON object will be provided via a separate system message that begins with 'ROUTER_DECISION (do not reinterpret):'.\n"
-        "- You MUST treat this RouterDecision as the single source of truth for high-level analytics mode (e.g., district_summary, student_monthly, vendor_monthly, invoice_details, student_provider_breakdown, provider_breakdown, top_invoices), primary entities, time_window, and month scope.\n"
+        "- You MUST treat this RouterDecision as the single source of truth for high-level analytics mode (e.g., district_summary, student_monthly, vendor_monthly, invoice_details, student_provider_breakdown, provider_breakdown, top_invoices, clinician_student_breakdown), primary entities, time_window, and month scope.\n"
         "- Do NOT try to re-derive or reinterpret the mode from natural language. Obey the RouterDecision.\n\n"
     )
 

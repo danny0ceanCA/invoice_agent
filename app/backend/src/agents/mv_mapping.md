@@ -1045,3 +1045,95 @@ CREATE INDEX IF NOT EXISTS idx_mv_ddc_dk_date
     ON mv_district_daily_coverage (district_key, service_date);
 
 -- REFRESH MATERIALIZED VIEW CONCURRENTLY mv_district_daily_coverage;
+
+16. mv_provider_student_monthly
+
+Description
+Source: invoices, invoice_line_items
+
+Purpose:
+Clinician → Student monthly breakdown (hours + cost).
+This MV allows the agent to answer questions such as:
+
+“Which students did this clinician support in August?”
+
+“Who did this LVN work with in September?”
+
+“List all students supported by this clinician this month.”
+
+“Provider → student cost and hours for a given month.”
+
+SQLite Version
+DROP TABLE IF EXISTS mv_provider_student_monthly;
+
+CREATE TABLE mv_provider_student_monthly AS
+SELECT 
+    i.district_key AS district_key,
+    LOWER(ili.clinician) AS clinician,
+    LOWER(ili.student) AS student,
+    CAST(strftime('%Y', ili.service_date) AS INT) AS service_year,
+    CAST(strftime('%m', ili.service_date) AS INT) AS service_month_num,
+    strftime('%Y-%m', ili.service_date) AS service_month,
+    SUM(ili.hours) AS total_hours,
+    SUM(ili.cost) AS total_cost
+FROM invoice_line_items ili
+JOIN invoices i ON i.id = ili.invoice_id
+GROUP BY 
+    i.district_key,
+    LOWER(ili.clinician),
+    LOWER(ili.student),
+    CAST(strftime('%Y', ili.service_date) AS INT),
+    CAST(strftime('%m', ili.service_date) AS INT),
+    strftime('%Y-%m', ili.service_date);
+;
+
+-- Indexes
+DROP INDEX IF EXISTS idx_mvp_sm_dk_year_month;
+DROP INDEX IF EXISTS idx_mvp_sm_lower_clinician;
+DROP INDEX IF EXISTS idx_mvp_sm_lower_student;
+
+CREATE INDEX idx_mvp_sm_dk_year_month 
+    ON mv_provider_student_monthly (district_key, service_year, service_month_num);
+
+CREATE INDEX idx_mvp_sm_lower_clinician 
+    ON mv_provider_student_monthly (clinician);
+
+CREATE INDEX idx_mvp_sm_lower_student 
+    ON mv_provider_student_monthly (student);
+
+Postgres Version
+DROP MATERIALIZED VIEW IF EXISTS mv_provider_student_monthly;
+
+CREATE MATERIALIZED VIEW mv_provider_student_monthly AS
+SELECT 
+    i.district_key AS district_key,
+    LOWER(ili.clinician) AS clinician,
+    LOWER(ili.student) AS student,
+    EXTRACT(YEAR FROM ili.service_date::date)::int AS service_year,
+    EXTRACT(MONTH FROM ili.service_date::date)::int AS service_month_num,
+    to_char(ili.service_date::date, 'YYYY-MM') AS service_month,
+    SUM(ili.hours) AS total_hours,
+    SUM(ili.cost) AS total_cost
+FROM invoice_line_items ili
+JOIN invoices i ON i.id = ili.invoice_id
+GROUP BY 
+    i.district_key,
+    LOWER(ili.clinician),
+    LOWER(ili.student),
+    EXTRACT(YEAR FROM ili.service_date::date)::int,
+    EXTRACT(MONTH FROM ili.service_date::date)::int,
+    to_char(ili.service_date::date, 'YYYY-MM');
+;
+
+-- Indexes
+CREATE INDEX IF NOT EXISTS idx_mvp_sm_dk_year_month 
+    ON mv_provider_student_monthly (district_key, service_year, service_month_num);
+
+CREATE INDEX IF NOT EXISTS idx_mvp_sm_lower_clinician 
+    ON mv_provider_student_monthly (clinician);
+
+CREATE INDEX IF NOT EXISTS idx_mvp_sm_lower_student 
+    ON mv_provider_student_monthly (student);
+
+-- Refresh
+-- REFRESH MATERIALIZED VIEW CONCURRENTLY mv_provider_student_monthly;

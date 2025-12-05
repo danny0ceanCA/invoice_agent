@@ -79,6 +79,7 @@ def route_sql(
         "top_invoices",
         "student_provider_breakdown",
         "student_monthly",
+        "clinician_student_breakdown",
         "district_monthly",
         "vendor_monthly",
         "provider_caseload_monthly",

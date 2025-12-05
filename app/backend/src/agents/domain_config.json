@@ -598,7 +598,40 @@
       "entity_role": "clinician",
       "metric": "caseload",
       "supports_multi_entity": false
-    }
+    },
+    "clinician_student_breakdown": {
+  "intent_synonyms": [
+    "who they supported",
+    "who they helped",
+    "who they worked with",
+    "who they provided support to",
+    "who received support from them",
+    "who they provided services to",
+    "who was supported",
+    "who received care from them",
+    "who they were assigned to",
+    "who they collaborated with",
+    "who they covered",
+    "who they assisted",
+    "show who they supported",
+    "show who they worked with",
+    "show who received support",
+    "the individuals they supported",
+    "the individuals they worked with",
+    "the individuals who received support",
+    "list those they supported",
+    "list those they worked with",
+    "who was under their care",
+    "who they were working with",
+    "who they interacted with",
+    "who they served",
+    "who received their support"
+  ],
+  "entity_role": "clinician",
+  "metric": "cost",
+  "requires_month": false,
+  "supports_multi_entity": false
+}
   },
 
   "router_modes": {
@@ -731,7 +764,21 @@
         "provider caseload"
       ],
       "primary_entity": "clinician"
-    }
+    },
+
+    "clinician_student_breakdown": {
+  "triggers": [
+    "list students for",
+    "students for",
+    "student list for",
+    "students assigned to",
+    "student assignments for",
+    "individuals for",
+    "assignments for"
+  ],
+  "primary_entity": "clinician"
+}
+
   },
 
   "materialized_views": {
@@ -766,7 +813,20 @@
     "mv_provider_caseload_monthly": {
       "purpose": "Clinician caseload (#students) + hours per month",
       "columns": ["district_key", "clinician", "service_year", "service_month_num", "service_month", "num_students", "total_hours", "total_cost"]
-    }
+    },
+    "mv_provider_student_monthly": {
+  "purpose": "Clinician × Student breakdown per month",
+  "columns": [
+    "district_key",
+    "clinician",
+    "student",
+    "service_year",
+    "service_month_num",
+    "service_month",
+    "total_hours",
+    "total_cost"
+  ]
+}
   },
 
   "mode_to_mv_map": {
@@ -777,7 +837,8 @@
     "district_monthly": "mv_district_monthly_hours_cost",
     "vendor_monthly": "mv_vendor_monthly_hours_cost",
     "top_invoices": "mv_invoice_summary",
-    "provider_caseload_monthly": "mv_provider_caseload_monthly"
+    "provider_caseload_monthly": "mv_provider_caseload_monthly",
+    "clinician_student_breakdown": "mv_provider_student_monthly"
   },
 
   "validation": {
