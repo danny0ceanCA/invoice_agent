@@ -271,6 +271,41 @@
       "supports_multi_entity": false
     },
 
+    "student_provider_breakdown": {
+  "intent_synonyms": [
+    "who supported",
+    "who provided support",
+    "who provided services",
+    "who worked with the student",
+    "which clinicians worked with",
+    "which clinician helped",
+    "which provider helped",
+    "who helped them",
+    "who helped the student",
+    "who was the provider",
+    "who covered the student",
+    "who was supporting",
+    "which caregivers",
+    "which nurse supported",
+    "which staff supported",
+    "which agency staff supported",
+    "agency staff who worked with",
+    "which agency staff",
+    "care providers for the student",
+    "support provided by",
+    "providers in this month",
+    "provider summary for this student",
+    "clinician summary for this student",
+    "provider distribution for this student",
+    "see support breakdown",
+    "show me agency staff",
+    "providers who worked with the student"
+  ],
+  "entity_role": "student",
+  "metric": "cost",
+  "requires_month": false,
+  "supports_multi_entity": false
+},
     "vendor_invoices": {
       "intent_synonyms": [
         "vendor invoices",
@@ -597,21 +632,7 @@
       ],
       "primary_entity": "clinician"
     },
-    "student_provider_breakdown": {
-      "triggers": [
-        "who worked with",
-        "providers for",
-        "providers who worked with",
-        "providers that worked with",
-        "which clinicians",
-        "who supported",
-        "who provided services",
-        "clinician breakdown",
-        "provider breakdown",
-        "provider list for"
-      ],
-      "primary_entity": "student"
-    },
+
     "district_monthly": {
       "triggers": [
         "district monthly",
@@ -627,6 +648,30 @@
       ],
       "primary_entity": "district"
     },
+
+    "student_provider_breakdown": {
+  "triggers": [
+    "provider breakdown",
+    "clinician breakdown",
+    "breakdown by provider",
+    "breakdown by clinician",
+    "providers for",
+    "providers working with",
+    "providers who worked with",
+    "providers that worked with",
+    "provider list for",
+    "clinician list for",
+    "provider breakdown for",
+    "clinician breakdown for",
+    "provider report for",
+    "clinician report for",
+    "provider distribution",
+    "distribution by provider",
+    "provider summary",
+    "clinician summary"
+  ],
+  "primary_entity": "student"
+},
     "vendor_monthly": {
       "triggers": [
         "vendor monthly",
