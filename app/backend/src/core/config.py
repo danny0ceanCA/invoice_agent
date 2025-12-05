@@ -43,6 +43,12 @@ class Settings(BaseSettings):
     )
     auth0_domain: str | None = Field(default=None, alias="AUTH0_DOMAIN")
     auth0_audience: str | None = Field(default=None, alias="AUTH0_AUDIENCE")
+    analytics_default_model: str = Field(
+        default="gpt-4.1-mini", alias="ANALYTICS_DEFAULT_MODEL"
+    )
+    analytics_logic_model: str = Field(
+        default="gpt-5.1", alias="ANALYTICS_LOGIC_MODEL"
+    )
 
     model_config = SettingsConfigDict(
         case_sensitive=False,
