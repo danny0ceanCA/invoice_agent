@@ -2019,6 +2019,9 @@ def _build_agent() -> Agent:
     insight_system_prompt = build_insight_system_prompt()
     business_rule_system_prompt = build_business_rule_system_prompt()
 
+    default_model = settings.analytics_default_model or DEFAULT_MODEL
+    logic_model = settings.analytics_logic_model or LOGIC_MODEL
+
     workflow = Workflow(
         nlv_system_prompt=nlv_system_prompt,
         entity_resolution_system_prompt=entity_resolution_system_prompt,
@@ -2036,15 +2039,15 @@ def _build_agent() -> Agent:
     tools = [_build_run_sql_tool(engine), _build_list_s3_tool()]
     return Agent(
         client=client,
-        nlv_model=DEFAULT_MODEL,
-        entity_model=DEFAULT_MODEL,
-        sql_planner_model=DEFAULT_MODEL,
-        router_model=DEFAULT_MODEL,
-        logic_model=LOGIC_MODEL,
-        render_model=DEFAULT_MODEL,
-        validator_model=DEFAULT_MODEL,
-        insight_model=DEFAULT_MODEL,
-        business_rule_model=DEFAULT_MODEL,
+        nlv_model=default_model,
+        entity_model=default_model,
+        sql_planner_model=default_model,
+        router_model=default_model,
+        logic_model=logic_model,
+        render_model=default_model,
+        validator_model=default_model,
+        insight_model=default_model,
+        business_rule_model=default_model,
         workflow=workflow,
         tools=tools,
     )
