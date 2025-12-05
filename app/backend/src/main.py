@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 # Explicitly load the .env file located in app/backend/
 env_path = os.path.join(os.path.dirname(__file__), "../.env")
 load_dotenv(dotenv_path=os.path.abspath(env_path))
-print("DEBUG OPENAI_API_KEY:", os.getenv("OPENAI_API_KEY"))
+print("DEBUG: OpenAI key loaded (hidden)")
 
 
 from fastapi import FastAPI
