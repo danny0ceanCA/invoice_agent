@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "last_updated": "2025-12-03",
+  "last_updated": "2025-12-05",
 
   "entities": {
     "types": {
@@ -272,40 +272,41 @@
     },
 
     "student_provider_breakdown": {
-  "intent_synonyms": [
-    "who supported",
-    "who provided support",
-    "who provided services",
-    "who worked with the student",
-    "which clinicians worked with",
-    "which clinician helped",
-    "which provider helped",
-    "who helped them",
-    "who helped the student",
-    "who was the provider",
-    "who covered the student",
-    "who was supporting",
-    "which caregivers",
-    "which nurse supported",
-    "which staff supported",
-    "which agency staff supported",
-    "agency staff who worked with",
-    "which agency staff",
-    "care providers for the student",
-    "support provided by",
-    "providers in this month",
-    "provider summary for this student",
-    "clinician summary for this student",
-    "provider distribution for this student",
-    "see support breakdown",
-    "show me agency staff",
-    "providers who worked with the student"
-  ],
-  "entity_role": "student",
-  "metric": "cost",
-  "requires_month": false,
-  "supports_multi_entity": false
-},
+      "intent_synonyms": [
+        "who supported",
+        "who provided support",
+        "who provided services",
+        "who worked with the student",
+        "which clinicians worked with",
+        "which clinician helped",
+        "which provider helped",
+        "who helped them",
+        "who helped the student",
+        "who was the provider",
+        "who covered the student",
+        "who was supporting",
+        "which caregivers",
+        "which nurse supported",
+        "which staff supported",
+        "which agency staff supported",
+        "agency staff who worked with",
+        "which agency staff",
+        "care providers for the student",
+        "support provided by",
+        "providers in this month",
+        "provider summary for this student",
+        "clinician summary for this student",
+        "provider distribution for this student",
+        "see support breakdown",
+        "show me agency staff",
+        "providers who worked with the student"
+      ],
+      "entity_role": "student",
+      "metric": "cost",
+      "requires_month": false,
+      "supports_multi_entity": false
+    },
+
     "vendor_invoices": {
       "intent_synonyms": [
         "vendor invoices",
@@ -480,7 +481,6 @@
         "what’s the directional trend",
         "long-term movement",
         "over time movement",
-        "time-based pattern",
         "does it show growth",
         "does it show decline",
         "how does the curve look",
@@ -599,39 +599,179 @@
       "metric": "caseload",
       "supports_multi_entity": false
     },
+
     "clinician_student_breakdown": {
-  "intent_synonyms": [
-    "who they supported",
-    "who they helped",
-    "who they worked with",
-    "who they provided support to",
-    "who received support from them",
-    "who they provided services to",
-    "who was supported",
-    "who received care from them",
-    "who they were assigned to",
-    "who they collaborated with",
-    "who they covered",
-    "who they assisted",
-    "show who they supported",
-    "show who they worked with",
-    "show who received support",
-    "the individuals they supported",
-    "the individuals they worked with",
-    "the individuals who received support",
-    "list those they supported",
-    "list those they worked with",
-    "who was under their care",
-    "who they were working with",
-    "who they interacted with",
-    "who they served",
-    "who received their support"
-  ],
-  "entity_role": "clinician",
-  "metric": "cost",
-  "requires_month": false,
-  "supports_multi_entity": false
-}
+      "intent_synonyms": [
+        "who they supported",
+        "who they helped",
+        "who they worked with",
+        "who they provided support to",
+        "who received support from them",
+        "who they provided services to",
+        "who was supported",
+        "who received care from them",
+        "who they were assigned to",
+        "who they collaborated with",
+        "who they covered",
+        "who they assisted",
+        "show who they supported",
+        "show who they worked with",
+        "show who received support",
+        "the individuals they supported",
+        "the individuals they worked with",
+        "the individuals who received support",
+        "list those they supported",
+        "list those they worked with",
+        "who was under their care",
+        "who they were working with",
+        "who they interacted with",
+        "who they served",
+        "who received their support"
+      ],
+      "entity_role": "clinician",
+      "metric": "cost",
+      "requires_month": false,
+      "supports_multi_entity": false
+    },
+
+    "district_service_code_spend": {
+      "intent_synonyms": [
+        "district spending by service",
+        "district spending by service code",
+        "how much the district is spending for each service",
+        "how much we spend on each service",
+        "cost per service per month",
+        "district service breakdown",
+        "service-level spend",
+        "service code costs",
+        "service by month costs",
+        "monthly spend by service",
+        "district cost per service",
+        "district spending by service type",
+        "spending broken out by service"
+      ],
+      "entity_role": "district",
+      "metric": "cost",
+      "requires_month": false,
+      "supports_multi_entity": false
+    },
+
+    "student_service_code_monthly": {
+      "intent_synonyms": [
+        "student spending by service",
+        "student spending by service code",
+        "student cost by service code",
+        "how much each service cost for this student",
+        "service breakdown for this student",
+        "cost by service type for this student",
+        "student services by month and service",
+        "service-level detail for this student",
+        "student's service code costs",
+        "how much was spent for each service for this student"
+      ],
+      "entity_role": "student",
+      "metric": "cost",
+      "requires_month": false,
+      "supports_multi_entity": false
+    },
+
+    "provider_service_code_monthly": {
+      "intent_synonyms": [
+        "provider spending by service",
+        "provider spending by service code",
+        "provider cost by service code",
+        "hours by service for this clinician",
+        "what services this provider delivered by type",
+        "service breakdown for clinician",
+        "service mix for this provider",
+        "provider's service codes by month",
+        "cost by service for this provider"
+      ],
+      "entity_role": "clinician",
+      "metric": "cost",
+      "requires_month": false,
+      "supports_multi_entity": false
+    },
+
+    "student_year_summary": {
+      "intent_synonyms": [
+        "yearly spend for this student",
+        "student cost this year",
+        "year to date cost for this student",
+        "annual total for this student",
+        "yearly total for this student",
+        "school year summary for this student",
+        "total cost for the year for this student",
+        "total hours and cost this year for this student"
+      ],
+      "entity_role": "student",
+      "metric": "cost",
+      "requires_month": false,
+      "supports_multi_entity": false
+    },
+
+    "student_daily_hours": {
+      "intent_synonyms": [
+        "daily hours for this student",
+        "student hours by day",
+        "day by day hours for this student",
+        "how many hours each day for this student",
+        "daily service pattern for this student",
+        "hours for this student each day"
+      ],
+      "entity_role": "student",
+      "metric": "hours",
+      "requires_month": false,
+      "supports_multi_entity": false
+    },
+
+    "provider_daily_hours": {
+      "intent_synonyms": [
+        "daily hours for this provider",
+        "daily hours for this clinician",
+        "provider hours by day",
+        "day by day hours for this provider",
+        "how many hours each day for this provider",
+        "daily coverage for this provider"
+      ],
+      "entity_role": "clinician",
+      "metric": "hours",
+      "requires_month": false,
+      "supports_multi_entity": false
+    },
+
+    "district_daily_coverage": {
+      "intent_synonyms": [
+        "district daily coverage",
+        "daily across the district",
+        "day by day district hours",
+        "district hours per day",
+        "district daily hours",
+        "daily coverage for the district",
+        "how many hours per day district-wide",
+        "daily number of students and clinicians served"
+      ],
+      "entity_role": "district",
+      "metric": "hours",
+      "requires_month": false,
+      "supports_multi_entity": false
+    },
+
+    "student_service_intensity": {
+      "intent_synonyms": [
+        "service intensity for this student",
+        "average hours per day for this student",
+        "how intense services were for this student",
+        "service frequency for this student",
+        "service days and average hours per day",
+        "how often this student was served",
+        "how concentrated services were for this student"
+      ],
+      "entity_role": "student",
+      "metric": "hours",
+      "requires_month": false,
+      "supports_multi_entity": false
+    }
   },
 
   "router_modes": {
@@ -650,6 +790,7 @@
       ],
       "primary_entity": "student"
     },
+
     "provider_monthly": {
       "triggers": [
         "provider monthly",
@@ -683,28 +824,29 @@
     },
 
     "student_provider_breakdown": {
-  "triggers": [
-    "provider breakdown",
-    "clinician breakdown",
-    "breakdown by provider",
-    "breakdown by clinician",
-    "providers for",
-    "providers working with",
-    "providers who worked with",
-    "providers that worked with",
-    "provider list for",
-    "clinician list for",
-    "provider breakdown for",
-    "clinician breakdown for",
-    "provider report for",
-    "clinician report for",
-    "provider distribution",
-    "distribution by provider",
-    "provider summary",
-    "clinician summary"
-  ],
-  "primary_entity": "student"
-},
+      "triggers": [
+        "provider breakdown",
+        "clinician breakdown",
+        "breakdown by provider",
+        "breakdown by clinician",
+        "providers for",
+        "providers working with",
+        "providers who worked with",
+        "providers that worked with",
+        "provider list for",
+        "clinician list for",
+        "provider breakdown for",
+        "clinician breakdown for",
+        "provider report for",
+        "clinician report for",
+        "provider distribution",
+        "distribution by provider",
+        "provider summary",
+        "clinician summary"
+      ],
+      "primary_entity": "student"
+    },
+
     "vendor_monthly": {
       "triggers": [
         "vendor monthly",
@@ -720,6 +862,7 @@
       ],
       "primary_entity": "vendor"
     },
+
     "top_invoices": {
       "triggers": [
         "top invoices",
@@ -735,6 +878,7 @@
       ],
       "primary_entity": "invoice"
     },
+
     "invoice_details": {
       "triggers": [
         "invoice number",
@@ -750,6 +894,7 @@
       ],
       "primary_entity": "invoice"
     },
+
     "provider_caseload_monthly": {
       "triggers": [
         "caseload",
@@ -767,18 +912,123 @@
     },
 
     "clinician_student_breakdown": {
-  "triggers": [
-    "list students for",
-    "students for",
-    "student list for",
-    "students assigned to",
-    "student assignments for",
-    "individuals for",
-    "assignments for"
-  ],
-  "primary_entity": "clinician"
-}
+      "triggers": [
+        "list students for",
+        "students for",
+        "student list for",
+        "students assigned to",
+        "student assignments for",
+        "individuals for",
+        "assignments for"
+      ],
+      "primary_entity": "clinician"
+    },
 
+    "district_service_code_monthly": {
+      "triggers": [
+        "by service",
+        "by service code",
+        "each service",
+        "each service code",
+        "service breakdown",
+        "service code breakdown",
+        "service report",
+        "services by month",
+        "spending by service",
+        "cost by service",
+        "spending by service code",
+        "district service breakdown"
+      ],
+      "primary_entity": "district"
+    },
+
+    "student_service_code_monthly": {
+      "triggers": [
+        "by service for this student",
+        "by service code for this student",
+        "student service breakdown",
+        "student service code breakdown",
+        "services for this student by month",
+        "service report for this student",
+        "cost by service for this student",
+        "service breakdown for this student"
+      ],
+      "primary_entity": "student"
+    },
+
+    "provider_service_code_monthly": {
+      "triggers": [
+        "by service for this provider",
+        "by service code for this provider",
+        "provider service breakdown",
+        "clinician service breakdown",
+        "service mix for this provider",
+        "services this provider delivered by type",
+        "cost by service for this provider"
+      ],
+      "primary_entity": "clinician"
+    },
+
+    "student_daily": {
+      "triggers": [
+        "daily for this student",
+        "day by day for this student",
+        "each day for this student",
+        "daily hours for this student",
+        "daily cost for this student",
+        "by day for this student",
+        "student daily pattern"
+      ],
+      "primary_entity": "student"
+    },
+
+    "provider_daily": {
+      "triggers": [
+        "daily for this provider",
+        "daily for this clinician",
+        "day by day for this provider",
+        "each day for this provider",
+        "daily hours for this provider",
+        "by day for this provider",
+        "provider daily pattern"
+      ],
+      "primary_entity": "clinician"
+    },
+
+    "district_daily": {
+      "triggers": [
+        "district daily coverage",
+        "daily across the district",
+        "day by day district",
+        "district hours per day",
+        "district daily hours",
+        "daily coverage for the district"
+      ],
+      "primary_entity": "district"
+    },
+
+    "student_year_summary": {
+      "triggers": [
+        "for the year for this student",
+        "this school year for this student",
+        "year to date for this student",
+        "annual total for this student",
+        "yearly total for this student",
+        "school year summary for this student"
+      ],
+      "primary_entity": "student"
+    },
+
+    "student_service_intensity_monthly": {
+      "triggers": [
+        "service intensity for this student",
+        "average hours per day for this student",
+        "how intense services were for this student",
+        "service frequency for this student",
+        "service days and average hours per day"
+      ],
+      "primary_entity": "student"
+    }
   },
 
   "materialized_views": {
@@ -815,18 +1065,37 @@
       "columns": ["district_key", "clinician", "service_year", "service_month_num", "service_month", "num_students", "total_hours", "total_cost"]
     },
     "mv_provider_student_monthly": {
-  "purpose": "Clinician × Student breakdown per month",
-  "columns": [
-    "district_key",
-    "clinician",
-    "student",
-    "service_year",
-    "service_month_num",
-    "service_month",
-    "total_hours",
-    "total_cost"
-  ]
-}
+      "purpose": "Clinician × Student breakdown per month",
+      "columns": ["district_key", "clinician", "student", "service_year", "service_month_num", "service_month", "total_hours", "total_cost"]
+    },
+    "mv_district_service_code_monthly": {
+      "purpose": "District totals by service_code per month",
+      "columns": ["district_key", "service_code", "service_year", "service_month_num", "service_month", "total_hours", "total_cost"]
+    },
+    "mv_student_year_summary": {
+      "purpose": "Yearly totals per student (district, year)",
+      "columns": ["district_key", "student", "service_year", "total_hours", "total_cost"]
+    },
+    "mv_student_service_code_monthly": {
+      "purpose": "Student × service_code hours + cost per month",
+      "columns": ["district_key", "student", "service_code", "service_year", "service_month_num", "service_month", "total_hours", "total_cost"]
+    },
+    "mv_provider_service_code_monthly": {
+      "purpose": "Clinician × service_code hours + cost per month",
+      "columns": ["district_key", "clinician", "service_code", "service_year", "service_month_num", "service_month", "total_hours", "total_cost"]
+    },
+    "mv_provider_daily_hours": {
+      "purpose": "Daily hours + cost per clinician",
+      "columns": ["district_key", "clinician", "service_date", "total_hours", "total_cost"]
+    },
+    "mv_student_service_intensity_monthly": {
+      "purpose": "Student service_days, hours, and avg_hours_per_day per month",
+      "columns": ["district_key", "student", "service_year", "service_month_num", "service_month", "service_days", "total_hours", "avg_hours_per_day"]
+    },
+    "mv_district_daily_coverage": {
+      "purpose": "District daily hours, cost, #students, #clinicians",
+      "columns": ["district_key", "service_date", "total_hours", "total_cost", "num_students", "num_clinicians"]
+    }
   },
 
   "mode_to_mv_map": {
@@ -838,7 +1107,16 @@
     "vendor_monthly": "mv_vendor_monthly_hours_cost",
     "top_invoices": "mv_invoice_summary",
     "provider_caseload_monthly": "mv_provider_caseload_monthly",
-    "clinician_student_breakdown": "mv_provider_student_monthly"
+    "clinician_student_breakdown": "mv_provider_student_monthly",
+
+    "district_service_code_monthly": "mv_district_service_code_monthly",
+    "student_service_code_monthly": "mv_student_service_code_monthly",
+    "provider_service_code_monthly": "mv_provider_service_code_monthly",
+    "student_daily": "mv_student_daily_hours",
+    "provider_daily": "mv_provider_daily_hours",
+    "district_daily": "mv_district_daily_coverage",
+    "student_year_summary": "mv_student_year_summary",
+    "student_service_intensity_monthly": "mv_student_service_intensity_monthly"
   },
 
   "validation": {
