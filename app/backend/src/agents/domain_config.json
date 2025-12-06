@@ -1213,8 +1213,7 @@
       "low_month": "{entity} had the lowest {metric} in {month}."
     }
   }
-},
-
+,
 "multi_turn": {
   "version": "1.0",
   "model": {
@@ -1636,6 +1635,6 @@
         "time_window_kind": "this_month"
       }
     }
-  ]
+   ]
+    }
 }
-
