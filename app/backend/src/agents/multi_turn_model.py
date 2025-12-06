@@ -332,18 +332,28 @@ class MultiTurnConversationManager:
                 LOGGER.debug("multi-turn-mti skipped: llm_client_or_model_missing")
                 return None
 
-            system_prompt = prompt
+            system_content = prompt
             user_payload = {
                 "previous_slots": previous_slots,
                 "user_message": user_message,
             }
+
+            # Add pronoun context if we have an active entity
+            if state.active_topic and state.active_topic.get("value"):
+                active_name = state.active_topic["value"]
+                pronoun_hint = (
+                    "When the user uses pronouns like 'her', 'him', or 'them', "
+                    f"assume they refer to '{active_name}' unless the user explicitly "
+                    "mentions a different entity."
+                )
+                system_content = system_content + "\n\n" + pronoun_hint
 
             try:
                 response = self.llm_client.chat.completions.create(
                     model=self.llm_model,
                     response_format={"type": "json_object"},
                     messages=[
-                        {"role": "system", "content": system_prompt},
+                        {"role": "system", "content": system_content},
                         {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
                     ],
                 )
