@@ -339,6 +339,123 @@ class MultiTurnConversationManager:
         if time_window_kind:
             state.last_period_type = time_window_kind
 
+    def _compose_fused_query(
+        self,
+        slots: Dict[str, Any],
+        user_message: str,
+        previous_query: Optional[str] = None,
+    ) -> str:
+        """
+        Build a clean, planner-friendly fused query from MTI slots.
+        """
+        if not slots:
+            return previous_query or user_message
+
+        entity_role = slots.get("entity_role")
+        entity_name = slots.get("entity_name")
+        metric = slots.get("metric")
+        mode = slots.get("mode")
+        time_window_kind = slots.get("time_window_kind")
+
+        def metric_phrase(value):
+            if value == "hours":
+                return "hours"
+            if value == "caseload":
+                return "caseload"
+            return "cost"
+
+        def time_phrase(kind):
+            if not kind or kind == "unspecified":
+                return ""
+            mapping = {
+                "this_school_year": " for this school year",
+                "last_school_year": " for last school year",
+                "this_month": " for this month",
+                "last_month": " for last month",
+                "ytd": " year to date for this school year",
+                "explicit_month": " for the requested month",
+                "explicit_range": " for the requested date range",
+                "fall": " for the fall term",
+                "winter": " for the winter term",
+                "spring": " for the spring term",
+                "summer": " for the summer term",
+            }
+            return mapping.get(kind, "")
+
+        def subject_phrase(role, name):
+            if role == "student":
+                return f"student {name}" if name else "the student"
+            if role == "clinician":
+                return f"clinician {name}" if name else "the clinician"
+            if role == "vendor":
+                return f"vendor {name}" if name else "the vendor"
+            if role == "invoice":
+                return "invoices"
+            if role == "district":
+                return "the district"
+            return name or "the record"
+
+        m = metric_phrase(metric)
+        t = time_phrase(time_window_kind)
+        subj = subject_phrase(entity_role, entity_name)
+
+        # Mode-based templates
+        if mode == "student_monthly":
+            return f"Show monthly {m} for {subj}{t}."
+
+        if mode == "student_provider_breakdown":
+            return f"Show provider breakdown by {m} for {subj}{t}."
+
+        if mode == "provider_monthly":
+            return f"Show monthly {m} for {subj}{t}."
+
+        if mode == "district_monthly":
+            return f"Show district-wide monthly {m}{t}."
+
+        if mode == "vendor_monthly":
+            return f"Show monthly {m} for {subj}{t}."
+
+        if mode == "provider_caseload_monthly":
+            return f"Show monthly caseload for {subj}{t}."
+
+        if mode == "clinician_student_breakdown":
+            return f"Show all students {subj} supported{t}."
+
+        if mode == "student_list":
+            return f"Show student list{t}."
+
+        if mode == "clinician_list":
+            return f"Show clinician list{t}."
+
+        if mode == "top_invoices":
+            return f"Show top invoices by {m}{t}."
+
+        if mode == "district_service_code_monthly":
+            return f"Show district spending by service code{t}."
+
+        if mode == "student_service_code_monthly":
+            return f"Show spending by service code for {subj}{t}."
+
+        if mode == "provider_service_code_monthly":
+            return f"Show spending by service code for {subj}{t}."
+
+        if mode == "student_daily":
+            return f"Show daily {m} for {subj}{t}."
+
+        if mode == "provider_daily":
+            return f"Show daily {m} for {subj}{t}."
+
+        if mode == "district_daily":
+            return f"Show district-wide daily {m}{t}."
+
+        if mode == "student_year_summary":
+            return f"Show yearly summary of {m} for {subj}{t}."
+
+        if mode == "student_service_intensity_monthly":
+            return f"Show monthly service intensity for {subj}{t}."
+
+        return previous_query or user_message
+
     def _apply_mti_decision(
         self,
         decision: Dict[str, Any],
@@ -354,7 +471,10 @@ class MultiTurnConversationManager:
 
         decision_type = decision.get("decision")
         slots = decision.get("slots") or {}
-        fused_query = decision.get("fused_query") or user_message
+        previous_query = state.original_query
+        if not previous_query and isinstance(state.active_topic, dict):
+            previous_query = state.active_topic.get("last_query")
+        fused_query = self._compose_fused_query(slots, user_message, previous_query)
         reason = decision.get("reason")
 
         if decision_type == "clarification":
@@ -374,6 +494,9 @@ class MultiTurnConversationManager:
         if decision_type == "new_topic":
             self.clear_state(session_id)
             state = self._start_new_thread(user_message, required_slots)
+            fused_query = self._compose_fused_query(
+                slots, user_message, previous_query=None
+            )
             self._apply_mti_slots(state, slots, fused_query)
             state.original_query = fused_query
             state.latest_user_message = user_message
@@ -394,6 +517,7 @@ class MultiTurnConversationManager:
         if decision_type == "fuse":
             state.latest_user_message = user_message
             state.history.append({"role": "user", "content": user_message})
+            fused_query = self._compose_fused_query(slots, user_message, previous_query)
             self._apply_mti_slots(state, slots, fused_query)
             if state.active_topic:
                 state.active_topic["last_query"] = fused_query
