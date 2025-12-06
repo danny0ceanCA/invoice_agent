@@ -56,6 +56,7 @@ class ConversationState:
     last_period_start: Optional[str] = None
     last_period_end: Optional[str] = None
     last_month: Optional[str] = None
+    last_explicit_month: Optional[str] = None
     last_year_window: Optional[str] = None
     last_session_id: Optional[str] = None
     active_mode: Optional[str] = None
@@ -80,6 +81,7 @@ class ConversationState:
             last_period_start=data.get("last_period_start"),
             last_period_end=data.get("last_period_end"),
             last_month=data.get("last_month"),
+            last_explicit_month=data.get("last_explicit_month"),
             last_year_window=data.get("last_year_window"),
             last_session_id=data.get("last_session_id"),
             active_mode=data.get("active_mode"),
@@ -1344,6 +1346,7 @@ class MultiTurnConversationManager:
                 "last_period_start",
                 "last_period_end",
                 "last_month",
+                "last_explicit_month",
                 "last_year_window",
             ]:
                 setattr(state, field_name, None)
@@ -1358,6 +1361,7 @@ class MultiTurnConversationManager:
                 "last_period_start",
                 "last_period_end",
                 "last_month",
+                "last_explicit_month",
                 "last_year_window",
             ]:
                 if period_info.get(field_name) is None:
@@ -1368,6 +1372,7 @@ class MultiTurnConversationManager:
             "last_period_start",
             "last_period_end",
             "last_month",
+            "last_explicit_month",
             "last_year_window",
         ]:
             if field_name in period_info and period_info[field_name] is not None:
@@ -1441,6 +1446,7 @@ class MultiTurnConversationManager:
             last_period_start=period_info.get("last_period_start"),
             last_period_end=period_info.get("last_period_end"),
             last_month=period_info.get("last_month"),
+            last_explicit_month=period_info.get("last_explicit_month"),
             last_year_window=period_info.get("last_year_window"),
         )
 
@@ -1688,6 +1694,7 @@ class MultiTurnConversationManager:
             "last_period_start": None,
             "last_period_end": None,
             "last_month": None,
+            "last_explicit_month": None,
             "last_year_window": None,
             "has_explicit_period": False,
         }
@@ -1696,6 +1703,30 @@ class MultiTurnConversationManager:
             return info
 
         text = message.lower()
+
+        # Detect explicit month phrases like "in July" or "for September"
+        months = [
+            "january",
+            "february",
+            "march",
+            "april",
+            "may",
+            "june",
+            "july",
+            "august",
+            "september",
+            "october",
+            "november",
+            "december",
+        ]
+        lower_msg = text
+        for m in months:
+            if f"in {m}" in lower_msg or f"for {m}" in lower_msg:
+                info["last_explicit_month"] = m.capitalize()
+                info["last_month"] = m.capitalize()
+                info["last_period_type"] = "explicit_month"
+                return info
+
         info["has_explicit_period"] = bool(re.search(r"\b\d{4}-\d{2}-\d{2}\b", text))
 
         today = date.today()
