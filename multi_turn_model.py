@@ -103,10 +103,14 @@ class MultiTurnConversationManager:
         redis_client: "Redis",
         state_ttl_seconds: int = 86400,
         multi_turn_config: Optional[Dict[str, Any]] = None,
+        llm_client: "OpenAI" | None = None,
+        llm_model: str | None = None,
     ) -> None:
         self.redis = redis_client
         self.state_ttl_seconds = state_ttl_seconds
         self.multi_turn_config = multi_turn_config or get_multi_turn_config()
+        self.llm_client = llm_client
+        self.llm_model = llm_model
 
     def _state_key(self, session_id: str) -> str:
         return f"session:{session_id}:state"
@@ -264,13 +268,51 @@ class MultiTurnConversationManager:
                 prompt_preview=prompt[:500],
             )
 
-            # Placeholder for actual MTI LLM call. When available, replace the stub below
-            # with a structured LLM invocation and JSON parsing.
-            # Example:
-            # response = llm_client.generate(prompt)
-            # decision = json.loads(response)
-            # return decision
-            return None
+            if not self.llm_client or not self.llm_model:
+                LOGGER.debug("multi-turn-mti skipped: llm_client_or_model_missing")
+                return None
+
+            system_prompt = prompt
+            user_payload = {
+                "previous_slots": previous_slots,
+                "user_message": user_message,
+            }
+
+            try:
+                response = self.llm_client.chat.completions.create(
+                    model=self.llm_model,
+                    response_format={"type": "json_object"},
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
+                    ],
+                )
+            except Exception as exc:  # pragma: no cover - defensive
+                LOGGER.warning("multi-turn-mti llm_call_failed", error=str(exc))
+                return None
+
+            try:
+                raw = response.choices[0].message.content  # type: ignore[index]
+            except Exception as exc:  # pragma: no cover - defensive
+                LOGGER.warning("multi-turn-mti missing_response_content", error=str(exc))
+                return None
+
+            if not raw:
+                LOGGER.warning("multi-turn-mti empty_response")
+                return None
+
+            try:
+                decision = json.loads(raw)
+            except Exception as exc:  # pragma: no cover - defensive
+                LOGGER.warning("multi-turn-mti json_parse_failed", error=str(exc))
+                return None
+
+            required_keys = {"decision", "reason", "slots", "fused_query"}
+            if not required_keys.issubset(decision.keys() if isinstance(decision, dict) else set()):
+                LOGGER.warning("multi-turn-mti invalid_payload", payload_type=type(decision).__name__)
+                return None
+
+            return decision
         except Exception as exc:  # pragma: no cover - defensive
             LOGGER.warning("multi-turn-mti failed", error=str(exc))
             return None
