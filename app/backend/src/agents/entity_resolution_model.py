@@ -5,7 +5,12 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import structlog
 from openai import OpenAI
+
+from .json_utils import _extract_json_object
+
+LOGGER = structlog.get_logger(__name__)
 
 
 def build_entity_resolution_system_prompt() -> str:
@@ -108,11 +113,17 @@ def run_entity_resolution_model(
             messages=messages,
             temperature=temperature,
         )
-        assistant_content = response.choices[0].message.content if response.choices else None
-        parsed = json.loads(assistant_content or "{}")
+        try:
+            assistant_content = response.choices[0].message.content if response.choices else None
+        except Exception as exc:  # pragma: no cover - defensive
+            LOGGER.warning("llm_missing_content", error=str(exc))
+            raise
+
+        parsed = _extract_json_object(assistant_content or "{}")
         if not isinstance(parsed, dict):
             return _default_payload(normalized_intent)
-    except Exception:
+    except Exception as exc:
+        LOGGER.warning("entity_resolution_model_failed", error=str(exc))
         return _default_payload(normalized_intent)
 
     payload = _default_payload(normalized_intent)

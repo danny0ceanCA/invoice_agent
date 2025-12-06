@@ -7,6 +7,7 @@ import structlog
 from openai import OpenAI
 
 from .domain_config_loader import load_domain_config
+from .json_utils import _extract_json_object
 
 
 LOGGER = structlog.get_logger(__name__)
@@ -409,8 +410,13 @@ def run_sql_router_model(
             messages=messages,
             temperature=temperature,
         )
-        assistant_content = response.choices[0].message.content if response.choices else None
-        parsed = json.loads(assistant_content or "{}")
+        try:
+            assistant_content = response.choices[0].message.content if response.choices else None
+        except Exception as exc:  # pragma: no cover - defensive
+            LOGGER.warning("llm_missing_content", error=str(exc))
+            raise
+
+        parsed = _extract_json_object(assistant_content or "{}")
     except Exception as exc:  # pragma: no cover - defensive
         LOGGER.warning("router_model_failed", error=str(exc))
         return fallback_decision

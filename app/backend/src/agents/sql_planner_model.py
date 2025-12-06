@@ -6,10 +6,14 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
-from openai import OpenAI
+import structlog
 from jinja2 import Environment, FileSystemLoader
+from openai import OpenAI
 
 from .domain_config_loader import load_domain_config
+from .json_utils import _extract_json_object
+
+LOGGER = structlog.get_logger(__name__)
 
 
 def build_sql_planner_system_prompt() -> str:
@@ -314,11 +318,17 @@ def run_sql_planner_model(
             messages=messages,
             temperature=temperature,
         )
-        assistant_content = response.choices[0].message.content if response.choices else None
-        parsed = json.loads(assistant_content or "{}")
+        try:
+            assistant_content = response.choices[0].message.content if response.choices else None
+        except Exception as exc:  # pragma: no cover - defensive
+            LOGGER.warning("llm_missing_content", error=str(exc))
+            raise
+
+        parsed = _extract_json_object(assistant_content or "{}")
         if not isinstance(parsed, dict):
             raise ValueError("Invalid planner response")
-    except Exception:
+    except Exception as exc:
+        LOGGER.warning("planner_model_failed", error=str(exc))
         return {
             "plan": None,
             "requires_clarification": False,
