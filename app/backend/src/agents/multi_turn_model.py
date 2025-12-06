@@ -51,6 +51,7 @@ class ConversationState:
     resolved_slots: Dict[str, str] = field(default_factory=dict)
     history: List[Dict[str, str]] = field(default_factory=list)
     active_topic: Dict[str, Any] = field(default_factory=dict)
+    candidate_entities: List[str] = field(default_factory=list)
     last_period_type: Optional[str] = None
     last_period_start: Optional[str] = None
     last_period_end: Optional[str] = None
@@ -74,6 +75,7 @@ class ConversationState:
             resolved_slots=dict(data.get("resolved_slots", {})),
             history=list(data.get("history", [])),
             active_topic=dict(data.get("active_topic", {})),
+            candidate_entities=list(data.get("candidate_entities", [])),
             last_period_type=data.get("last_period_type"),
             last_period_start=data.get("last_period_start"),
             last_period_end=data.get("last_period_end"),
@@ -145,16 +147,22 @@ class MultiTurnConversationManager:
         except Exception:
             pass
 
-    def _get_pattern_list(self, key: str, default: List[str]) -> List[str]:
+    def _get_pattern_list(
+        self, key: str, default: Optional[List[str]] = None
+    ) -> List[str]:
         """Read a pattern list from config with a safe fallback."""
 
         patterns = self.multi_turn_config.get("patterns", {}) if self.multi_turn_config else {}
+        default = default or []
         return list(patterns.get(key, []) or default)
 
-    def _get_topic_pattern_list(self, key: str, default: List[str]) -> List[str]:
+    def _get_topic_pattern_list(
+        self, key: str, default: Optional[List[str]] = None
+    ) -> List[str]:
         topic_patterns = (
             self.multi_turn_config.get("topic_patterns", {}) if self.multi_turn_config else {}
         )
+        default = default or []
         return list(topic_patterns.get(key, []) or default)
 
     def _get_name_stop_words(self) -> List[str]:
@@ -184,6 +192,42 @@ class MultiTurnConversationManager:
         ]
         return self._get_pattern_list("name_stop_words", default_stops)
 
+    def _should_reset_topic(self, user_message: str, state: ConversationState) -> bool:
+        """
+        More conservative reset logic:
+        Only reset the topic when:
+        - user explicitly uses reset triggers
+        - entity name appears that is DIFFERENT from active_topic
+        - user explicitly uses new intent openers AND the message contains a NEW entity
+        """
+        msg = user_message.lower()
+
+        # explicit resets
+        for trig in self._get_topic_pattern_list("reset_triggers"):
+            if trig in msg:
+                return True
+
+        # if no active topic, cannot reset
+        if not state.active_topic:
+            return False
+
+        active_name = state.active_topic.get("value", "").lower()
+
+        # detect if user mentions a different name → new topic
+        for name in state.candidate_entities:
+            if name.lower() != active_name and name.lower() in msg:
+                return True
+
+        # detect "new intent openers" only if a new entity is referenced
+        for opener in self._get_topic_pattern_list("new_intent_openers"):
+            if msg.startswith(opener):
+                # opener alone doesn't reset — only reset if new entity appears
+                for name in state.candidate_entities:
+                    if name.lower() != active_name and name.lower() in msg:
+                        return True
+
+        return False
+
     def _build_previous_slots(self, state: ConversationState) -> Dict[str, Optional[str]]:
         active_topic = state.active_topic if isinstance(state.active_topic, dict) else {}
         return {
@@ -194,6 +238,31 @@ class MultiTurnConversationManager:
             "plan_kind": getattr(state, "last_plan_kind", None),
             "time_window_kind": getattr(state, "last_period_type", None),
         }
+
+    def _fallback_decision(self, user_message: str) -> Optional[str]:
+        """
+        Only fallback when MTI *clearly* cannot classify something
+        AND the message looks like a single-turn new query.
+
+        This greatly reduces SAFE_FUSION_RESET.
+        """
+        msg = user_message.strip().lower()
+
+        # If it's a list intent → never fallback
+        if any(phrase in msg for phrase in self._get_pattern_list("list_intent_phrases")):
+            return None
+
+        # If it's a pure time follow-up → MTI should handle, not fallback
+        if any(phrase in msg for phrase in self._get_pattern_list("time_shift_phrases")):
+            return None
+
+        # If it looks like a new standalone query
+        for opener in self._get_topic_pattern_list("new_intent_openers"):
+            if msg.startswith(opener):
+                return "new_topic"
+
+        # otherwise, do not fallback
+        return None
 
     def _run_mti(self, state: ConversationState, user_message: str) -> Optional[dict]:
         """
@@ -900,80 +969,14 @@ class MultiTurnConversationManager:
                 "state": fresh_state.to_dict(),
             }
 
-        new_intent_openers = self._get_topic_pattern_list(
-            "new_intent_openers",
-            [
-                "i want",
-                "give me",
-                "show me",
-                "list",
-                "top",
-                "highest",
-                "summary",
-                "most expensive",
-                "all invoices",
-                "what are",
-                "what is",
-                "vendor summary",
-            ],
-        )
-        if any(lower_message.startswith(o) for o in new_intent_openers):
+        if self._should_reset_topic(user_message, state):
             return _reset_thread_and_return()
 
-        extracted_name_new = self._extract_name(user_message)
-        if extracted_name_new and self._is_valid_name(extracted_name_new):
-            active_value = state.active_topic.get("value") if state.active_topic else None
-            if not active_value or extracted_name_new.lower() != str(active_value).lower():
-                return _reset_thread_and_return()
-
-        district_terms = self._get_topic_pattern_list(
-            "reset_triggers",
-            ["district", "district-wide", "all invoices", "vendor summary"],
-        )
-        if any(term in lower_message for term in district_terms):
+        fallback_decision = self._fallback_decision(user_message)
+        if fallback_decision == "new_topic":
             return _reset_thread_and_return()
-
-        last_mode = getattr(state, "last_mode", None)
-        if last_mode == "invoice_details":
-            summary_keywords = ["top", "highest", "summary", "total", "spend"]
-            if any(keyword in lower_message for keyword in summary_keywords):
-                return _reset_thread_and_return()
 
         has_active_topic = state.original_query is not None
-
-        invoice_detail_followup = has_active_topic and any(
-            term in lower_message
-            for term in [
-                "invoice detail",
-                "invoice details",
-                "line item",
-                "line items",
-                "drill down",
-                "drilldown",
-            ]
-        )
-
-        followup_markers = self._get_pattern_list(
-            "followup_markers",
-            [
-                "now",
-                "also",
-                "what about",
-                "continue",
-                "next",
-                "same",
-                "and",
-                "and for him",
-                "and for her",
-                "and for them",
-            ],
-        )
-        if (
-            not time_only_followup
-            and not invoice_detail_followup
-            and not any(marker in lower_message for marker in followup_markers)
-        ):
-            return _reset_thread_and_return()
 
         is_list_followup = (
             self._refers_to_prior_list(user_message, state) if has_active_topic else False
