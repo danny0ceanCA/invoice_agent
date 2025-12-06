@@ -1213,4 +1213,429 @@
       "low_month": "{entity} had the lowest {metric} in {month}."
     }
   }
+},
+
+"multi_turn": {
+  "version": "1.0",
+  "model": {
+    "decision_labels": [
+      "fuse",
+      "new_topic",
+      "clarification"
+    ],
+    "output_schema": {
+      "decision": "fuse | new_topic | clarification",
+      "reason": "string",
+      "slots": {
+        "entity_role": "student | clinician | vendor | invoice | district | null",
+        "entity_name": "string | null",
+        "metric": "cost | hours | caseload | null",
+        "mode": "router_mode key or null",
+        "plan_kind": "plan_kinds key or null",
+        "time_window_kind": "explicit_range | explicit_month | this_month | last_month | this_school_year | last_school_year | ytd | fall | winter | spring | summer | unspecified"
+      },
+      "fused_query": "string"
+    }
+  },
+
+  "slots": {
+    "entity_role": {
+      "description": "Primary domain entity the conversation is about.",
+      "allowed_values": ["student", "clinician", "vendor", "invoice", "district"],
+      "aligns_with": "entities.types"
+    },
+    "entity_name": {
+      "description": "Resolved display name for the active entity (e.g., student or clinician full name).",
+      "nullable": true
+    },
+    "metric": {
+      "description": "Primary metric the user cares about in this thread.",
+      "allowed_values": ["cost", "hours", "caseload"],
+      "aligns_with": "metrics"
+    },
+    "mode": {
+      "description": "Router mode describing the shape of the report/table.",
+      "allowed_values": [
+        "student_monthly",
+        "provider_monthly",
+        "district_monthly",
+        "student_provider_breakdown",
+        "vendor_monthly",
+        "top_invoices",
+        "invoice_details",
+        "student_list",
+        "clinician_list",
+        "provider_caseload_monthly",
+        "clinician_student_breakdown",
+        "district_service_code_monthly",
+        "student_service_code_monthly",
+        "provider_service_code_monthly",
+        "student_daily",
+        "provider_daily",
+        "district_daily",
+        "student_year_summary",
+        "student_service_intensity_monthly"
+      ],
+      "aligns_with": "router_modes"
+    },
+    "plan_kind": {
+      "description": "Semantic analytics plan kind produced by the planner.",
+      "allowed_values": [
+        "student_monthly_spend",
+        "student_monthly_hours",
+        "student_list",
+        "clinician_list",
+        "student_invoices",
+        "vendor_monthly_spend",
+        "student_provider_breakdown",
+        "vendor_invoices",
+        "district_monthly_spend",
+        "comparison",
+        "trend",
+        "top_invoices",
+        "caseload",
+        "clinician_student_breakdown",
+        "district_service_code_spend",
+        "student_service_code_monthly",
+        "provider_service_code_monthly",
+        "student_year_summary",
+        "student_daily_hours",
+        "provider_daily_hours",
+        "district_daily_coverage",
+        "student_service_intensity"
+      ],
+      "aligns_with": "plan_kinds"
+    },
+    "time_window_kind": {
+      "description": "Abstract time window classification used for follow-ups and fusion.",
+      "allowed_values": [
+        "explicit_range",
+        "explicit_month",
+        "this_month",
+        "last_month",
+        "this_school_year",
+        "last_school_year",
+        "ytd",
+        "fall",
+        "winter",
+        "spring",
+        "summer",
+        "unspecified"
+      ],
+      "aligns_with": "time_windows.named_windows"
+    }
+  },
+
+  "decision_types": {
+    "time_only_followup": {
+      "description": "User changes only the time window while keeping the same entity, metric, and general report shape.",
+      "changes_slots": ["time_window_kind"],
+      "inherits_slots": ["entity_role", "entity_name", "metric", "mode", "plan_kind"],
+      "default_mode_behavior": "reuse_previous_mode"
+    },
+    "provider_time_followup": {
+      "description": "User asks which providers/clinicians supported the same student for a specific time window.",
+      "changes_slots": ["mode", "plan_kind", "metric", "time_window_kind"],
+      "inherits_slots": ["entity_role", "entity_name"],
+      "requires_entity_role": "student",
+      "sets_mode": "student_provider_breakdown",
+      "sets_plan_kind": "student_provider_breakdown"
+    },
+    "metric_followup": {
+      "description": "User keeps the same entity and time, but switches metric (e.g., cost → hours, hours → caseload).",
+      "changes_slots": ["metric", "plan_kind"],
+      "inherits_slots": ["entity_role", "entity_name", "time_window_kind", "mode"]
+    },
+    "list_followup": {
+      "description": "User refers back to a previously shown list (students, clinicians, invoices) and wants to refine/filter it.",
+      "changes_slots": [],
+      "inherits_slots": ["entity_role", "mode", "time_window_kind"],
+      "allowed_modes": ["student_list", "clinician_list", "top_invoices"]
+    },
+    "new_topic": {
+      "description": "Start a new topic; previous entity and time window should not be reused.",
+      "resets_slots": ["entity_role", "entity_name", "metric", "mode", "plan_kind", "time_window_kind"]
+    },
+    "clarification_needed": {
+      "description": "User input is ambiguous or under-specified; agent should ask a concrete follow-up question instead of guessing.",
+      "resets_slots": [],
+      "inherits_slots": ["entity_role", "entity_name", "metric", "mode", "plan_kind", "time_window_kind"]
+    }
+  },
+
+  "patterns": {
+    "followup_markers": [
+      "now",
+      "also",
+      "and",
+      "then",
+      "next",
+      "same",
+      "continue",
+      "too",
+      "as well"
+    ],
+    "time_shift_phrases": [
+      "what about",
+      "how about",
+      "this month",
+      "last month",
+      "next month",
+      "this school year",
+      "this year",
+      "last school year",
+      "last year",
+      "ytd",
+      "year to date",
+      "in september",
+      "in october",
+      "in november",
+      "in december",
+      "in january",
+      "in february",
+      "in march",
+      "in april",
+      "in may",
+      "in june",
+      "in july",
+      "in august"
+    ],
+    "provider_focus_phrases": [
+      "who supported",
+      "who helped",
+      "who provided",
+      "which providers",
+      "which clinicians",
+      "which nurses",
+      "which staff",
+      "which care staff",
+      "which health aides",
+      "provider breakdown",
+      "by provider",
+      "by clinician",
+      "provider summary",
+      "clinician summary"
+    ],
+    "metric_switch_phrases": {
+      "hours": [
+        "hours",
+        "hrs",
+        "time",
+        "time worked",
+        "service hours",
+        "coverage hours"
+      ],
+      "cost": [
+        "cost",
+        "spend",
+        "charges",
+        "billing",
+        "amount we paid",
+        "how much did we pay",
+        "how much it cost",
+        "total cost"
+      ],
+      "caseload": [
+        "caseload",
+        "how many students",
+        "student load",
+        "kids served",
+        "students served",
+        "how many kids they have",
+        "how many on their list"
+      ]
+    },
+    "list_intent_phrases": [
+      "student list",
+      "list students",
+      "list all students",
+      "show students",
+      "clinician list",
+      "provider list",
+      "list providers",
+      "list all clinicians",
+      "show providers",
+      "show clinicians"
+    ],
+    "list_reference_phrases": [
+      "that list",
+      "this list",
+      "the list you just showed",
+      "the list you showed",
+      "those students",
+      "those providers",
+      "that provider list",
+      "that student list"
+    ],
+    "pronoun_followup_starters": [
+      "who supported her",
+      "who supported him",
+      "who supported them",
+      "who helped her",
+      "who helped him",
+      "who helped them",
+      "who worked with her",
+      "who worked with him",
+      "who worked with them",
+      "what about her",
+      "what about him",
+      "what about them"
+    ]
+  },
+
+  "topic_patterns": {
+    "new_intent_openers": [
+      "i want",
+      "show me",
+      "give me",
+      "list",
+      "how many",
+      "get",
+      "what is",
+      "what are",
+      "can you pull",
+      "can you show"
+    ],
+    "reset_triggers": [
+      "reset please",
+      "start over",
+      "new question",
+      "clear",
+      "clear conversation"
+    ],
+    "entity_change_starts_new_topic": true,
+    "name_only_starts_topic": true,
+    "list_intents_start_topic": true
+  },
+
+  "period_handling": {
+    "detect_school_year": true,
+    "detect_months": true,
+    "detect_ytd": true,
+    "inherit_if_followup": true,
+    "clear_if_new_topic": true
+  },
+
+  "defaults": {
+    "default_metric_if_unspecified": "cost",
+    "default_mode_for_student": "student_monthly",
+    "default_mode_for_clinician": "provider_monthly",
+    "default_mode_for_vendor": "vendor_monthly",
+    "default_mode_for_district": "district_monthly",
+    "default_time_window_kind_if_unspecified": "this_school_year"
+  },
+
+  "examples": [
+    {
+      "label": "student_provider_followup_september",
+      "previous_slots": {
+        "entity_role": "student",
+        "entity_name": "Evelyn Ramirez",
+        "metric": "cost",
+        "mode": "student_monthly",
+        "plan_kind": "student_monthly_spend",
+        "time_window_kind": "this_school_year"
+      },
+      "user_message": "Who supported her in September?",
+      "expected_decision_type": "provider_time_followup",
+      "expected_decision": "fuse",
+      "expected_slots": {
+        "entity_role": "student",
+        "entity_name": "Evelyn Ramirez",
+        "metric": "hours",
+        "mode": "student_provider_breakdown",
+        "plan_kind": "student_provider_breakdown",
+        "time_window_kind": "explicit_month"
+      }
+    },
+    {
+      "label": "time_only_followup_october",
+      "previous_slots": {
+        "entity_role": "student",
+        "entity_name": "Jordan Lee",
+        "metric": "cost",
+        "mode": "student_monthly",
+        "plan_kind": "student_monthly_spend",
+        "time_window_kind": "this_school_year"
+      },
+      "user_message": "What about October?",
+      "expected_decision_type": "time_only_followup",
+      "expected_decision": "fuse",
+      "expected_slots": {
+        "entity_role": "student",
+        "entity_name": "Jordan Lee",
+        "metric": "cost",
+        "mode": "student_monthly",
+        "plan_kind": "student_monthly_spend",
+        "time_window_kind": "explicit_month"
+      }
+    },
+    {
+      "label": "metric_followup_hours",
+      "previous_slots": {
+        "entity_role": "student",
+        "entity_name": "Chloe Barnes",
+        "metric": "cost",
+        "mode": "student_monthly",
+        "plan_kind": "student_monthly_spend",
+        "time_window_kind": "this_school_year"
+      },
+      "user_message": "Now show hours instead.",
+      "expected_decision_type": "metric_followup",
+      "expected_decision": "fuse",
+      "expected_slots": {
+        "entity_role": "student",
+        "entity_name": "Chloe Barnes",
+        "metric": "hours",
+        "mode": "student_monthly",
+        "plan_kind": "student_monthly_hours",
+        "time_window_kind": "this_school_year"
+      }
+    },
+    {
+      "label": "new_topic_different_student",
+      "previous_slots": {
+        "entity_role": "student",
+        "entity_name": "Evelyn Ramirez",
+        "metric": "cost",
+        "mode": "student_monthly",
+        "plan_kind": "student_monthly_spend",
+        "time_window_kind": "this_school_year"
+      },
+      "user_message": "Show total cost for Jordan Lee last month.",
+      "expected_decision_type": "new_topic",
+      "expected_decision": "new_topic",
+      "expected_slots": {
+        "entity_role": "student",
+        "entity_name": "Jordan Lee",
+        "metric": "cost",
+        "mode": "student_monthly",
+        "plan_kind": "student_monthly_spend",
+        "time_window_kind": "last_month"
+      }
+    },
+    {
+      "label": "district_reset_from_student_context",
+      "previous_slots": {
+        "entity_role": "student",
+        "entity_name": "Evelyn Ramirez",
+        "metric": "cost",
+        "mode": "student_monthly",
+        "plan_kind": "student_monthly_spend",
+        "time_window_kind": "this_school_year"
+      },
+      "user_message": "Show district-wide spend this month.",
+      "expected_decision_type": "new_topic",
+      "expected_decision": "new_topic",
+      "expected_slots": {
+        "entity_role": "district",
+        "entity_name": null,
+        "metric": "cost",
+        "mode": "district_monthly",
+        "plan_kind": "district_monthly_spend",
+        "time_window_kind": "this_month"
+      }
+    }
+  ]
 }
+
