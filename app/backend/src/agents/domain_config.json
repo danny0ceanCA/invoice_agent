@@ -1645,7 +1645,762 @@
         "plan_kind": "district_monthly_spend",
         "time_window_kind": "this_month"
       }
+    },
+  {
+    "label": "time_only_followup_november_student_cost",
+    "previous_slots": {
+      "entity_role": "student",
+      "entity_name": "Evelyn Ramirez",
+      "metric": "cost",
+      "mode": "student_monthly",
+      "plan_kind": "student_monthly_spend",
+      "time_window_kind": "this_school_year"
+    },
+    "user_message": "What about November?",
+    "expected_decision_type": "time_only_followup",
+    "expected_decision": "fuse",
+    "expected_slots": {
+      "entity_role": "student",
+      "entity_name": "Evelyn Ramirez",
+      "metric": "cost",
+      "mode": "student_monthly",
+      "plan_kind": "student_monthly_spend",
+      "time_window_kind": "explicit_month"
     }
-   ]
+  },
+  {
+    "label": "time_only_followup_last_month_student_hours",
+    "previous_slots": {
+      "entity_role": "student",
+      "entity_name": "Jordan Lee",
+      "metric": "hours",
+      "mode": "student_monthly",
+      "plan_kind": "student_monthly_hours",
+      "time_window_kind": "this_school_year"
+    },
+    "user_message": "And last month?",
+    "expected_decision_type": "time_only_followup",
+    "expected_decision": "fuse",
+    "expected_slots": {
+      "entity_role": "student",
+      "entity_name": "Jordan Lee",
+      "metric": "hours",
+      "mode": "student_monthly",
+      "plan_kind": "student_monthly_hours",
+      "time_window_kind": "last_month"
     }
+  },
+  {
+    "label": "time_only_followup_this_month_district_cost",
+    "previous_slots": {
+      "entity_role": "district",
+      "entity_name": null,
+      "metric": "cost",
+      "mode": "district_monthly",
+      "plan_kind": "district_monthly_spend",
+      "time_window_kind": "this_school_year"
+    },
+    "user_message": "Now just this month.",
+    "expected_decision_type": "time_only_followup",
+    "expected_decision": "fuse",
+    "expected_slots": {
+      "entity_role": "district",
+      "entity_name": null,
+      "metric": "cost",
+      "mode": "district_monthly",
+      "plan_kind": "district_monthly_spend",
+      "time_window_kind": "this_month"
+    }
+  },
+  {
+    "label": "time_only_followup_ytd_vendor_cost",
+    "previous_slots": {
+      "entity_role": "vendor",
+      "entity_name": "BrightCare Nursing",
+      "metric": "cost",
+      "mode": "vendor_monthly",
+      "plan_kind": "vendor_monthly_spend",
+      "time_window_kind": "this_school_year"
+    },
+    "user_message": "Make it year to date instead.",
+    "expected_decision_type": "time_only_followup",
+    "expected_decision": "fuse",
+    "expected_slots": {
+      "entity_role": "vendor",
+      "entity_name": "BrightCare Nursing",
+      "metric": "cost",
+      "mode": "vendor_monthly",
+      "plan_kind": "vendor_monthly_spend",
+      "time_window_kind": "ytd"
+    }
+  },
+  {
+    "label": "time_only_followup_fall_student_cost",
+    "previous_slots": {
+      "entity_role": "student",
+      "entity_name": "Chloe Taylor",
+      "metric": "cost",
+      "mode": "student_monthly",
+      "plan_kind": "student_monthly_spend",
+      "time_window_kind": "this_school_year"
+    },
+    "user_message": "How about just the fall?",
+    "expected_decision_type": "time_only_followup",
+    "expected_decision": "fuse",
+    "expected_slots": {
+      "entity_role": "student",
+      "entity_name": "Chloe Taylor",
+      "metric": "cost",
+      "mode": "student_monthly",
+      "plan_kind": "student_monthly_spend",
+      "time_window_kind": "fall"
+    }
+  },
+  {
+    "label": "time_only_followup_explicit_month_text",
+    "previous_slots": {
+      "entity_role": "student",
+      "entity_name": "Avery Smith",
+      "metric": "cost",
+      "mode": "student_monthly",
+      "plan_kind": "student_monthly_spend",
+      "time_window_kind": "this_school_year"
+    },
+    "user_message": "Show me August instead.",
+    "expected_decision_type": "time_only_followup",
+    "expected_decision": "fuse",
+    "expected_slots": {
+      "entity_role": "student",
+      "entity_name": "Avery Smith",
+      "metric": "cost",
+      "mode": "student_monthly",
+      "plan_kind": "student_monthly_spend",
+      "time_window_kind": "explicit_month"
+    }
+  },
+  {
+    "label": "time_only_followup_last_school_year_student",
+    "previous_slots": {
+      "entity_role": "student",
+      "entity_name": "Jack Wilson",
+      "metric": "cost",
+      "mode": "student_monthly",
+      "plan_kind": "student_monthly_spend",
+      "time_window_kind": "this_school_year"
+    },
+    "user_message": "What about last school year?",
+    "expected_decision_type": "time_only_followup",
+    "expected_decision": "fuse",
+    "expected_slots": {
+      "entity_role": "student",
+      "entity_name": "Jack Wilson",
+      "metric": "cost",
+      "mode": "student_monthly",
+      "plan_kind": "student_monthly_spend",
+      "time_window_kind": "last_school_year"
+    }
+  },
+  {
+    "label": "time_only_followup_unspecified_from_list",
+    "previous_slots": {
+      "entity_role": "district",
+      "entity_name": null,
+      "metric": null,
+      "mode": "student_list",
+      "plan_kind": "student_list",
+      "time_window_kind": "this_school_year"
+    },
+    "user_message": "Now just this year.",
+    "expected_decision_type": "time_only_followup",
+    "expected_decision": "fuse",
+    "expected_slots": {
+      "entity_role": "district",
+      "entity_name": null,
+      "metric": null,
+      "mode": "student_list",
+      "plan_kind": "student_list",
+      "time_window_kind": "this_school_year"
+    }
+  },
+
+  {
+    "label": "provider_time_followup_who_supported_her_october",
+    "previous_slots": {
+      "entity_role": "student",
+      "entity_name": "Chloe Taylor",
+      "metric": "cost",
+      "mode": "student_monthly",
+      "plan_kind": "student_monthly_spend",
+      "time_window_kind": "this_school_year"
+    },
+    "user_message": "Who supported her in October?",
+    "expected_decision_type": "provider_time_followup",
+    "expected_decision": "fuse",
+    "expected_slots": {
+      "entity_role": "student",
+      "entity_name": "Chloe Taylor",
+      "metric": "hours",
+      "mode": "student_provider_breakdown",
+      "plan_kind": "student_provider_breakdown",
+      "time_window_kind": "explicit_month"
+    }
+  },
+  {
+    "label": "provider_time_followup_who_helped_him_this_month",
+    "previous_slots": {
+      "entity_role": "student",
+      "entity_name": "Carter Sanchez",
+      "metric": "cost",
+      "mode": "student_monthly",
+      "plan_kind": "student_monthly_spend",
+      "time_window_kind": "this_school_year"
+    },
+    "user_message": "Who helped him this month?",
+    "expected_decision_type": "provider_time_followup",
+    "expected_decision": "fuse",
+    "expected_slots": {
+      "entity_role": "student",
+      "entity_name": "Carter Sanchez",
+      "metric": "hours",
+      "mode": "student_provider_breakdown",
+      "plan_kind": "student_provider_breakdown",
+      "time_window_kind": "this_month"
+    }
+  },
+  {
+    "label": "provider_time_followup_which_nurses_supported_her_september",
+    "previous_slots": {
+      "entity_role": "student",
+      "entity_name": "Evelyn Ramirez",
+      "metric": "cost",
+      "mode": "student_monthly",
+      "plan_kind": "student_monthly_spend",
+      "time_window_kind": "this_school_year"
+    },
+    "user_message": "Which nurses supported her in September?",
+    "expected_decision_type": "provider_time_followup",
+    "expected_decision": "fuse",
+    "expected_slots": {
+      "entity_role": "student",
+      "entity_name": "Evelyn Ramirez",
+      "metric": "hours",
+      "mode": "student_provider_breakdown",
+      "plan_kind": "student_provider_breakdown",
+      "time_window_kind": "explicit_month"
+    }
+  },
+  {
+    "label": "provider_time_followup_who_provided_care_ytd",
+    "previous_slots": {
+      "entity_role": "student",
+      "entity_name": "Jordan Lee",
+      "metric": "cost",
+      "mode": "student_monthly",
+      "plan_kind": "student_monthly_spend",
+      "time_window_kind": "this_school_year"
+    },
+    "user_message": "Who provided care year to date?",
+    "expected_decision_type": "provider_time_followup",
+    "expected_decision": "fuse",
+    "expected_slots": {
+      "entity_role": "student",
+      "entity_name": "Jordan Lee",
+      "metric": "hours",
+      "mode": "student_provider_breakdown",
+      "plan_kind": "student_provider_breakdown",
+      "time_window_kind": "ytd"
+    }
+  },
+  {
+    "label": "provider_time_followup_pronoun_them_october",
+    "previous_slots": {
+      "entity_role": "student",
+      "entity_name": "Avery Smith",
+      "metric": "cost",
+      "mode": "student_monthly",
+      "plan_kind": "student_monthly_spend",
+      "time_window_kind": "this_school_year"
+    },
+    "user_message": "Who supported them in October?",
+    "expected_decision_type": "provider_time_followup",
+    "expected_decision": "fuse",
+    "expected_slots": {
+      "entity_role": "student",
+      "entity_name": "Avery Smith",
+      "metric": "hours",
+      "mode": "student_provider_breakdown",
+      "plan_kind": "student_provider_breakdown",
+      "time_window_kind": "explicit_month"
+    }
+  },
+  {
+    "label": "provider_time_followup_who_worked_with_her_last_month",
+    "previous_slots": {
+      "entity_role": "student",
+      "entity_name": "Chloe Taylor",
+      "metric": "cost",
+      "mode": "student_monthly",
+      "plan_kind": "student_monthly_spend",
+      "time_window_kind": "this_school_year"
+    },
+    "user_message": "Who worked with her last month?",
+    "expected_decision_type": "provider_time_followup",
+    "expected_decision": "fuse",
+    "expected_slots": {
+      "entity_role": "student",
+      "entity_name": "Chloe Taylor",
+      "metric": "hours",
+      "mode": "student_provider_breakdown",
+      "plan_kind": "student_provider_breakdown",
+      "time_window_kind": "last_month"
+    }
+  },
+  {
+    "label": "provider_time_followup_who_supported_her_fall",
+    "previous_slots": {
+      "entity_role": "student",
+      "entity_name": "Evelyn Ramirez",
+      "metric": "cost",
+      "mode": "student_monthly",
+      "plan_kind": "student_monthly_spend",
+      "time_window_kind": "this_school_year"
+    },
+    "user_message": "Who supported her during the fall?",
+    "expected_decision_type": "provider_time_followup",
+    "expected_decision": "fuse",
+    "expected_slots": {
+      "entity_role": "student",
+      "entity_name": "Evelyn Ramirez",
+      "metric": "hours",
+      "mode": "student_provider_breakdown",
+      "plan_kind": "student_provider_breakdown",
+      "time_window_kind": "fall"
+    }
+  },
+
+  {
+    "label": "metric_followup_hours_from_cost_student",
+    "previous_slots": {
+      "entity_role": "student",
+      "entity_name": "Chloe Taylor",
+      "metric": "cost",
+      "mode": "student_monthly",
+      "plan_kind": "student_monthly_spend",
+      "time_window_kind": "this_school_year"
+    },
+    "user_message": "Now show hours instead.",
+    "expected_decision_type": "metric_followup",
+    "expected_decision": "fuse",
+    "expected_slots": {
+      "entity_role": "student",
+      "entity_name": "Chloe Taylor",
+      "metric": "hours",
+      "mode": "student_monthly",
+      "plan_kind": "student_monthly_hours",
+      "time_window_kind": "this_school_year"
+    }
+  },
+  {
+    "label": "metric_followup_cost_from_hours_student",
+    "previous_slots": {
+      "entity_role": "student",
+      "entity_name": "Jordan Lee",
+      "metric": "hours",
+      "mode": "student_monthly",
+      "plan_kind": "student_monthly_hours",
+      "time_window_kind": "this_school_year"
+    },
+    "user_message": "Actually, show cost instead of hours.",
+    "expected_decision_type": "metric_followup",
+    "expected_decision": "fuse",
+    "expected_slots": {
+      "entity_role": "student",
+      "entity_name": "Jordan Lee",
+      "metric": "cost",
+      "mode": "student_monthly",
+      "plan_kind": "student_monthly_spend",
+      "time_window_kind": "this_school_year"
+    }
+  },
+  {
+    "label": "metric_followup_hours_for_district_trend",
+    "previous_slots": {
+      "entity_role": "district",
+      "entity_name": null,
+      "metric": "cost",
+      "mode": "district_monthly",
+      "plan_kind": "district_monthly_spend",
+      "time_window_kind": "this_school_year"
+    },
+    "user_message": "Can you show hours instead of spend?",
+    "expected_decision_type": "metric_followup",
+    "expected_decision": "fuse",
+    "expected_slots": {
+      "entity_role": "district",
+      "entity_name": null,
+      "metric": "hours",
+      "mode": "district_monthly",
+      "plan_kind": "district_daily_coverage",
+      "time_window_kind": "this_school_year"
+    }
+  },
+  {
+    "label": "metric_followup_caseload_for_clinician",
+    "previous_slots": {
+      "entity_role": "clinician",
+      "entity_name": "Sofia Thomas",
+      "metric": "hours",
+      "mode": "provider_monthly",
+      "plan_kind": "provider_daily_hours",
+      "time_window_kind": "this_school_year"
+    },
+    "user_message": "What about her caseload instead?",
+    "expected_decision_type": "metric_followup",
+    "expected_decision": "fuse",
+    "expected_slots": {
+      "entity_role": "clinician",
+      "entity_name": "Sofia Thomas",
+      "metric": "caseload",
+      "mode": "provider_caseload_monthly",
+      "plan_kind": "caseload",
+      "time_window_kind": "this_school_year"
+    }
+  },
+  {
+    "label": "metric_followup_hours_pronoun_followup",
+    "previous_slots": {
+      "entity_role": "student",
+      "entity_name": "Avery Smith",
+      "metric": "cost",
+      "mode": "student_monthly",
+      "plan_kind": "student_monthly_spend",
+      "time_window_kind": "this_school_year"
+    },
+    "user_message": "How many hours did they have instead?",
+    "expected_decision_type": "metric_followup",
+    "expected_decision": "fuse",
+    "expected_slots": {
+      "entity_role": "student",
+      "entity_name": "Avery Smith",
+      "metric": "hours",
+      "mode": "student_monthly",
+      "plan_kind": "student_monthly_hours",
+      "time_window_kind": "this_school_year"
+    }
+  },
+
+  {
+    "label": "list_followup_filter_that_student_list",
+    "previous_slots": {
+      "entity_role": "district",
+      "entity_name": null,
+      "metric": null,
+      "mode": "student_list",
+      "plan_kind": "student_list",
+      "time_window_kind": "this_school_year"
+    },
+    "user_message": "Filter that list to just students with last name Ramirez.",
+    "expected_decision_type": "list_followup",
+    "expected_decision": "fuse",
+    "expected_slots": {
+      "entity_role": "district",
+      "entity_name": null,
+      "metric": null,
+      "mode": "student_list",
+      "plan_kind": "student_list",
+      "time_window_kind": "this_school_year"
+    }
+  },
+  {
+    "label": "list_followup_top_invoices_for_that_list",
+    "previous_slots": {
+      "entity_role": "invoice",
+      "entity_name": null,
+      "metric": "cost",
+      "mode": "top_invoices",
+      "plan_kind": "top_invoices",
+      "time_window_kind": "this_school_year"
+    },
+    "user_message": "Now from that list just show the top 10.",
+    "expected_decision_type": "list_followup",
+    "expected_decision": "fuse",
+    "expected_slots": {
+      "entity_role": "invoice",
+      "entity_name": null,
+      "metric": "cost",
+      "mode": "top_invoices",
+      "plan_kind": "top_invoices",
+      "time_window_kind": "this_school_year"
+    }
+  },
+  {
+    "label": "list_followup_clinician_list_filter",
+    "previous_slots": {
+      "entity_role": "clinician",
+      "entity_name": null,
+      "metric": null,
+      "mode": "clinician_list",
+      "plan_kind": "clinician_list",
+      "time_window_kind": "this_school_year"
+    },
+    "user_message": "From that list, only show nurses.",
+    "expected_decision_type": "list_followup",
+    "expected_decision": "fuse",
+    "expected_slots": {
+      "entity_role": "clinician",
+      "entity_name": null,
+      "metric": null,
+      "mode": "clinician_list",
+      "plan_kind": "clinician_list",
+      "time_window_kind": "this_school_year"
+    }
+  },
+  {
+    "label": "list_followup_refer_to_those_students",
+    "previous_slots": {
+      "entity_role": "district",
+      "entity_name": null,
+      "metric": null,
+      "mode": "student_list",
+      "plan_kind": "student_list",
+      "time_window_kind": "this_school_year"
+    },
+    "user_message": "For those students, continue the list but sorted alphabetically.",
+    "expected_decision_type": "list_followup",
+    "expected_decision": "fuse",
+    "expected_slots": {
+      "entity_role": "district",
+      "entity_name": null,
+      "metric": null,
+      "mode": "student_list",
+      "plan_kind": "student_list",
+      "time_window_kind": "this_school_year"
+    }
+  },
+
+  {
+    "label": "new_topic_switch_to_different_student",
+    "previous_slots": {
+      "entity_role": "student",
+      "entity_name": "Evelyn Ramirez",
+      "metric": "cost",
+      "mode": "student_monthly",
+      "plan_kind": "student_monthly_spend",
+      "time_window_kind": "this_school_year"
+    },
+    "user_message": "Now show total cost for Jack Wilson this school year.",
+    "expected_decision_type": "new_topic",
+    "expected_decision": "new_topic",
+    "expected_slots": {
+      "entity_role": "student",
+      "entity_name": "Jack Wilson",
+      "metric": "cost",
+      "mode": "student_monthly",
+      "plan_kind": "student_monthly_spend",
+      "time_window_kind": "this_school_year"
+    }
+  },
+  {
+    "label": "new_topic_switch_to_vendor_from_student",
+    "previous_slots": {
+      "entity_role": "student",
+      "entity_name": "Chloe Taylor",
+      "metric": "cost",
+      "mode": "student_monthly",
+      "plan_kind": "student_monthly_spend",
+      "time_window_kind": "this_school_year"
+    },
+    "user_message": "Show monthly spend for the vendor BrightCare Nursing this year.",
+    "expected_decision_type": "new_topic",
+    "expected_decision": "new_topic",
+    "expected_slots": {
+      "entity_role": "vendor",
+      "entity_name": "BrightCare Nursing",
+      "metric": "cost",
+      "mode": "vendor_monthly",
+      "plan_kind": "vendor_monthly_spend",
+      "time_window_kind": "this_school_year"
+    }
+  },
+  {
+    "label": "new_topic_switch_to_district_from_vendor",
+    "previous_slots": {
+      "entity_role": "vendor",
+      "entity_name": "BrightCare Nursing",
+      "metric": "cost",
+      "mode": "vendor_monthly",
+      "plan_kind": "vendor_monthly_spend",
+      "time_window_kind": "this_school_year"
+    },
+    "user_message": "Show district-wide spend last month.",
+    "expected_decision_type": "new_topic",
+    "expected_decision": "new_topic",
+    "expected_slots": {
+      "entity_role": "district",
+      "entity_name": null,
+      "metric": "cost",
+      "mode": "district_monthly",
+      "plan_kind": "district_monthly_spend",
+      "time_window_kind": "last_month"
+    }
+  },
+  {
+    "label": "new_topic_switch_to_clinician_caseload",
+    "previous_slots": {
+      "entity_role": "student",
+      "entity_name": "Jordan Lee",
+      "metric": "cost",
+      "mode": "student_monthly",
+      "plan_kind": "student_monthly_spend",
+      "time_window_kind": "this_school_year"
+    },
+    "user_message": "Show me the caseload for clinician Sofia Thomas this school year.",
+    "expected_decision_type": "new_topic",
+    "expected_decision": "new_topic",
+    "expected_slots": {
+      "entity_role": "clinician",
+      "entity_name": "Sofia Thomas",
+      "metric": "caseload",
+      "mode": "provider_caseload_monthly",
+      "plan_kind": "caseload",
+      "time_window_kind": "this_school_year"
+    }
+  },
+  {
+    "label": "new_topic_switch_to_student_list",
+    "previous_slots": {
+      "entity_role": "clinician",
+      "entity_name": "Sofia Thomas",
+      "metric": "hours",
+      "mode": "provider_monthly",
+      "plan_kind": "provider_daily_hours",
+      "time_window_kind": "this_school_year"
+    },
+    "user_message": "Show me a student list for this school year.",
+    "expected_decision_type": "new_topic",
+    "expected_decision": "new_topic",
+    "expected_slots": {
+      "entity_role": "student",
+      "entity_name": null,
+      "metric": null,
+      "mode": "student_list",
+      "plan_kind": "student_list",
+      "time_window_kind": "this_school_year"
+    }
+  },
+  {
+    "label": "new_topic_switch_to_clinician_student_breakdown",
+    "previous_slots": {
+      "entity_role": "district",
+      "entity_name": null,
+      "metric": "cost",
+      "mode": "district_monthly",
+      "plan_kind": "district_monthly_spend",
+      "time_window_kind": "this_school_year"
+    },
+    "user_message": "Show which students clinician Sofia Thomas provided care for this school year.",
+    "expected_decision_type": "new_topic",
+    "expected_decision": "new_topic",
+    "expected_slots": {
+      "entity_role": "clinician",
+      "entity_name": "Sofia Thomas",
+      "metric": "cost",
+      "mode": "clinician_student_breakdown",
+      "plan_kind": "clinician_student_breakdown",
+      "time_window_kind": "this_school_year"
+    }
+  },
+
+  {
+    "label": "clarification_needed_which_student_totals",
+    "previous_slots": {
+      "entity_role": "student",
+      "entity_name": null,
+      "metric": "cost",
+      "mode": "student_monthly",
+      "plan_kind": "student_monthly_spend",
+      "time_window_kind": "this_school_year"
+    },
+    "user_message": "Show me total cost.",
+    "expected_decision_type": "clarification_needed",
+    "expected_decision": "clarification",
+    "expected_slots": {
+      "entity_role": "student",
+      "entity_name": null,
+      "metric": "cost",
+      "mode": "student_monthly",
+      "plan_kind": "student_monthly_spend",
+      "time_window_kind": "this_school_year"
+    }
+  },
+  {
+    "label": "clarification_needed_missing_time_period_district",
+    "previous_slots": {
+      "entity_role": "district",
+      "entity_name": null,
+      "metric": "cost",
+      "mode": "district_monthly",
+      "plan_kind": "district_monthly_spend",
+      "time_window_kind": "unspecified"
+    },
+    "user_message": "How much are we spending?",
+    "expected_decision_type": "clarification_needed",
+    "expected_decision": "clarification",
+    "expected_slots": {
+      "entity_role": "district",
+      "entity_name": null,
+      "metric": "cost",
+      "mode": "district_monthly",
+      "plan_kind": "district_monthly_spend",
+      "time_window_kind": "unspecified"
+    }
+  },
+  {
+    "label": "clarification_needed_pronoun_without_context",
+    "previous_slots": {
+      "entity_role": null,
+      "entity_name": null,
+      "metric": null,
+      "mode": null,
+      "plan_kind": null,
+      "time_window_kind": "unspecified"
+    },
+    "user_message": "How much did she cost this year?",
+    "expected_decision_type": "clarification_needed",
+    "expected_decision": "clarification",
+    "expected_slots": {
+      "entity_role": null,
+      "entity_name": null,
+      "metric": "cost",
+      "mode": null,
+      "plan_kind": null,
+      "time_window_kind": "this_school_year"
+    }
+  },
+  {
+    "label": "clarification_needed_which_month",
+    "previous_slots": {
+      "entity_role": "student",
+      "entity_name": "Chloe Taylor",
+      "metric": "cost",
+      "mode": "student_monthly",
+      "plan_kind": "student_monthly_spend",
+      "time_window_kind": "this_school_year"
+    },
+    "user_message": "Show me the monthly number.",
+    "expected_decision_type": "clarification_needed",
+    "expected_decision": "clarification",
+    "expected_slots": {
+      "entity_role": "student",
+      "entity_name": "Chloe Taylor",
+      "metric": "cost",
+      "mode": "student_monthly",
+      "plan_kind": "student_monthly_spend",
+            "time_window_kind": "this_school_year"
+    }
+  }
+]
 }
+}
+
+
