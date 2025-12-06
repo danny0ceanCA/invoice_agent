@@ -418,7 +418,17 @@ class MultiTurnConversationManager:
         Build a clean, planner-friendly fused query from MTI slots.
         """
         if not slots:
-            return previous_query or user_message
+            result = previous_query or user_message
+            LOGGER.debug(
+                "compose-fused-query",
+                entity_role=None,
+                entity_name=None,
+                metric=None,
+                mode=None,
+                time_window_kind=None,
+                output=result if "result" in locals() else None,
+            )
+            return result
 
         entity_role = slots.get("entity_role")
         entity_name = slots.get("entity_name")
@@ -470,60 +480,250 @@ class MultiTurnConversationManager:
 
         # Mode-based templates
         if mode == "student_monthly":
-            return f"Show monthly {m} for {subj}{t}."
+            result = f"Show monthly {m} for {subj}{t}."
+            LOGGER.debug(
+                "compose-fused-query",
+                entity_role=entity_role,
+                entity_name=entity_name,
+                metric=metric,
+                mode=mode,
+                time_window_kind=time_window_kind,
+                output=result if "result" in locals() else None,
+            )
+            return result
 
         if mode == "student_provider_breakdown":
-            return f"Show provider breakdown by {m} for {subj}{t}."
+            result = f"Show provider breakdown by {m} for {subj}{t}."
+            LOGGER.debug(
+                "compose-fused-query",
+                entity_role=entity_role,
+                entity_name=entity_name,
+                metric=metric,
+                mode=mode,
+                time_window_kind=time_window_kind,
+                output=result if "result" in locals() else None,
+            )
+            return result
 
         if mode == "provider_monthly":
-            return f"Show monthly {m} for {subj}{t}."
+            result = f"Show monthly {m} for {subj}{t}."
+            LOGGER.debug(
+                "compose-fused-query",
+                entity_role=entity_role,
+                entity_name=entity_name,
+                metric=metric,
+                mode=mode,
+                time_window_kind=time_window_kind,
+                output=result if "result" in locals() else None,
+            )
+            return result
 
         if mode == "district_monthly":
-            return f"Show district-wide monthly {m}{t}."
+            result = f"Show district-wide monthly {m}{t}."
+            LOGGER.debug(
+                "compose-fused-query",
+                entity_role=entity_role,
+                entity_name=entity_name,
+                metric=metric,
+                mode=mode,
+                time_window_kind=time_window_kind,
+                output=result if "result" in locals() else None,
+            )
+            return result
 
         if mode == "vendor_monthly":
-            return f"Show monthly {m} for {subj}{t}."
+            result = f"Show monthly {m} for {subj}{t}."
+            LOGGER.debug(
+                "compose-fused-query",
+                entity_role=entity_role,
+                entity_name=entity_name,
+                metric=metric,
+                mode=mode,
+                time_window_kind=time_window_kind,
+                output=result if "result" in locals() else None,
+            )
+            return result
 
         if mode == "provider_caseload_monthly":
-            return f"Show monthly caseload for {subj}{t}."
+            result = f"Show monthly caseload for {subj}{t}."
+            LOGGER.debug(
+                "compose-fused-query",
+                entity_role=entity_role,
+                entity_name=entity_name,
+                metric=metric,
+                mode=mode,
+                time_window_kind=time_window_kind,
+                output=result if "result" in locals() else None,
+            )
+            return result
 
         if mode == "clinician_student_breakdown":
-            return f"Show all students {subj} supported{t}."
+            result = f"Show all students {subj} supported{t}."
+            LOGGER.debug(
+                "compose-fused-query",
+                entity_role=entity_role,
+                entity_name=entity_name,
+                metric=metric,
+                mode=mode,
+                time_window_kind=time_window_kind,
+                output=result if "result" in locals() else None,
+            )
+            return result
 
         if mode == "student_list":
-            return f"Show student list{t}."
+            result = f"Show student list{t}."
+            LOGGER.debug(
+                "compose-fused-query",
+                entity_role=entity_role,
+                entity_name=entity_name,
+                metric=metric,
+                mode=mode,
+                time_window_kind=time_window_kind,
+                output=result if "result" in locals() else None,
+            )
+            return result
 
         if mode == "clinician_list":
-            return f"Show clinician list{t}."
+            result = f"Show clinician list{t}."
+            LOGGER.debug(
+                "compose-fused-query",
+                entity_role=entity_role,
+                entity_name=entity_name,
+                metric=metric,
+                mode=mode,
+                time_window_kind=time_window_kind,
+                output=result if "result" in locals() else None,
+            )
+            return result
 
         if mode == "top_invoices":
-            return f"Show top invoices by {m}{t}."
+            result = f"Show top invoices by {m}{t}."
+            LOGGER.debug(
+                "compose-fused-query",
+                entity_role=entity_role,
+                entity_name=entity_name,
+                metric=metric,
+                mode=mode,
+                time_window_kind=time_window_kind,
+                output=result if "result" in locals() else None,
+            )
+            return result
 
         if mode == "district_service_code_monthly":
-            return f"Show district spending by service code{t}."
+            result = f"Show district spending by service code{t}."
+            LOGGER.debug(
+                "compose-fused-query",
+                entity_role=entity_role,
+                entity_name=entity_name,
+                metric=metric,
+                mode=mode,
+                time_window_kind=time_window_kind,
+                output=result if "result" in locals() else None,
+            )
+            return result
 
         if mode == "student_service_code_monthly":
-            return f"Show spending by service code for {subj}{t}."
+            result = f"Show spending by service code for {subj}{t}."
+            LOGGER.debug(
+                "compose-fused-query",
+                entity_role=entity_role,
+                entity_name=entity_name,
+                metric=metric,
+                mode=mode,
+                time_window_kind=time_window_kind,
+                output=result if "result" in locals() else None,
+            )
+            return result
 
         if mode == "provider_service_code_monthly":
-            return f"Show spending by service code for {subj}{t}."
+            result = f"Show spending by service code for {subj}{t}."
+            LOGGER.debug(
+                "compose-fused-query",
+                entity_role=entity_role,
+                entity_name=entity_name,
+                metric=metric,
+                mode=mode,
+                time_window_kind=time_window_kind,
+                output=result if "result" in locals() else None,
+            )
+            return result
 
         if mode == "student_daily":
-            return f"Show daily {m} for {subj}{t}."
+            result = f"Show daily {m} for {subj}{t}."
+            LOGGER.debug(
+                "compose-fused-query",
+                entity_role=entity_role,
+                entity_name=entity_name,
+                metric=metric,
+                mode=mode,
+                time_window_kind=time_window_kind,
+                output=result if "result" in locals() else None,
+            )
+            return result
 
         if mode == "provider_daily":
-            return f"Show daily {m} for {subj}{t}."
+            result = f"Show daily {m} for {subj}{t}."
+            LOGGER.debug(
+                "compose-fused-query",
+                entity_role=entity_role,
+                entity_name=entity_name,
+                metric=metric,
+                mode=mode,
+                time_window_kind=time_window_kind,
+                output=result if "result" in locals() else None,
+            )
+            return result
 
         if mode == "district_daily":
-            return f"Show district-wide daily {m}{t}."
+            result = f"Show district-wide daily {m}{t}."
+            LOGGER.debug(
+                "compose-fused-query",
+                entity_role=entity_role,
+                entity_name=entity_name,
+                metric=metric,
+                mode=mode,
+                time_window_kind=time_window_kind,
+                output=result if "result" in locals() else None,
+            )
+            return result
 
         if mode == "student_year_summary":
-            return f"Show yearly summary of {m} for {subj}{t}."
+            result = f"Show yearly summary of {m} for {subj}{t}."
+            LOGGER.debug(
+                "compose-fused-query",
+                entity_role=entity_role,
+                entity_name=entity_name,
+                metric=metric,
+                mode=mode,
+                time_window_kind=time_window_kind,
+                output=result if "result" in locals() else None,
+            )
+            return result
 
         if mode == "student_service_intensity_monthly":
-            return f"Show monthly service intensity for {subj}{t}."
+            result = f"Show monthly service intensity for {subj}{t}."
+            LOGGER.debug(
+                "compose-fused-query",
+                entity_role=entity_role,
+                entity_name=entity_name,
+                metric=metric,
+                mode=mode,
+                time_window_kind=time_window_kind,
+                output=result if "result" in locals() else None,
+            )
+            return result
 
-        return previous_query or user_message
+        result = previous_query or user_message
+        LOGGER.debug(
+            "compose-fused-query",
+            entity_role=entity_role,
+            entity_name=entity_name,
+            metric=metric,
+            mode=mode,
+            time_window_kind=time_window_kind,
+            output=result if "result" in locals() else None,
+        )
+        return result
 
     def _apply_mti_decision(
         self,
@@ -544,6 +744,14 @@ class MultiTurnConversationManager:
         if not previous_query and isinstance(state.active_topic, dict):
             previous_query = state.active_topic.get("last_query")
         fused_query = self._compose_fused_query(slots, user_message, previous_query)
+        LOGGER.debug(
+            "mti-decision",
+            decision_type=decision_type,
+            slots=slots,
+            previous_query=previous_query,
+            fused_query=fused_query,
+            user_message=user_message,
+        )
         reason = decision.get("reason")
 
         if decision_type == "clarification":
