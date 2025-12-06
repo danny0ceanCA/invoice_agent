@@ -10,9 +10,13 @@ import json
 import re
 from typing import Any
 
+import structlog
 from openai import OpenAI
 
 from .ir import AnalyticsEntities, AnalyticsIR
+from .json_utils import _extract_json_object
+
+LOGGER = structlog.get_logger(__name__)
 
 
 # Rationale: The rendering stage now calls a real OpenAI model while keeping the
@@ -154,14 +158,20 @@ def run_rendering_model(
             messages=messages,
             temperature=temperature,
         )
-        assistant_content = response.choices[0].message.content if response.choices else None
-        parsed = json.loads(assistant_content or "{}")
+        try:
+            assistant_content = response.choices[0].message.content if response.choices else None
+        except Exception as exc:  # pragma: no cover - defensive
+            LOGGER.warning("llm_missing_content", error=str(exc))
+            raise
+
+        parsed = _extract_json_object(assistant_content or "{}")
         return {
             "text": str(parsed.get("text", "")).strip(),
             "html": parsed.get("html"),
             "rows": ir.rows,
         }
-    except Exception:
+    except Exception as exc:
+        LOGGER.warning("rendering_model_failed", error=str(exc))
         return {
             "text": "Here is an updated summary.",
             "html": None,

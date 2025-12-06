@@ -5,9 +5,13 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import structlog
 from openai import OpenAI
 
 from .ir import AnalyticsIR
+from .json_utils import _extract_json_object
+
+LOGGER = structlog.get_logger(__name__)
 
 
 def build_business_rule_system_prompt() -> str:
@@ -89,11 +93,17 @@ def run_business_rule_model(
             messages=messages,
             temperature=temperature,
         )
-        assistant_content = response.choices[0].message.content if response.choices else None
-        parsed = json.loads(assistant_content or "{}")
+        try:
+            assistant_content = response.choices[0].message.content if response.choices else None
+        except Exception as exc:  # pragma: no cover - defensive
+            LOGGER.warning("llm_missing_content", error=str(exc))
+            raise
+
+        parsed = _extract_json_object(assistant_content or "{}")
         if not isinstance(parsed, dict):
             raise ValueError("Invalid business rule response")
-    except Exception:
+    except Exception as exc:
+        LOGGER.warning("business_rule_model_failed", error=str(exc))
         return {
             "ok": True,
             "issues": [],

@@ -5,9 +5,13 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import structlog
 from openai import OpenAI
 
 from .ir import AnalyticsIR
+from .json_utils import _extract_json_object
+
+LOGGER = structlog.get_logger(__name__)
 
 
 def build_insight_system_prompt() -> str:
@@ -80,9 +84,15 @@ def run_insight_model(
             messages=messages,
             temperature=temperature,
         )
-        assistant_content = response.choices[0].message.content if response.choices else None
-        parsed = json.loads(assistant_content or "{}")
-    except Exception:
+        try:
+            assistant_content = response.choices[0].message.content if response.choices else None
+        except Exception as exc:  # pragma: no cover - defensive
+            LOGGER.warning("llm_missing_content", error=str(exc))
+            raise
+
+        parsed = _extract_json_object(assistant_content or "{}")
+    except Exception as exc:
+        LOGGER.warning("insight_model_failed", error=str(exc))
         parsed = {}
 
     if not isinstance(parsed, dict):
