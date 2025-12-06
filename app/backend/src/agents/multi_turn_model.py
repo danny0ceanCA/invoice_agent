@@ -810,6 +810,30 @@ class MultiTurnConversationManager:
             self._apply_mti_slots(state, slots, fused_query)
             if state.active_topic:
                 state.active_topic["last_query"] = fused_query
+
+            # --------------------------------------------------------------
+            # SAFETY RULE: CLEAR ENTITY CONTEXT FOR INVOICE/DISTRICT MODES
+            #
+            # These modes are NOT student-scoped. Inheriting an active_topic
+            # (e.g., student name) causes invalid SQL and logic failures.
+            #
+            # Modes:
+            #   - top_invoices
+            #   - invoice_details
+            #   - district_monthly
+            #   - district_daily
+            #
+            # When triggered, wipe active_topic so downstream SQL and routing
+            # do NOT apply student/vendor/provider filters incorrectly.
+            # --------------------------------------------------------------
+            invoice_or_district_modes = {
+                "top_invoices",
+                "invoice_details",
+                "district_monthly",
+                "district_daily",
+            }
+            if state.active_mode in invoice_or_district_modes:
+                state.active_topic = {}
             if not state.original_query:
                 state.original_query = fused_query
             needs_clarification = bool(state.missing_slots)
