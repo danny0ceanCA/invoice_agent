@@ -817,7 +817,9 @@
         "monthly totals",
         "monthly breakdown",
         "monthly summary",
-        "monthly view"
+        "monthly view",
+        "monthly",
+        "monthly cost"
       ],
       "primary_entity": "student"
     },
@@ -873,7 +875,16 @@
         "provider distribution",
         "distribution by provider",
         "provider summary",
-        "clinician summary"
+        "clinician summary",
+        "provided care",
+        "supported",
+        "supporting",
+        "providing care",
+        "worked with",
+        "supported",
+        "which staff",
+        "staff",
+        "taking care"
       ],
       "primary_entity": "student"
     },
