@@ -163,6 +163,32 @@
       "supports_multi_entity": false
     },
 
+    "student_list": {
+  "intent_synonyms": [
+    "list all students",
+    "show students",
+    "student list",
+    "who are the students",
+    "show me all students"
+  ],
+  "entity_role": "student",
+  "metric": null,
+  "supports_multi_entity": true
+},
+
+"clinician_list": {
+  "intent_synonyms": [
+    "list all clinicians",
+    "show clinicians",
+    "provider list",
+    "nurse list",
+    "show me all providers"
+  ],
+  "entity_role": "clinician",
+  "metric": null,
+  "supports_multi_entity": true
+},
+
     "student_invoices": {
       "intent_synonyms": [
         "student invoice history",
@@ -894,7 +920,24 @@
       ],
       "primary_entity": "invoice"
     },
+    "student_list": {
+  "triggers": [
+    "list all students",
+    "show students",
+    "student list"
+  ],
+  "primary_entity": "student"
+},
 
+"clinician_list": {
+  "triggers": [
+    "list all clinicians",
+    "show clinicians",
+    "provider list",
+    "clinician list"
+  ],
+  "primary_entity": "clinician"
+},
     "provider_caseload_monthly": {
       "triggers": [
         "caseload",
@@ -1095,6 +1138,14 @@
     "mv_district_daily_coverage": {
       "purpose": "District daily hours, cost, #students, #clinicians",
       "columns": ["district_key", "service_date", "total_hours", "total_cost", "num_students", "num_clinicians"]
+    },
+    "mv_student_list": {
+      "purpose": "Unique list of all students found in invoice line items",
+      "columns": ["student"]
+    },
+    "mv_clinician_list": {
+      "purpose": "Unique list of all clinicians found in invoice line items",
+      "columns": ["clinician"]
     }
   },
 
@@ -1108,7 +1159,6 @@
     "top_invoices": "mv_invoice_summary",
     "provider_caseload_monthly": "mv_provider_caseload_monthly",
     "clinician_student_breakdown": "mv_provider_student_monthly",
-
     "district_service_code_monthly": "mv_district_service_code_monthly",
     "student_service_code_monthly": "mv_student_service_code_monthly",
     "provider_service_code_monthly": "mv_provider_service_code_monthly",
@@ -1116,7 +1166,9 @@
     "provider_daily": "mv_provider_daily_hours",
     "district_daily": "mv_district_daily_coverage",
     "student_year_summary": "mv_student_year_summary",
-    "student_service_intensity_monthly": "mv_student_service_intensity_monthly"
+    "student_service_intensity_monthly": "mv_student_service_intensity_monthly",
+    "student_list": "mv_student_list",
+    "clinician_list": "mv_clinician_list"
   },
 
   "validation": {
