@@ -5,7 +5,7 @@
   "entities": {
     "types": {
       "student": ["student", "kid", "kids", "students", "child", "scholar", "kiddos", "student in care"],
-      "clinician": ["clinician", "provider", "nurse", "lpn", "lvn", "hha", "health aide", "caregiver", "care staff", "staff", "employees", "workers", "district staff"],
+      "clinician": ["clinician", "provider", "nurse", "nurses","lpn", "lvn","lvn's", "hha","hha's","health aides", "health aide", "caregiver", "care staff", "staff", "employees", "workers", "district staff"],
       "vendor": ["vendor", "company", "agency", "provider group", "external agency", "external contractor", "contractors", "contractor"],
       "invoice": ["invoice", "billing record", "bill", "invoices", "invoiced", "billed", "billing"]
     },
@@ -168,8 +168,10 @@
     "list all students",
     "show students",
     "student list",
-    "who are the students",
-    "show me all students"
+    "who are",
+    "show me all of the",
+    "see all of the",
+    "all of the"
   ],
   "entity_role": "student",
   "metric": null,
@@ -178,11 +180,14 @@
 
 "clinician_list": {
   "intent_synonyms": [
-    "list all clinicians",
-    "show clinicians",
-    "provider list",
-    "nurse list",
-    "show me all providers"
+    "I want to see all of the",
+    "see a list of",
+    "show me all the",
+    "show me all of the",
+    "who are all of the",
+    "show me a list",
+    "need to see all",
+    "see all of the"
   ],
   "entity_role": "clinician",
   "metric": null,
@@ -922,9 +927,7 @@
     },
     "student_list": {
   "triggers": [
-    "list all students",
-    "show students",
-    "student list"
+    "list"
   ],
   "primary_entity": "student"
 },
@@ -934,7 +937,9 @@
     "list all clinicians",
     "show clinicians",
     "provider list",
-    "clinician list"
+    "clinician list",
+    "staffing list",
+    "list"
   ],
   "primary_entity": "clinician"
 },
@@ -1141,12 +1146,13 @@
     },
     "mv_student_list": {
       "purpose": "Unique list of all students found in invoice line items",
-      "columns": ["student"]
+      "columns": ["district_key", "student"]
     },
     "mv_clinician_list": {
       "purpose": "Unique list of all clinicians found in invoice line items",
-      "columns": ["clinician"]
-    }
+      "columns": ["district_key", "clinician"]
+}
+
   },
 
   "mode_to_mv_map": {
