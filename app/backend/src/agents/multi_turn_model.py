@@ -15,25 +15,14 @@ import structlog
 
 LOGGER = structlog.get_logger(__name__)
 
-
-def find_project_root(start_path: Optional[Path] = None) -> Path:
-    """Best-effort search for the project root that contains domain_config.json."""
-
-    path = (start_path or Path(__file__)).resolve()
-    for parent in [path] + list(path.parents):
-        candidate = parent / "domain_config.json"
-        if candidate.is_file():
-            return parent
-    return path.parent
+CONFIG_PATH = Path(__file__).parent / "domain_config.json"
 
 
 def _load_domain_config() -> Dict[str, Any]:
     """Load domain_config.json safely, logging and returning an empty dict on failure."""
 
     try:
-        root = find_project_root()
-        config_path = root / "domain_config.json"
-        with config_path.open("r", encoding="utf-8") as f:
+        with CONFIG_PATH.open("r", encoding="utf-8") as f:
             return json.load(f)
     except Exception as exc:  # pragma: no cover - defensive
         LOGGER.warning("multi-turn-config load_failed", error=str(exc))

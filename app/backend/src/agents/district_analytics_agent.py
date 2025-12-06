@@ -19,7 +19,7 @@ from app.backend.src.core.config import get_settings
 from app.backend.src.core.memory import ConversationMemory, RedisConversationMemory
 from app.backend.src.db import get_engine
 from app.backend.src.services.s3 import get_s3_client
-from multi_turn_model import MultiTurnConversationManager
+from .multi_turn_model import MultiTurnConversationManager
 from .business_rule_model import build_business_rule_system_prompt, run_business_rule_model
 from .entity_resolution_model import (
     build_entity_resolution_system_prompt,
