@@ -1,12 +1,16 @@
+from pathlib import Path
 import json
-import os
-from functools import lru_cache
+import structlog
+
+LOGGER = structlog.get_logger(__name__)
+
+CONFIG_PATH = Path(__file__).parent / "domain_config.json"
 
 
-@lru_cache()
 def load_domain_config() -> dict:
-    """Load and cache domain_config.json from the agents folder."""
-    here = os.path.dirname(__file__)
-    config_path = os.path.join(here, "domain_config.json")
-    with open(config_path, "r") as f:
-        return json.load(f)
+    try:
+        with CONFIG_PATH.open("r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as exc:
+        LOGGER.warning("domain-config-load-failed", error=str(exc))
+        return {}
