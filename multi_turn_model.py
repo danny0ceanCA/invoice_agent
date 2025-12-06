@@ -7,12 +7,50 @@ import json
 import re
 from dataclasses import asdict, dataclass, field
 from datetime import date
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import structlog
 
 
 LOGGER = structlog.get_logger(__name__)
+
+
+def find_project_root(start_path: Optional[Path] = None) -> Path:
+    """Best-effort search for the project root that contains domain_config.json."""
+
+    path = (start_path or Path(__file__)).resolve()
+    for parent in [path] + list(path.parents):
+        candidate = parent / "domain_config.json"
+        if candidate.is_file():
+            return parent
+    return path.parent
+
+
+def _load_domain_config() -> Dict[str, Any]:
+    """Load domain_config.json safely, logging and returning an empty dict on failure."""
+
+    try:
+        root = find_project_root()
+        config_path = root / "domain_config.json"
+        with config_path.open("r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as exc:  # pragma: no cover - defensive
+        LOGGER.warning("multi-turn-config load_failed", error=str(exc))
+        return {}
+
+
+DOMAIN_CONFIG: Dict[str, Any] = _load_domain_config()
+MULTI_TURN_CONFIG: Dict[str, Any] = DOMAIN_CONFIG.get("multi_turn", {}) if DOMAIN_CONFIG else {}
+
+if not MULTI_TURN_CONFIG:
+    LOGGER.warning("multi-turn-config missing_or_empty")
+
+
+def get_multi_turn_config() -> Dict[str, Any]:
+    """Expose the loaded multi-turn configuration with a safe fallback."""
+
+    return MULTI_TURN_CONFIG or {}
 
 
 @dataclass
@@ -31,6 +69,8 @@ class ConversationState:
     last_year_window: Optional[str] = None
     last_session_id: Optional[str] = None
     active_mode: Optional[str] = None
+    last_metric: Optional[str] = None
+    last_plan_kind: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -52,13 +92,21 @@ class ConversationState:
             last_year_window=data.get("last_year_window"),
             last_session_id=data.get("last_session_id"),
             active_mode=data.get("active_mode"),
+            last_metric=data.get("last_metric"),
+            last_plan_kind=data.get("last_plan_kind"),
         )
 
 
 class MultiTurnConversationManager:
-    def __init__(self, redis_client: "Redis", state_ttl_seconds: int = 86400) -> None:
+    def __init__(
+        self,
+        redis_client: "Redis",
+        state_ttl_seconds: int = 86400,
+        multi_turn_config: Optional[Dict[str, Any]] = None,
+    ) -> None:
         self.redis = redis_client
         self.state_ttl_seconds = state_ttl_seconds
+        self.multi_turn_config = multi_turn_config or get_multi_turn_config()
 
     def _state_key(self, session_id: str) -> str:
         return f"session:{session_id}:state"
@@ -104,6 +152,237 @@ class MultiTurnConversationManager:
         except Exception:
             pass
 
+    def _get_pattern_list(self, key: str, default: List[str]) -> List[str]:
+        """Read a pattern list from config with a safe fallback."""
+
+        patterns = self.multi_turn_config.get("patterns", {}) if self.multi_turn_config else {}
+        return list(patterns.get(key, []) or default)
+
+    def _get_topic_pattern_list(self, key: str, default: List[str]) -> List[str]:
+        topic_patterns = (
+            self.multi_turn_config.get("topic_patterns", {}) if self.multi_turn_config else {}
+        )
+        return list(topic_patterns.get(key, []) or default)
+
+    def _get_name_stop_words(self) -> List[str]:
+        default_stops = [
+            "invoice",
+            "vendor",
+            "student",
+            "cost",
+            "amount",
+            "total",
+            "provider",
+            "providers",
+            "spend",
+            "burn",
+            "burn rate",
+            "expenses",
+            "charge",
+            "charges",
+            "health",
+            "care",
+            "hours",
+            "school",
+            "district",
+            "all",
+            "the",
+            "and",
+        ]
+        return self._get_pattern_list("name_stop_words", default_stops)
+
+    def _build_previous_slots(self, state: ConversationState) -> Dict[str, Optional[str]]:
+        active_topic = state.active_topic if isinstance(state.active_topic, dict) else {}
+        return {
+            "entity_role": active_topic.get("type"),
+            "entity_name": active_topic.get("value"),
+            "metric": getattr(state, "last_metric", None),
+            "mode": getattr(state, "active_mode", None),
+            "plan_kind": getattr(state, "last_plan_kind", None),
+            "time_window_kind": getattr(state, "last_period_type", None),
+        }
+
+    def _run_mti(self, state: ConversationState, user_message: str) -> Optional[dict]:
+        """
+        Call the Multi-Turn Intent (MTI) model to classify follow-ups.
+
+        Returns a dict with keys:
+          - decision: "fuse" | "new_topic" | "clarification"
+          - reason: string
+          - slots: { entity_role, entity_name, metric, mode, plan_kind, time_window_kind }
+          - fused_query: string (best-effort)
+        or None on failure.
+        """
+
+        config = self.multi_turn_config or {}
+        if not config:
+            LOGGER.debug("multi-turn-mti skipped: no config")
+            return None
+
+        previous_slots = self._build_previous_slots(state)
+        try:
+            slots_config = config.get("slots", {})
+            decision_types = config.get("decision_types", {})
+            patterns = config.get("patterns", {})
+            topic_patterns = config.get("topic_patterns", {})
+            period_handling = config.get("period_handling", {})
+            defaults = config.get("defaults", {})
+
+            prompt = (
+                "You are a Multi-Turn Intent (MTI) classifier for a K-12 analytics agent. "
+                "Use the configuration values to decide whether to fuse with the prior topic, start a new topic, "
+                "or ask for clarification. Output JSON ONLY."
+            )
+            prompt += "\nCONFIG:\n"
+            prompt += json.dumps(
+                {
+                    "slots": slots_config,
+                    "decision_types": decision_types,
+                    "patterns": patterns,
+                    "topic_patterns": topic_patterns,
+                    "period_handling": period_handling,
+                    "defaults": defaults,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+            prompt += "\nPrevious slots: " + json.dumps(previous_slots, ensure_ascii=False)
+            prompt += "\nUser message: " + user_message
+            prompt += (
+                "\nGuidelines:"
+                "\n- Use only allowed values for metric, mode, plan_kind, and time_window_kind."
+                "\n- If only the time window changes, prefer decision time_only_followup or fuse with updated time_window_kind."
+                "\n- If asking about providers/hours for a student, consider provider_time_followup and set mode/plan_kind accordingly."
+                "\n- If the entity changes, choose decision = 'new_topic'."
+                "\n- If ambiguous, choose decision = 'clarification' and avoid assumptions."
+                "\nRespond with JSON matching the schema: {decision, reason, slots, fused_query}."
+            )
+
+            LOGGER.debug(
+                "multi-turn-mti prompt_prepared",
+                previous_slots=previous_slots,
+                prompt_preview=prompt[:500],
+            )
+
+            # Placeholder for actual MTI LLM call. When available, replace the stub below
+            # with a structured LLM invocation and JSON parsing.
+            # Example:
+            # response = llm_client.generate(prompt)
+            # decision = json.loads(response)
+            # return decision
+            return None
+        except Exception as exc:  # pragma: no cover - defensive
+            LOGGER.warning("multi-turn-mti failed", error=str(exc))
+            return None
+
+    def _apply_mti_slots(
+        self, state: ConversationState, slots: Dict[str, Any], fused_query: Optional[str]
+    ) -> None:
+        """Apply MTI slot values to the conversation state."""
+
+        if not slots:
+            return
+
+        entity_role = slots.get("entity_role")
+        entity_name = slots.get("entity_name")
+        if entity_role and entity_name:
+            state.active_topic = {
+                "type": entity_role,
+                "value": entity_name,
+                "last_query": fused_query or (state.active_topic or {}).get("last_query"),
+            }
+
+        metric = slots.get("metric")
+        if metric:
+            state.last_metric = metric
+
+        mode = slots.get("mode")
+        if mode:
+            state.active_mode = mode
+
+        plan_kind = slots.get("plan_kind")
+        if plan_kind:
+            state.last_plan_kind = plan_kind
+
+        time_window_kind = slots.get("time_window_kind")
+        if time_window_kind:
+            state.last_period_type = time_window_kind
+
+    def _apply_mti_decision(
+        self,
+        decision: Dict[str, Any],
+        state: ConversationState,
+        session_id: str,
+        user_message: str,
+        required_slots: Optional[List[str]],
+    ) -> Optional[Dict[str, Any]]:
+        """Apply an MTI decision to the state and return a response payload."""
+
+        if not decision:
+            return None
+
+        decision_type = decision.get("decision")
+        slots = decision.get("slots") or {}
+        fused_query = decision.get("fused_query") or user_message
+        reason = decision.get("reason")
+
+        if decision_type == "clarification":
+            state.latest_user_message = user_message
+            state.history.append({"role": "user", "content": user_message})
+            clarification_prompt = reason or self._build_clarification_prompt(state)
+            self.save_state(state, session_id=session_id)
+            LOGGER.debug("multi-turn-mti clarification", reason=reason)
+            return {
+                "session_id": session_id,
+                "needs_clarification": True,
+                "clarification_prompt": clarification_prompt,
+                "fused_query": None,
+                "state": state.to_dict(),
+            }
+
+        if decision_type == "new_topic":
+            self.clear_state(session_id)
+            state = self._start_new_thread(user_message, required_slots)
+            self._apply_mti_slots(state, slots, fused_query)
+            state.original_query = fused_query
+            state.latest_user_message = user_message
+            state.history.append({"role": "user", "content": user_message})
+            needs_clarification = bool(state.missing_slots)
+            self.save_state(state, session_id=session_id)
+            LOGGER.debug("multi-turn-mti new_topic", fused_query=fused_query)
+            return {
+                "session_id": session_id,
+                "needs_clarification": needs_clarification,
+                "clarification_prompt": self._build_clarification_prompt(state)
+                if needs_clarification
+                else None,
+                "fused_query": fused_query,
+                "state": state.to_dict(),
+            }
+
+        if decision_type == "fuse":
+            state.latest_user_message = user_message
+            state.history.append({"role": "user", "content": user_message})
+            self._apply_mti_slots(state, slots, fused_query)
+            if state.active_topic:
+                state.active_topic["last_query"] = fused_query
+            if not state.original_query:
+                state.original_query = fused_query
+            needs_clarification = bool(state.missing_slots)
+            self.save_state(state, session_id=session_id)
+            LOGGER.debug("multi-turn-mti fused", fused_query=fused_query)
+            return {
+                "session_id": session_id,
+                "needs_clarification": needs_clarification,
+                "clarification_prompt": self._build_clarification_prompt(state)
+                if needs_clarification
+                else None,
+                "fused_query": fused_query,
+                "state": state.to_dict(),
+            }
+
+        return None
+
     def process_user_message(
         self,
         session_id: str,
@@ -140,20 +419,45 @@ class MultiTurnConversationManager:
         if last_query is None:
             last_query = state.original_query
 
+        mti_decision: Optional[Dict[str, Any]] = None
+        if self.multi_turn_config:
+            try:
+                mti_decision = self._run_mti(state, user_message)
+            except Exception as exc:  # pragma: no cover - defensive
+                LOGGER.warning("multi-turn-mti invocation_failed", error=str(exc))
+
+        if mti_decision:
+            applied = self._apply_mti_decision(
+                mti_decision, state, session_id, user_message, required_slots
+            )
+            if applied:
+                fused_query = applied.get("fused_query")
+                print("[multi-turn-debug] FUSION TRACE:")
+                print(f"  - session_id: {session_id}")
+                print(f"  - active_topic: {applied.get('state', {}).get('active_topic')}")
+                print(f"  - original_query: {applied.get('state', {}).get('original_query')}")
+                print(f"  - latest_user_message: {user_message}")
+                print(f"  - fusion: {'YES' if fused_query else 'NO'}")
+                print(f"  - fused_query: {fused_query or '<none>'}")
+                return applied
+
         def _classify_mode(text: str) -> Optional[str]:
             t = text.lower()
-            provider_terms = [
-                "provider",
-                "providers",
-                "clinician",
-                "clinicians",
-                "care staff",
-                "nurse",
-                "lvn",
-                "hha",
-                "health aide",
-                "aide",
-            ]
+            provider_terms = self._get_pattern_list(
+                "provider_focus_phrases",
+                [
+                    "provider",
+                    "providers",
+                    "clinician",
+                    "clinicians",
+                    "care staff",
+                    "nurse",
+                    "lvn",
+                    "hha",
+                    "health aide",
+                    "aide",
+                ],
+            )
             hours_terms = ["hours", "hrs"]
             if any(p in t for p in provider_terms) and any(h in t for h in hours_terms):
                 return "student_provider_breakdown"
@@ -227,23 +531,56 @@ class MultiTurnConversationManager:
 
             text = user_message.lower().strip()
 
-            provider_terms = [
-                "provider", "providers", "clinician", "clinicians",
-                "care staff", "carestaff", "nurse", "lvn", "hha",
-                "health aide", "aide", "who supported", "who provided care"
-            ]
+            provider_terms = self._get_pattern_list(
+                "provider_focus_phrases",
+                [
+                    "provider",
+                    "providers",
+                    "clinician",
+                    "clinicians",
+                    "care staff",
+                    "carestaff",
+                    "nurse",
+                    "lvn",
+                    "hha",
+                    "health aide",
+                    "aide",
+                    "who supported",
+                    "who provided care",
+                ],
+            )
 
-            time_terms = [
-                "january", "february", "march", "april", "may", "june",
-                "july", "august", "september", "october",
-                "november", "december",
-                "this month", "last month", "this school year",
-                "this year", "ytd", "what about", "now", "next", "then"
-            ]
+            time_terms = self._get_pattern_list(
+                "time_shift_phrases",
+                [
+                    "january",
+                    "february",
+                    "march",
+                    "april",
+                    "may",
+                    "june",
+                    "july",
+                    "august",
+                    "september",
+                    "october",
+                    "november",
+                    "december",
+                    "this month",
+                    "last month",
+                    "this school year",
+                    "this year",
+                    "ytd",
+                    "what about",
+                    "now",
+                    "next",
+                    "then",
+                ],
+            )
 
-            district_reset_terms = [
-                "district", "district-wide", "all students", "whole district"
-            ]
+            district_reset_terms = self._get_topic_pattern_list(
+                "reset_triggers",
+                ["district", "district-wide", "all students", "whole district"],
+            )
 
             mentions_provider = any(term in text for term in provider_terms)
             mentions_time = any(term in text for term in time_terms)
@@ -296,25 +633,28 @@ class MultiTurnConversationManager:
         ):
             t = user_message.lower().strip()
 
-            time_only_terms = [
-                "january",
-                "february",
-                "march",
-                "april",
-                "may",
-                "june",
-                "july",
-                "august",
-                "september",
-                "october",
-                "november",
-                "december",
-                "this month",
-                "last month",
-                "this school year",
-                "this year",
-                "ytd",
-            ]
+            time_only_terms = self._get_pattern_list(
+                "time_shift_phrases",
+                [
+                    "january",
+                    "february",
+                    "march",
+                    "april",
+                    "may",
+                    "june",
+                    "july",
+                    "august",
+                    "september",
+                    "october",
+                    "november",
+                    "december",
+                    "this month",
+                    "last month",
+                    "this school year",
+                    "this year",
+                    "ytd",
+                ],
+            )
             is_time_only = any(m in t for m in time_only_terms) and "provider" not in t and "clinician" not in t
 
             if is_time_only and not any(dw in t for dw in ["district", "all students", "whole district"]):
@@ -405,20 +745,23 @@ class MultiTurnConversationManager:
                 "state": fresh_state.to_dict(),
             }
 
-        new_intent_openers = [
-            "i want",
-            "give me",
-            "show me",
-            "list",
-            "top",
-            "highest",
-            "summary",
-            "most expensive",
-            "all invoices",
-            "what are",
-            "what is",
-            "vendor summary",
-        ]
+        new_intent_openers = self._get_topic_pattern_list(
+            "new_intent_openers",
+            [
+                "i want",
+                "give me",
+                "show me",
+                "list",
+                "top",
+                "highest",
+                "summary",
+                "most expensive",
+                "all invoices",
+                "what are",
+                "what is",
+                "vendor summary",
+            ],
+        )
         if any(lower_message.startswith(o) for o in new_intent_openers):
             return _reset_thread_and_return()
 
@@ -428,7 +771,10 @@ class MultiTurnConversationManager:
             if not active_value or extracted_name_new.lower() != str(active_value).lower():
                 return _reset_thread_and_return()
 
-        district_terms = ["district", "district-wide", "all invoices", "vendor summary"]
+        district_terms = self._get_topic_pattern_list(
+            "reset_triggers",
+            ["district", "district-wide", "all invoices", "vendor summary"],
+        )
         if any(term in lower_message for term in district_terms):
             return _reset_thread_and_return()
 
@@ -452,18 +798,21 @@ class MultiTurnConversationManager:
             ]
         )
 
-        followup_markers = [
-            "now",
-            "also",
-            "what about",
-            "continue",
-            "next",
-            "same",
-            "and",
-            "and for him",
-            "and for her",
-            "and for them",
-        ]
+        followup_markers = self._get_pattern_list(
+            "followup_markers",
+            [
+                "now",
+                "also",
+                "what about",
+                "continue",
+                "next",
+                "same",
+                "and",
+                "and for him",
+                "and for her",
+                "and for them",
+            ],
+        )
         if (
             not time_only_followup
             and not invoice_detail_followup
@@ -734,21 +1083,24 @@ class MultiTurnConversationManager:
             return False
         text = query.lower().strip()
 
-        explicit_phrases = [
-            "student list",
-            "list students",
-            "list all students",
-            "show students",
-            "show student list",
-            "show me student list",
-            "show me the student list",
-            "give me the student list",
-            "provider list",
-            "list providers",
-            "list all providers",
-            "show provider list",
-            "show providers",
-        ]
+        explicit_phrases = self._get_pattern_list(
+            "list_intent_phrases",
+            [
+                "student list",
+                "list students",
+                "list all students",
+                "show students",
+                "show student list",
+                "show me student list",
+                "show me the student list",
+                "give me the student list",
+                "provider list",
+                "list providers",
+                "list all providers",
+                "show provider list",
+                "show providers",
+            ],
+        )
 
         for phrase in explicit_phrases:
             if (
@@ -765,14 +1117,17 @@ class MultiTurnConversationManager:
         if not message or not state.original_query:
             return False
         text = message.lower().strip()
-        markers = [
-            "that list",
-            "this list",
-            "the list you just showed",
-            "the list you showed",
-            "that provider list",
-            "that student list",
-        ]
+        markers = self._get_pattern_list(
+            "list_reference_phrases",
+            [
+                "that list",
+                "this list",
+                "the list you just showed",
+                "the list you showed",
+                "that provider list",
+                "that student list",
+            ],
+        )
         return any(marker in text for marker in markers)
 
     def _is_short_wh_followup(self, message: str) -> bool:
@@ -836,19 +1191,22 @@ class MultiTurnConversationManager:
             "i wanna",
         ]
         starts_with_suppressed = any(text.startswith(prefix) for prefix in suppress_prefixes)
-        markers = [
-            "now",
-            "also",
-            "again",
-            "too",
-            "as well",
-            "another",
-            "next",
-            "what about",
-            "how about",
-            "same",
-            "continue",
-        ]
+        markers = self._get_pattern_list(
+            "followup_markers",
+            [
+                "now",
+                "also",
+                "again",
+                "too",
+                "as well",
+                "another",
+                "next",
+                "what about",
+                "how about",
+                "same",
+                "continue",
+            ],
+        )
         marker_hit = any(marker in text for marker in markers)
 
         list_ref = False
@@ -859,16 +1217,19 @@ class MultiTurnConversationManager:
             if "that list" in text or "this list" in text:
                 list_ref = True
 
-            pronoun_starts = [
-                "who has ",
-                "who provided ",
-                "who provides ",
-                "who did ",
-                "can you tell me who",
-                "why did it ",
-                "why did this ",
-                "why did that ",
-            ]
+            pronoun_starts = self._get_pattern_list(
+                "pronoun_followup_starters",
+                [
+                    "who has ",
+                    "who provided ",
+                    "who provides ",
+                    "who did ",
+                    "can you tell me who",
+                    "why did it ",
+                    "why did this ",
+                    "why did that ",
+                ],
+            )
             if any(text.startswith(prefix) for prefix in pronoun_starts):
                 pronoun_prefix_hit = True
 
@@ -890,18 +1251,21 @@ class MultiTurnConversationManager:
         if not message:
             return False
         text = message.lower().strip()
-        start_markers = [
-            "why",
-            "what about",
-            "how about",
-            "now",
-            "next",
-            "and",
-            "also",
-            "continue",
-            "then",
-            "same",
-        ]
+        start_markers = self._get_pattern_list(
+            "followup_markers",
+            [
+                "why",
+                "what about",
+                "how about",
+                "now",
+                "next",
+                "and",
+                "also",
+                "continue",
+                "then",
+                "same",
+            ],
+        )
         if any(text.startswith(marker) for marker in start_markers):
             return True
 
@@ -927,15 +1291,20 @@ class MultiTurnConversationManager:
         if normalized.startswith("now "):
             normalized = normalized[len("now ") :].strip()
 
-        time_phrases = {
-            "this school year",
-            "current school year",
-            "this month",
-            "last month",
-            "this year",
-            "last year",
-            "this sy",
-        }
+        time_phrases = set(
+            self._get_pattern_list(
+                "time_shift_phrases",
+                [
+                    "this school year",
+                    "current school year",
+                    "this month",
+                    "last month",
+                    "this year",
+                    "last year",
+                    "this sy",
+                ],
+            )
+        )
 
         if normalized in time_phrases:
             return True
@@ -1014,47 +1383,50 @@ class MultiTurnConversationManager:
         if not message:
             return None
 
-        stop_words = {
-            "I",
-            "We",
-            "You",
-            "They",
-            "It",
-            "This",
-            "That",
-            "Now",
-            "Then",
-            "Can",
-            "Give",
-            "Show",
-            "List",
-            "Who",
-            "What",
-            "Why",
-            "How",
-            "When",
-            "Where",
-            "Provider",
-            "Providers",
-            "Student",
-            "Students",
-            "Cost",
-            "Hours",
-            "Service",
-            "Services",
-            "July",
-            "August",
-            "September",
-            "October",
-            "November",
-            "December",
-            "January",
-            "February",
-            "March",
-            "April",
-            "May",
-            "June",
-        }
+        configured_stops = set(self._get_name_stop_words())
+        stop_words = configured_stops.union(
+            {
+                "I",
+                "We",
+                "You",
+                "They",
+                "It",
+                "This",
+                "That",
+                "Now",
+                "Then",
+                "Can",
+                "Give",
+                "Show",
+                "List",
+                "Who",
+                "What",
+                "Why",
+                "How",
+                "When",
+                "Where",
+                "Provider",
+                "Providers",
+                "Student",
+                "Students",
+                "Cost",
+                "Hours",
+                "Service",
+                "Services",
+                "July",
+                "August",
+                "September",
+                "October",
+                "November",
+                "December",
+                "January",
+                "February",
+                "March",
+                "April",
+                "May",
+                "June",
+            }
+        )
         stop_words_lower = {word.lower() for word in stop_words}
 
         token_pattern = r"\b[A-Z][a-z]+\b"
@@ -1094,27 +1466,30 @@ class MultiTurnConversationManager:
     def _is_valid_name(self, name: str) -> bool:
         if not name:
             return False
-        bad = {
-            "i",
-            "me",
-            "you",
-            "we",
-            "they",
-            "i want",
-            "want",
-            "show",
-            "give",
-            "this",
-            "that",
-            "it",
-            "cost",
-            "hours",
-            "provider",
-            "providers",
-            "student",
-            "students",
-            "see",
-        }
+        bad = set(word.lower() for word in self._get_name_stop_words())
+        bad.update(
+            {
+                "i",
+                "me",
+                "you",
+                "we",
+                "they",
+                "i want",
+                "want",
+                "show",
+                "give",
+                "this",
+                "that",
+                "it",
+                "cost",
+                "hours",
+                "provider",
+                "providers",
+                "student",
+                "students",
+                "see",
+            }
+        )
         return name.lower() not in bad
 
     def _refers_to_provider_followup(self, message: str, state: ConversationState) -> bool:
@@ -1122,14 +1497,17 @@ class MultiTurnConversationManager:
             return False
 
         text = (message or "").lower()
-        provider_keywords = [
-            "provider",
-            "providers",
-            "hours",
-            "care",
-            "who provided",
-            "show me providers",
-        ]
+        provider_keywords = self._get_pattern_list(
+            "provider_focus_phrases",
+            [
+                "provider",
+                "providers",
+                "hours",
+                "care",
+                "who provided",
+                "show me providers",
+            ],
+        )
 
         if not any(keyword in text for keyword in provider_keywords):
             return False
