@@ -1199,10 +1199,15 @@ class Agent:
         self.tools = list(tools)
         self._tool_lookup = {tool.name: tool for tool in self.tools}
         self.multi_turn_manager: MultiTurnConversationManager | None = None
+        default_model = self.router_model
         try:
             redis_client = getattr(self.workflow.memory, "client", None)
             if redis_client:
-                self.multi_turn_manager = MultiTurnConversationManager(redis_client)
+                self.multi_turn_manager = MultiTurnConversationManager(
+                    redis_client,
+                    llm_client=self.client,
+                    llm_model=default_model,
+                )
         except Exception as exc:  # pragma: no cover - defensive
             LOGGER.warning("multi_turn_manager_init_failed", error=str(exc))
 
