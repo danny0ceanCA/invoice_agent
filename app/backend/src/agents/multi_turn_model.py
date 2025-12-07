@@ -59,6 +59,7 @@ class ConversationState:
     history: List[Dict[str, str]] = field(default_factory=list)
     active_topic: Dict[str, Any] = field(default_factory=dict)
     candidate_entities: List[str] = field(default_factory=list)
+    last_invoice_candidates: List[str] = field(default_factory=list)
     last_period_type: Optional[str] = None
     last_period_start: Optional[str] = None
     last_period_end: Optional[str] = None
@@ -84,6 +85,7 @@ class ConversationState:
             history=list(data.get("history", [])),
             active_topic=dict(data.get("active_topic", {})),
             candidate_entities=list(data.get("candidate_entities", [])),
+            last_invoice_candidates=list(data.get("last_invoice_candidates", [])),
             last_period_type=data.get("last_period_type"),
             last_period_start=data.get("last_period_start"),
             last_period_end=data.get("last_period_end"),
@@ -605,6 +607,15 @@ class MultiTurnConversationManager:
         if mode:
             state.active_mode = mode
 
+        if slots.get("mode") in {"top_invoices", "invoice_details"}:
+            invoice_candidates = slots.get("invoice_numbers") or slots.get(
+                "invoice_candidates"
+            )
+            if invoice_candidates is None and state.candidate_entities:
+                invoice_candidates = state.candidate_entities
+            if isinstance(invoice_candidates, (list, tuple)):
+                state.last_invoice_candidates = [str(i) for i in invoice_candidates]
+
         plan_kind = slots.get("plan_kind")
         if plan_kind:
             state.last_plan_kind = plan_kind
@@ -612,6 +623,54 @@ class MultiTurnConversationManager:
         time_window_kind = slots.get("time_window_kind")
         if time_window_kind:
             state.last_period_type = time_window_kind
+
+    def _detect_time_followup(
+        self, user_message: Optional[str], state: ConversationState
+    ) -> Optional[Dict[str, str]]:
+        """
+        Detect month-only follow-ups that should inherit the active topic.
+
+        Returns an object with month and time window details when the message is only a
+        month reference.
+        """
+
+        if not user_message or not state or not state.active_topic:
+            return None
+
+        normalized = re.sub(r"[?.!]", "", user_message).strip().lower()
+        if not normalized:
+            return None
+
+        if self._extract_name(user_message):
+            return None
+
+        month_pattern = (
+            r"^(?:just\s+|only\s+|for\s+|in\s+)?"
+            r"(january|february|march|april|may|june|july|august|september|october|november|december)\b$"
+        )
+        match = re.match(month_pattern, normalized)
+        if not match:
+            return None
+
+        month_name = match.group(1).title()
+        today = date.today()
+        current_year = today.year
+        if today.month >= 7:
+            start_year = current_year
+            end_year = current_year + 1
+        else:
+            start_year = current_year - 1
+            end_year = current_year
+
+        state.last_period_start = f"{start_year}-07-01"
+        state.last_period_end = f"{end_year}-06-30"
+
+        return {
+            "month": month_name,
+            "time_window_kind": "explicit_month",
+            "last_period_start": state.last_period_start,
+            "last_period_end": state.last_period_end,
+        }
 
     def _compose_fused_query(
         self,
@@ -945,6 +1004,40 @@ class MultiTurnConversationManager:
 
         decision_type = decision.get("decision")
         slots = decision.get("slots") or {}
+
+        pronoun_slots = self._extract_entities_from_message(user_message, state)
+        if pronoun_slots.get("entity_role") and not slots.get("entity_role"):
+            slots["entity_role"] = pronoun_slots["entity_role"]
+        if pronoun_slots.get("entity_name") and not slots.get("entity_name"):
+            slots["entity_name"] = pronoun_slots["entity_name"]
+
+        reason = decision.get("reason")
+
+        if pronoun_slots.get("missing_slot"):
+            state.missing_slots = [pronoun_slots["missing_slot"]]
+            decision_type = "clarification"
+            decision["reason"] = reason or "Need invoice number from previous list."
+            if pronoun_slots.get("clarification_prompt"):
+                decision["reason"] = pronoun_slots["clarification_prompt"]
+
+        time_followup = self._detect_time_followup(user_message, state)
+        if time_followup:
+            slots = self._build_previous_slots(state)
+            slots["time_window_kind"] = time_followup.get(
+                "time_window_kind", "explicit_month"
+            )
+            month = time_followup.get("month")
+            slots["month"] = month
+            state.last_month = month
+            state.last_explicit_month = month
+            state.last_period_type = slots["time_window_kind"]
+            state.last_period_start = time_followup.get("last_period_start")
+            state.last_period_end = time_followup.get("last_period_end")
+            decision_type = "time_only_followup"
+            decision["reason"] = (
+                decision.get("reason")
+                or "Month-only follow-up detected; inheriting active topic."
+            )
         previous_query = state.original_query
         if not previous_query and isinstance(state.active_topic, dict):
             previous_query = state.active_topic.get("last_query")
@@ -957,7 +1050,16 @@ class MultiTurnConversationManager:
             fused_query=fused_query,
             user_message=user_message,
         )
+        if pronoun_slots and decision_type is None:
+            decision_type = "fuse"
         reason = decision.get("reason")
+        if pronoun_slots and decision_type == "clarification":
+            if pronoun_slots.get("entity_role") or pronoun_slots.get("entity_name"):
+                decision_type = "fuse"
+                reason = (
+                    reason
+                    or "Resolved pronoun or placeholder to previous topic; fusing."
+                )
 
         if decision_type == "clarification":
             state.latest_user_message = user_message
@@ -996,7 +1098,9 @@ class MultiTurnConversationManager:
                 "state": state.to_dict(),
             }
 
-        if decision_type == "fuse":
+        is_time_only_followup = decision_type == "time_only_followup"
+
+        if decision_type in {"fuse", "time_only_followup"}:
             state.latest_user_message = user_message
             state.history.append({"role": "user", "content": user_message})
             fused_query = self._compose_fused_query(slots, user_message, previous_query)
@@ -1029,7 +1133,7 @@ class MultiTurnConversationManager:
                 state.active_topic = {}
             if not state.original_query:
                 state.original_query = fused_query
-            needs_clarification = bool(state.missing_slots)
+            needs_clarification = False if is_time_only_followup else bool(state.missing_slots)
             self.save_state(state, session_id=session_id)
             LOGGER.debug("multi-turn-mti fused", fused_query=fused_query)
             return {
@@ -2119,8 +2223,31 @@ class MultiTurnConversationManager:
             state.missing_slots = []
 
     def _build_clarification_prompt(self, state: ConversationState) -> Optional[str]:
+        """
+        Build a user-facing clarification prompt based on missing slots.
+
+        Default behaviour is a simple "I need the following additional details: …"
+        but we special-case common analytics follow-ups to make them more natural.
+        """
+
         if not state.missing_slots:
             return None
+
+        # Special case: asking for invoice details without an invoice_number.
+        # This covers flows like:
+        #   - "show top invoices"
+        #   - "can I see the line-item details for that?"
+        # where we need the user to pick a specific invoice number.
+        if len(state.missing_slots) == 1 and state.missing_slots[0] == "invoice_number":
+            active_mode = getattr(state, "active_mode", None)
+            last_plan = getattr(state, "last_plan_kind", None)
+            if active_mode in {"top_invoices", "invoice_details"} or last_plan in {"top_invoices"}:
+                return (
+                    "I need the invoice number so I know which invoice to show line-item details for. "
+                    "Please provide the invoice number you have in mind."
+                )
+
+        # Default generic clarification
         slots_text = ", ".join(state.missing_slots)
         return f"I need the following additional details: {slots_text}."
 
@@ -2150,8 +2277,15 @@ class MultiTurnConversationManager:
         if period_details:
             parts.append(f"Time period is {'; '.join(period_details)}.")
 
+        month_followup = None
+        if state.latest_user_message and state.active_topic:
+            month_followup = self._detect_time_followup(state.latest_user_message, state)
+
         if state.latest_user_message and state.latest_user_message != state.original_query:
-            if state.latest_user_message not in state.resolved_slots.values():
+            if (
+                state.latest_user_message not in state.resolved_slots.values()
+                and not month_followup
+            ):
                 parts.append(f"Additional instruction: {state.latest_user_message}")
 
         return " ".join(part.strip() for part in parts if part).strip()
@@ -2161,6 +2295,71 @@ class MultiTurnConversationManager:
         patterns = self._get_pattern_list("pronoun_followup_starters", [])
         lowered = text.lower()
         return any(p in lowered for p in pronouns) or any(p in lowered for p in patterns)
+
+    def _extract_entities_from_message(
+        self, user_message: Optional[str], state: ConversationState
+    ) -> Dict[str, Optional[str]]:
+        """
+        Resolve pronoun/placeholder references to the active topic when possible.
+        """
+
+        results: Dict[str, Optional[str]] = {}
+        if not user_message or not state:
+            return results
+
+        lowered = user_message.lower()
+        active_role = state.active_topic.get("type") if state.active_topic else None
+        active_value = state.active_topic.get("value") if state.active_topic else None
+
+        placeholder_terms = {
+            "the ones",
+            "those ones",
+            "the people",
+            "the kids",
+            "the providers",
+        }
+        pronoun_hit = bool(
+            re.search(r"\b(he|she|they|him|her|them)\b", lowered)
+            or any(term in lowered for term in placeholder_terms)
+            or any(term in lowered for term in ["that month", "that student"])
+        )
+
+        if pronoun_hit and active_role:
+            results["entity_role"] = active_role
+            if active_value:
+                results["entity_name"] = active_value
+
+        invoice_reference_terms = {
+            "that invoice",
+            "that one",
+            "that",
+            "the biggest one",
+        }
+        if not state.active_topic and any(term in lowered for term in invoice_reference_terms):
+            candidates = getattr(state, "last_invoice_candidates", []) or []
+            if len(candidates) == 1:
+                results["entity_role"] = "invoice"
+                results["entity_name"] = str(candidates[0])
+            elif len(candidates) > 1:
+                results["missing_slot"] = "invoice_number"
+                choice_text = ", ".join(str(c) for c in candidates)
+                results["clarification_prompt"] = (
+                    f"Which invoice number do you want? You can choose from: {choice_text}"
+                )
+
+        placeholder_entity_terms = {"the ones", "the kids", "the providers", "the people"}
+        if any(term in lowered for term in placeholder_entity_terms):
+            inferred_role = None
+            if state.active_mode == "student_list":
+                inferred_role = "student"
+            elif state.active_mode in {"clinician_student_breakdown", "provider_monthly"}:
+                inferred_role = "clinician"
+            elif state.active_mode == "vendor_monthly":
+                inferred_role = "vendor"
+            if inferred_role:
+                results.setdefault("entity_role", inferred_role)
+
+        return results
 
     def _contains_provider_focus(self, text: str) -> bool:
         providers = self._get_pattern_list("provider_focus_phrases", [])
