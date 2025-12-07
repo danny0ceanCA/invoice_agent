@@ -98,6 +98,16 @@ class ConversationState:
 
 
 class MultiTurnConversationManager:
+    METRIC_PLAN_MAP = {
+        ("student", "cost"): "student_monthly_spend",
+        ("student", "hours"): "student_monthly_hours",
+        ("student", "caseload"): "caseload",
+        ("vendor", "cost"): "vendor_monthly_spend",
+        ("district", "cost"): "district_monthly_spend",
+        ("clinician", "caseload"): "caseload",
+        ("clinician", "hours"): "provider_daily_hours",
+    }
+
     def __init__(
         self,
         redis_client: "Redis",
@@ -406,7 +416,10 @@ class MultiTurnConversationManager:
             return None
 
     def _apply_json_decision_rules(
-        self, previous_slots: Dict[str, Optional[str]], user_message: str
+        self,
+        previous_slots: Dict[str, Optional[str]],
+        user_message: str,
+        state: Optional[ConversationState] = None,
     ) -> Optional[Dict[str, Any]]:
         """Lightweight, JSON-driven decision classifier prior to legacy heuristics."""
 
@@ -432,9 +445,27 @@ class MultiTurnConversationManager:
         def _base_slots(decision_key: str) -> Dict[str, Optional[str]]:
             slots = dict(previous_slots or {})
             decision_cfg = decision_types.get(decision_key, {}) if isinstance(decision_types, dict) else {}
-            for slot in decision_cfg.get("resets_slots", []) or []:
-                slots[slot] = None
             return slots
+
+        def _apply_slot_policies(decision_key: str, slots: Dict[str, Optional[str]]) -> None:
+            inherit_list = decision_types.get(decision_key, {}).get("inherits_slots", [])
+            reset_list = decision_types.get(decision_key, {}).get("resets_slots", [])
+
+            for key in reset_list:
+                slots[key] = None
+
+            for key in inherit_list:
+                if key in previous_slots and slots.get(key) is None:
+                    slots[key] = previous_slots[key]
+
+            period_cfg = self.multi_turn_config.get("period_handling", {})
+
+            if period_cfg.get("inherit_if_followup") and previous_slots.get("time_window_kind"):
+                if slots.get("time_window_kind") in (None, "unspecified"):
+                    slots["time_window_kind"] = previous_slots.get("time_window_kind")
+
+            if decision_key == "new_topic" and period_cfg.get("clear_if_new_topic"):
+                slots["time_window_kind"] = None
 
         # time_only_followup
         if decision_types.get("time_only_followup") and (
@@ -442,7 +473,7 @@ class MultiTurnConversationManager:
         ):
             slots = _base_slots("time_only_followup")
             slots.update(previous_slots or {})
-            period_info = self._extract_period_info(user_message)
+            period_info = self._extract_period_info(user_message, state)
             time_window = period_info.get("last_period_type") or period_info.get("last_month")
             if time_window == "explicit_month" or period_info.get("last_month"):
                 slots["time_window_kind"] = "explicit_month"
@@ -454,6 +485,7 @@ class MultiTurnConversationManager:
                     or defaults.get("default_time_window_kind_if_unspecified")
                     or "unspecified"
                 )
+            _apply_slot_policies("time_only_followup", slots)
             fused_query = self._compose_fused_query(slots, user_message)
             return {
                 "decision": _default_decision("time_only_followup"),
@@ -476,17 +508,20 @@ class MultiTurnConversationManager:
                         "mode": decision_types.get("provider_time_followup", {}).get(
                             "sets_mode", "student_provider_breakdown"
                         ),
-                        "plan_kind": decision_types.get("provider_time_followup", {}).get(
-                            "sets_plan_kind", "student_provider_breakdown"
-                        ),
+                        "plan_kind": None,
                         "metric": "hours",
                     }
                 )
-                period_info = self._extract_period_info(user_message)
+                strict_key = ("student", "hours")
+                slots["plan_kind"] = self.METRIC_PLAN_MAP.get(
+                    strict_key, "student_provider_breakdown"
+                )
+                period_info = self._extract_period_info(user_message, state)
                 if period_info.get("last_period_type"):
                     slots["time_window_kind"] = period_info.get("last_period_type")
                 elif period_info.get("last_month"):
                     slots["time_window_kind"] = "explicit_month"
+                _apply_slot_policies("provider_time_followup", slots)
                 fused_query = self._compose_fused_query(slots, user_message)
                 return {
                     "decision": _default_decision("provider_time_followup"),
@@ -504,6 +539,11 @@ class MultiTurnConversationManager:
                     slots.update(previous_slots or {})
                     slots["metric"] = metric
                     slots["plan_kind"] = slots.get("plan_kind")
+                    entity_role = previous_slots.get("entity_role")
+                    strict_key = (entity_role, metric)
+                    if strict_key in self.METRIC_PLAN_MAP:
+                        slots["plan_kind"] = self.METRIC_PLAN_MAP[strict_key]
+                    _apply_slot_policies("metric_followup", slots)
                     fused_query = self._compose_fused_query(slots, user_message)
                     return {
                         "decision": _default_decision("metric_followup"),
@@ -517,6 +557,7 @@ class MultiTurnConversationManager:
         if decision_types.get("list_followup") and any(ref in text for ref in list_refs):
             slots = _base_slots("list_followup")
             slots.update(previous_slots or {})
+            _apply_slot_policies("list_followup", slots)
             fused_query = self._compose_fused_query(slots, user_message)
             return {
                 "decision": _default_decision("list_followup"),
@@ -528,6 +569,7 @@ class MultiTurnConversationManager:
         reset_triggers = self._get_topic_pattern_list("reset_triggers", [])
         if decision_types.get("new_topic") and any(trig in text for trig in reset_triggers):
             slots = _base_slots("new_topic")
+            _apply_slot_policies("new_topic", slots)
             fused_query = user_message
             return {
                 "decision": _default_decision("new_topic"),
@@ -1081,18 +1123,6 @@ class MultiTurnConversationManager:
             if any(p in t for p in provider_terms) and any(h in t for h in hours_terms):
                 return "student_provider_breakdown"
 
-            total_terms = [
-                "total cost",
-                "total spend",
-                "spend",
-                "charges",
-                "burn",
-                "burn rate",
-                "amount",
-            ]
-            if any(term in t for term in total_terms):
-                return "student_total_cost"
-
             return None
 
         lower_message = user_message.lower()
@@ -1111,7 +1141,7 @@ class MultiTurnConversationManager:
             return _reset_thread_and_return()
 
         json_decision = self._apply_json_decision_rules(
-            self._build_previous_slots(state), user_message
+            self._build_previous_slots(state), user_message, state
         )
         if json_decision:
             self._apply_mti_slots(
@@ -1151,192 +1181,6 @@ class MultiTurnConversationManager:
                     LOGGER.debug("    └── fused_query: <none>")
             except Exception:
                 pass
-
-        # ============================================================
-        # PROVIDER FOLLOW-UP FUSION (Option B+)
-        # Fuse with active student topic when:
-        # - session_id matches
-        # - active_topic.type == "student"
-        # - follow-up mentions providers
-        # - follow-up mentions time/month
-        # - follow-up does NOT request district-wide scope
-        # ============================================================
-
-        if (
-            session_id == getattr(state, "last_session_id", None)
-            and active_topic
-            and active_topic.get("type") == "student"
-        ):
-
-            text = user_message.lower().strip()
-
-            provider_terms = self._get_pattern_list(
-                "provider_focus_phrases",
-                [
-                    "provider",
-                    "providers",
-                    "clinician",
-                    "clinicians",
-                    "care staff",
-                    "carestaff",
-                    "nurse",
-                    "lvn",
-                    "hha",
-                    "health aide",
-                    "aide",
-                    "who supported",
-                    "who provided care",
-                ],
-            )
-
-            time_terms = self._get_pattern_list(
-                "time_shift_phrases",
-                [
-                    "january",
-                    "february",
-                    "march",
-                    "april",
-                    "may",
-                    "june",
-                    "july",
-                    "august",
-                    "september",
-                    "october",
-                    "november",
-                    "december",
-                    "this month",
-                    "last month",
-                    "this school year",
-                    "this year",
-                    "ytd",
-                    "what about",
-                    "now",
-                    "next",
-                    "then",
-                ],
-            )
-
-            district_reset_terms = self._get_topic_pattern_list(
-                "reset_triggers",
-                ["district", "district-wide", "all students", "whole district"],
-            )
-
-            mentions_provider = any(term in text for term in provider_terms)
-            mentions_time = any(term in text for term in time_terms)
-            is_district_reset = any(term in text for term in district_reset_terms)
-
-            if mentions_provider and mentions_time and not is_district_reset:
-                previous_query = last_query or ""
-                fused_query = f"{previous_query} Additional instruction: {user_message}"
-
-                state.latest_user_message = user_message
-                state.history.append({"role": "user", "content": user_message})
-                state.active_mode = "student_provider_breakdown"
-                active_topic["last_query"] = fused_query
-
-                self.save_state(state, session_id=session_id)
-
-                # DEBUG LOGS
-                LOGGER.debug("multi-turn-debug PROVIDER_FUSION_TRIGGERED")
-                LOGGER.debug("multi-turn-debug previous", previous=previous_query)
-                LOGGER.debug("multi-turn-debug followup", followup=user_message)
-                LOGGER.debug("multi-turn-debug fused_query", fused_query=fused_query)
-
-                # Visual fusion log
-                _log_fusion_tree(
-                    decision="fused",
-                    reason="provider_follow_up",
-                    fused=fused_query,
-                )
-
-                fused_query = locals().get("fused_query")
-                print("[multi-turn-debug] FUSION TRACE:")
-                print(f"  - session_id: {session_id}")
-                print(f"  - active_topic: {state.active_topic}")
-                print(f"  - original_query: {state.original_query}")
-                print(f"  - latest_user_message: {user_message}")
-                print(f"  - fusion: {'YES' if fused_query else 'NO'}")
-                print(f"  - fused_query: {fused_query or '<none>'}")
-                return {
-                    "session_id": session_id,
-                    "needs_clarification": False,
-                    "clarification_prompt": None,
-                    "fused_query": fused_query,
-                    "state": state.to_dict(),
-                }
-
-        if (
-            session_id == getattr(state, "last_session_id", None)
-            and active_topic
-            and active_topic.get("type") == "student"
-        ):
-            t = user_message.lower().strip()
-
-            time_only_terms = self._get_pattern_list(
-                "time_shift_phrases",
-                [
-                    "january",
-                    "february",
-                    "march",
-                    "april",
-                    "may",
-                    "june",
-                    "july",
-                    "august",
-                    "september",
-                    "october",
-                    "november",
-                    "december",
-                    "this month",
-                    "last month",
-                    "this school year",
-                    "this year",
-                    "ytd",
-                ],
-            )
-            is_time_only = any(m in t for m in time_only_terms) and "provider" not in t and "clinician" not in t
-
-            if is_time_only and not any(dw in t for dw in ["district", "all students", "whole district"]):
-                mode = active_mode or _classify_mode(last_query or "")
-
-                if mode == "student_provider_breakdown":
-                    fused_query = (
-                        f"{last_query or ''} Time period is month focus is {user_message.strip()}. "
-                        "Additional instruction: providers and hours for this month."
-                    )
-                else:
-                    fused_query = (
-                        f"{last_query or ''} Time period is month focus is {user_message.strip()}. "
-                        f"Additional instruction: {user_message}"
-                    )
-
-                state.latest_user_message = user_message
-                state.history.append({"role": "user", "content": user_message})
-                state.active_mode = mode
-                active_topic["last_query"] = fused_query
-                self.save_state(state, session_id=session_id)
-
-                _log_fusion_tree(
-                    decision="fused",
-                    reason="time_only_follow_up",
-                    fused=fused_query,
-                )
-
-                fused_query = locals().get("fused_query")
-                print("[multi-turn-debug] FUSION TRACE:")
-                print(f"  - session_id: {session_id}")
-                print(f"  - active_topic: {state.active_topic}")
-                print(f"  - original_query: {state.original_query}")
-                print(f"  - latest_user_message: {user_message}")
-                print(f"  - fusion: {'YES' if fused_query else 'NO'}")
-                print(f"  - fused_query: {fused_query or '<none>'}")
-                return {
-                    "session_id": session_id,
-                    "needs_clarification": False,
-                    "clarification_prompt": None,
-                    "fused_query": fused_query,
-                    "state": state.to_dict(),
-                }
 
         def _reset_thread_and_return() -> Dict[str, Any]:
             print("[multi-turn-debug] SAFE_FUSION_RESET", flush=True)
@@ -1541,7 +1385,7 @@ class MultiTurnConversationManager:
         state.history.append({"role": "user", "content": user_message})
         state.latest_user_message = user_message
 
-        period_info = self._extract_period_info(user_message)
+        period_info = self._extract_period_info(user_message, state)
         is_followup = self._is_followup_message(user_message)
         lower_message = user_message.lower()
 
@@ -1916,7 +1760,9 @@ class MultiTurnConversationManager:
 
         return False
 
-    def _extract_period_info(self, message: str) -> Dict[str, Optional[str]]:
+    def _extract_period_info(
+        self, message: str, state: Optional[ConversationState] = None
+    ) -> Dict[str, Optional[str]]:
         info: Dict[str, Optional[str]] = {
             "last_period_type": None,
             "last_period_start": None,
@@ -1931,6 +1777,12 @@ class MultiTurnConversationManager:
             return info
 
         text = message.lower()
+
+        if "that month" in text and state and state.last_month:
+            info["last_month"] = state.last_month
+            info["last_period_type"] = "explicit_month"
+            info["last_explicit_month"] = state.last_month
+            return info
 
         # Detect explicit month phrases like "in July" or "for September"
         months = [
@@ -2175,9 +2027,9 @@ class MultiTurnConversationManager:
             return True
 
         if state.active_topic:
-            if self._contains_pronoun(text):
-                return False
             if self._contains_time_phrase(text):
+                return False
+            if self._contains_pronoun(text):
                 return False
 
         # --- 1) ENTITY-BASED TOPIC SHIFT (student change) --------------------
