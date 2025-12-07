@@ -1,53 +1,49 @@
 [
-  { "id": 1, "question": "How much did we spend on Carter Sanchez each month this school year?" },
-  { "id": 2, "question": "And what about just September?" },
-  { "id": 3, "question": "Who helped him that month?" },
+  { "id": 101, "question": "How much money did we spend on Noah Jenkins each month this school year?" },
+  { "id": 102, "question": "And what about just February?" },
+  { "id": 103, "question": "How many hours did he get that month?" },
+  { "id": 104, "question": "Did those hours go up or down compared to March?" },
+  { "id": 105, "question": "And how much did that cost us?" },
 
-  { "id": 4, "question": "Show me all the hours Jordan Lee received month by month." },
-  { "id": 5, "question": "And how many hours did he get in October?" },
+  { "id": 106, "question": "Which nurses helped Mia Torres last month?" },
+  { "id": 107, "question": "Who covered her in October?" },
+  { "id": 108, "question": "And who else worked with her that month?" },
+  { "id": 109, "question": "How many hours did they each put in?" },
+  { "id": 110, "question": "And who had the highest cost?" },
 
-  { "id": 6, "question": "Which nurses worked with Evelyn Ramirez in October?" },
-  { "id": 7, "question": "Who covered her in November?" },
+  { "id": 111, "question": "Show me the daily hours for Lucas Miller." },
+  { "id": 112, "question": "What about just last week?" },
+  { "id": 113, "question": "And how many hours per day was that on average?" },
+  { "id": 114, "question": "Did he have any days with zero support?" },
+  { "id": 115, "question": "And compare that to this month." },
 
-  { "id": 8, "question": "Can you show me everything billed for Hannah Wood this year?" },
-  { "id": 9, "question": "Now show me just the July charges." },
-  { "id": 10, "question": "Can I see the line-item details?" },
+  { "id": 116, "question": "What types of services did Emma Coleman get this school year?" },
+  { "id": 117, "question": "Which service took the most hours?" },
+  { "id": 118, "question": "And which one cost the most?" },
+  { "id": 119, "question": "What about only September?" },
+  { "id": 120, "question": "And what if we only look at behavioral services?" },
 
-  { "id": 11, "question": "What did the district spend every month this school year?" },
-  { "id": 12, "question": "What about this month only?" },
+  { "id": 121, "question": "Which students did nurse Anthony Lee support this month?" },
+  { "id": 122, "question": "Who did he work with the most?" },
+  { "id": 123, "question": "And how many total hours was that?" },
+  { "id": 124, "question": "Did he cover anyone new last month?" },
+  { "id": 125, "question": "And how many students is he supporting overall?" },
 
-  { "id": 13, "question": "What were our biggest invoices this year?" },
-  { "id": 14, "question": "Show me the next 5 after that." },
+  { "id": 126, "question": "How much did we pay BrightPath Staffing each month?" },
+  { "id": 127, "question": "What about just November?" },
+  { "id": 128, "question": "And which of their invoices was the biggest one?" },
+  { "id": 129, "question": "Can I see the line-item details for that?" },
+  { "id": 130, "question": "And how many hours did that invoice include?" },
 
-  { "id": 15, "question": "List every student we have in the system." },
+  { "id": 131, "question": "What did the district spend every month this school year?" },
+  { "id": 132, "question": "Which month was the highest?" },
+  { "id": 133, "question": "And what about this month only?" },
+  { "id": 134, "question": "Can you break that down by service type?" },
+  { "id": 135, "question": "Which service category cost the most?" },
 
-  { "id": 16, "question": "I want to see the caregivers who helped Owen Jackson in September." },
-  { "id": 17, "question": "Who helped him in October?" },
-  { "id": 18, "question": "And how much did that cost?" },
-
-  { "id": 19, "question": "What did we pay BrightCare Nursing each month?" },
-  { "id": 20, "question": "Which month was the most expensive?" },
-
-  { "id": 21, "question": "How many days did Chloe Barnes get support in October?" },
-  { "id": 22, "question": "How many hours was that on average per day?" },
-
-  { "id": 23, "question": "Show me what we spent for each service type this year." },
-  { "id": 24, "question": "Which service code was the most expensive?" },
-
-  { "id": 25, "question": "Show me the daily hours for Carter Sanchez." },
-  { "id": 26, "question": "What about just last week?" },
-
-  { "id": 27, "question": "Which students did Sofia Thomas support this month?" },
-  { "id": 28, "question": "And how many students did she handle last month?" },
-
-  { "id": 29, "question": "What were the hours and cost for each service code for Evelyn Ramirez?" },
-  { "id": 30, "question": "Which service code did she use the most?" },
-
-  { "id": 31, "question": "Can you show me all invoices tied to Owen Jackson?" },
-  { "id": 32, "question": "Now show me the details for the most recent one." },
-
-  { "id": 33, "question": "What’s the total cost for this student over the whole year?" },
-  { "id": 34, "question": "How does that compare to last year?" },
-
-  { "id": 35, "question": "What’s the day-by-day breakdown for the entire district?" }
+  { "id": 136, "question": "List every student we have in the system." },
+  { "id": 137, "question": "Show me the ones who received services in October." },
+  { "id": 138, "question": "And who had the most hours that month?" },
+  { "id": 139, "question": "Did any students receive no services at all this school year?" },
+  { "id": 140, "question": "Which students had increasing hours month over month?" }
 ]
