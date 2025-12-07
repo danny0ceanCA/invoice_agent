@@ -114,7 +114,8 @@
         "billing total",
         "invoice total cost",
         "how much was charged against the PO",
-        "burn rate for this student"
+        "burn rate for this student",
+        "I want to see total cost"
       ],
       "entity_role": "student",
       "metric": "cost",
@@ -822,7 +823,9 @@
         "monthly summary",
         "monthly view",
         "monthly",
-        "monthly cost"
+        "monthly cost",
+        "total cost",
+        "cost"
       ],
       "primary_entity": "student"
     },
