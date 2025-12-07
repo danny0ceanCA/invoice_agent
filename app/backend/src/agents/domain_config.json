@@ -4,8 +4,8 @@
 
   "entities": {
     "types": {
-      "student": ["student", "kid", "kids", "students", "child", "scholar", "kiddos", "student in care"],
-      "clinician": ["clinician", "provider", "nurse", "nurses","lpn", "lvn","lvn's", "hha","hha's","health aides", "health aide", "caregiver", "care staff", "staff", "employees", "workers", "district staff"],
+      "student": ["student", "kid", "kids", "students", "child", "scholar", "kiddos", "student in care","students"],
+      "clinician": ["clinician", "provider", "nurse", "nurses","lpn", "lvn","lvn's", "hha","hha's","health aides", "health aide", "caregiver", "care staff", "staff", "employees", "workers", "district staff", "nurses","employees"],
       "vendor": ["vendor", "company", "agency", "provider group", "external agency", "external contractor", "contractors", "contractor"],
       "invoice": ["invoice", "billing record", "bill", "invoices", "invoiced", "billed", "billing"]
     },
@@ -419,7 +419,17 @@
         "charges submitted across the district",
         "district billing activity",
         "records of invoices submitted to us",
-        "district invoice submission list"
+        "district invoice submission list",
+        "highest month",
+        "which month cost the most",
+        "most expensive month",
+        "peak month",
+        "month with most hours",
+        "month with most cost",
+        "which month was biggest",
+        "compare months",
+        "month comparison",
+        "month comparison"
       ],
       "entity_role": "district",
       "metric": "cost",
@@ -661,7 +671,28 @@
         "who they were working with",
         "who they interacted with",
         "who they served",
-        "who received their support"
+        "who received their support",
+        "students supported by",
+        "students they supported",
+        "students he supported",
+        "students she supported",
+        "who did he help",
+        "who did she help",
+        "kids he worked with",
+        "kids she worked with",
+        "students he covered",
+        "students she covered",
+        "who did he work with the most",
+        "who did she work with the most",
+        "which student he worked with the most",
+        "which student she worked with the most",
+        "who did he support the most",
+        "who did she support the most",
+        "top student he served",
+        "top student she served",
+        "student he spent the most hours with",
+        "student she spent the most hours with",
+        "student with the most hours with this provider"
       ],
       "entity_role": "clinician",
       "metric": "cost",
@@ -683,7 +714,14 @@
         "monthly spend by service",
         "district cost per service",
         "district spending by service type",
-        "spending broken out by service"
+        "spending broken out by service",
+        "service category cost the most",
+        "most expensive service type",
+        "service code with highest cost",
+        "which service code was highest",
+        "which service type cost the most",
+        "highest service category",
+        "biggest service type"
       ],
       "entity_role": "district",
       "metric": "cost",
@@ -702,7 +740,10 @@
         "student services by month and service",
         "service-level detail for this student",
         "student's service code costs",
-        "how much was spent for each service for this student"
+        "how much was spent for each service for this student",
+        "only look show me health aides",
+        "only show me behaviroal aides",
+        "only show me nurses"
       ],
       "entity_role": "student",
       "metric": "cost",
@@ -922,7 +963,9 @@
         "rank invoices",
         "highest cost invoices",
         "largest invoices",
-        "invoice leaderboard"
+        "invoice leaderboard",
+        "biggest invoice",
+        "highest"
       ],
       "primary_entity": "invoice"
     },
@@ -938,7 +981,11 @@
         "line items for invoice",
         "show line items",
         "detail this invoice",
-        "invoice line items"
+        "invoice line items",
+        "details for",
+        "breakdown",
+        "break",
+        "details"
       ],
       "primary_entity": "invoice"
     },
@@ -984,7 +1031,9 @@
         "students assigned to",
         "student assignments for",
         "individuals for",
-        "assignments for"
+        "assignments for",
+        "supported",
+        "worked with"
       ],
       "primary_entity": "clinician"
     },
@@ -1009,14 +1058,14 @@
 
     "student_service_code_monthly": {
       "triggers": [
-        "by service for this student",
-        "by service code for this student",
+        "by service",
+        "by service code",
         "student service breakdown",
         "student service code breakdown",
-        "services for this student by month",
-        "service report for this student",
-        "cost by service for this student",
-        "service breakdown for this student"
+        "services by month",
+        "service report",
+        "cost by service",
+        "service breakdown"
       ],
       "primary_entity": "student"
     },
@@ -1481,7 +1530,10 @@
       "those students",
       "those providers",
       "that provider list",
-      "that student list"
+      "that student list",
+      "the ones",
+      "the ones who",
+      "the ones that"
     ],
     "pronoun_followup_starters": [
       "who supported her",
