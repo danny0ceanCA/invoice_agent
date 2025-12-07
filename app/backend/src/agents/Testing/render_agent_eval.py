@@ -6,6 +6,7 @@ from datetime import date
 from app.backend.src.agents.district_analytics_agent import run_analytics_agent
 
 DISTRICT_KEY = "I51P-DA8D-HJQ0"
+PERSISTENT_SESSION_ID = "internal-eval-session"
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 INPUT_FILE = os.path.join(SCRIPT_DIR, "questions.json")
@@ -31,14 +32,12 @@ def run_eval():
 
             print(f"▶ Q{qid}: {question}")
 
-            session_id = f"internal-eval-{qid}-{int(time.time())}"
-
             # DIRECT INTERNAL CALL — bypasses Auth0 & HTTP
             result = run_analytics_agent(
                 question,
                 {
                     "district_key": DISTRICT_KEY,
-                    "session_id": session_id
+                    "session_id": PERSISTENT_SESSION_ID
                 },
             )
 
