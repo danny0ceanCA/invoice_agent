@@ -16,6 +16,48 @@ from .json_utils import _extract_json_object
 LOGGER = structlog.get_logger(__name__)
 
 
+def _deterministic_intent_from_config(user_query: str) -> str | None:
+    """Use domain_config.plan_kinds intent_synonyms to pick a best intent.
+
+    Returns the plan_kind name or None if there is no clear, unambiguous match.
+    This is a deterministic helper so domain_config.json stays the source of truth,
+    but it falls back safely to the model's chosen intent when config is missing
+    or ambiguous.
+    """
+    try:
+        config = load_domain_config()
+        plan_kinds = config.get("plan_kinds", {}) or {}
+        if not isinstance(plan_kinds, dict):
+            return None
+
+        q = user_query.lower()
+        scores: dict[str, int] = {}
+
+        for kind_name, cfg in plan_kinds.items():
+            if not isinstance(cfg, dict):
+                continue
+            synonyms = cfg.get("intent_synonyms") or []
+            for syn in synonyms:
+                if not isinstance(syn, str):
+                    continue
+                syn_l = syn.strip().lower()
+                if syn_l and syn_l in q:
+                    scores[kind_name] = scores.get(kind_name, 0) + 1
+
+        if not scores:
+            return None
+
+        # Prefer the plan kind with the highest score; tie → ambiguous → no override.
+        sorted_items = sorted(scores.items(), key=lambda kv: (-kv[1], kv[0]))
+        if len(sorted_items) >= 2 and sorted_items[0][1] == sorted_items[1][1]:
+            return None
+
+        return sorted_items[0][0]
+    except Exception:
+        # Never block the agent on config issues; just fall back to the model intent.
+        return None
+
+
 def build_nlv_system_prompt() -> str:
     """System prompt for the NLV model that normalizes raw queries."""
 
@@ -483,6 +525,13 @@ def run_nlv_model(
         # Deterministic override for "this school year" / "this year" semantics.
         if not explicit_month_year_found:
             _apply_this_school_year_override(user_query, payload)
+
+        # Deterministic override: enforce intent from domain_config.plan_kinds when
+        # there is a clear, unambiguous match. If config is missing or ambiguous,
+        # we safely fall back to the model-chosen intent.
+        explicit_intent = _deterministic_intent_from_config(user_query)
+        if explicit_intent:
+            payload["intent"] = explicit_intent
 
         return payload
     except Exception:
