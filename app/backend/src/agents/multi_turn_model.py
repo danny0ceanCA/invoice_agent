@@ -1013,6 +1013,31 @@ class MultiTurnConversationManager:
 
         reason = decision.get("reason")
 
+        # ------------------------------------------------------------------
+        # VENDOR GUARD:
+        # Never allow a fused query that says "the vendor" with no vendor_name.
+        #
+        # For example, inputs like:
+        #   "how much are we paying agencies"
+        # should either:
+        #   (a) ask which agency, or
+        #   (b) be routed as "all vendors" at the district level.
+        #
+        # If we see a vendor-mode plan without an entity_name, force a
+        # clarification asking for the vendor_name instead of fusing.
+        # ------------------------------------------------------------------
+        vendor_mode = slots.get("mode") == "vendor_monthly"
+        vendor_plan = slots.get("plan_kind") == "vendor_monthly_spend"
+        vendor_role = slots.get("entity_role") == "vendor"
+        if (vendor_mode or vendor_plan or vendor_role) and not slots.get("entity_name"):
+            state.missing_slots = ["vendor_name"]
+            decision_type = "clarification"
+            reason = reason or (
+                "Which agency or vendor do you want to look at? "
+                "If you mean all agencies, please say 'all agencies'."
+            )
+            decision["reason"] = reason
+
         if pronoun_slots.get("missing_slot"):
             state.missing_slots = [pronoun_slots["missing_slot"]]
             decision_type = "clarification"
@@ -1034,10 +1059,7 @@ class MultiTurnConversationManager:
             state.last_period_start = time_followup.get("last_period_start")
             state.last_period_end = time_followup.get("last_period_end")
             decision_type = "time_only_followup"
-            decision["reason"] = (
-                decision.get("reason")
-                or "Month-only follow-up detected; inheriting active topic."
-            )
+            decision["reason"] = decision.get("reason") or "Month-only follow-up detected; inheriting active topic."
         previous_query = state.original_query
         if not previous_query and isinstance(state.active_topic, dict):
             previous_query = state.active_topic.get("last_query")
