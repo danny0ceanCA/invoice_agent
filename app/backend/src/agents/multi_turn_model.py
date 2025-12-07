@@ -2119,8 +2119,31 @@ class MultiTurnConversationManager:
             state.missing_slots = []
 
     def _build_clarification_prompt(self, state: ConversationState) -> Optional[str]:
+        """
+        Build a user-facing clarification prompt based on missing slots.
+
+        Default behaviour is a simple "I need the following additional details: …"
+        but we special-case common analytics follow-ups to make them more natural.
+        """
+
         if not state.missing_slots:
             return None
+
+        # Special case: asking for invoice details without an invoice_number.
+        # This covers flows like:
+        #   - "show top invoices"
+        #   - "can I see the line-item details for that?"
+        # where we need the user to pick a specific invoice number.
+        if len(state.missing_slots) == 1 and state.missing_slots[0] == "invoice_number":
+            active_mode = getattr(state, "active_mode", None)
+            last_plan = getattr(state, "last_plan_kind", None)
+            if active_mode in {"top_invoices", "invoice_details"} or last_plan in {"top_invoices"}:
+                return (
+                    "I need the invoice number so I know which invoice to show line-item details for. "
+                    "Please provide the invoice number you have in mind."
+                )
+
+        # Default generic clarification
         slots_text = ", ".join(state.missing_slots)
         return f"I need the following additional details: {slots_text}."
 
