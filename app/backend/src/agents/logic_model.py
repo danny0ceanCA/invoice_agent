@@ -49,67 +49,67 @@ You are querying a Postgres database for a school district invoice system.
 - cost FLOAT                            -- line-item amount
 - service_date VARCHAR(32)
 
-### materialized views (Postgres MATERIALIZED VIEWs)
+### materialized views (Postgres MATERIALIZED VIEWs using Postgres column types)
 
 mv_student_monthly_hours_cost
 - purpose: Student hours + cost per month (per district, year, month).
-- columns: district_key TEXT, student TEXT, service_year INTEGER, service_month_num INTEGER, service_month TEXT, total_hours REAL, total_cost REAL
+- columns: district_key VARCHAR, student VARCHAR, service_year INTEGER, service_month_num INTEGER, service_month VARCHAR, total_hours NUMERIC, total_cost NUMERIC
 
 mv_provider_monthly_hours_cost
 - purpose: Clinician hours + cost per month.
-- columns: district_key TEXT, clinician TEXT, service_year INTEGER, service_month_num INTEGER, service_month TEXT, total_hours REAL, total_cost REAL
+- columns: district_key VARCHAR, clinician VARCHAR, service_year INTEGER, service_month_num INTEGER, service_month VARCHAR, total_hours NUMERIC, total_cost NUMERIC
 
 mv_student_provider_monthly
 - purpose: For each student, monthly breakdown by clinician (hours + cost).
-- columns: district_key TEXT, student TEXT, clinician TEXT, service_year INTEGER, service_month_num INTEGER, service_month TEXT, total_hours REAL, total_cost REAL
+- columns: district_key VARCHAR, student VARCHAR, clinician VARCHAR, service_year INTEGER, service_month_num INTEGER, service_month VARCHAR, total_hours NUMERIC, total_cost NUMERIC
 
 mv_district_service_code_monthly
 - purpose: District totals by service_code per month.
-- columns: district_key TEXT, service_code TEXT, service_year INTEGER, service_month_num INTEGER, service_month TEXT, total_hours REAL, total_cost REAL
+- columns: district_key VARCHAR, service_code VARCHAR, service_year INTEGER, service_month_num INTEGER, service_month VARCHAR, total_hours NUMERIC, total_cost NUMERIC
 
 mv_invoice_summary
 - purpose: Invoice-level totals (hours, cost, invoice_date, num_students, num_clinicians).
-- columns: invoice_id INTEGER, district_key TEXT, invoice_date DATE, total_hours REAL, total_cost REAL, num_students INTEGER, num_clinicians INTEGER
+- columns: invoice_id INTEGER, district_key VARCHAR, invoice_date DATE, total_hours NUMERIC, total_cost NUMERIC, num_students INTEGER, num_clinicians INTEGER
 
 mv_student_year_summary
 - purpose: Yearly totals per student (per district, year).
-- columns: district_key TEXT, student TEXT, service_year INTEGER, total_hours REAL, total_cost REAL
+- columns: district_key VARCHAR, student VARCHAR, service_year INTEGER, total_hours NUMERIC, total_cost NUMERIC
 
 mv_provider_caseload_monthly
 - purpose: Clinician caseload (#students) + hours per month.
-- columns: district_key TEXT, clinician TEXT, service_year INTEGER, service_month_num INTEGER, service_month TEXT, num_students INTEGER, total_hours REAL, total_cost REAL
+- columns: district_key VARCHAR, clinician VARCHAR, service_year INTEGER, service_month_num INTEGER, service_month VARCHAR, num_students INTEGER, total_hours NUMERIC, total_cost NUMERIC
 
 mv_district_monthly_hours_cost
 - purpose: District hours + cost per month.
-- columns: district_key TEXT, service_year INTEGER, service_month_num INTEGER, service_month TEXT, total_hours REAL, total_cost REAL
+- columns: district_key VARCHAR, service_year INTEGER, service_month_num INTEGER, service_month VARCHAR, total_hours NUMERIC, total_cost NUMERIC
 
 mv_vendor_monthly_hours_cost
 - purpose: Vendor hours + cost per month (per district, vendor).
-- columns: district_key TEXT, vendor_id INTEGER, vendor_name TEXT, service_year INTEGER, service_month_num INTEGER, service_month TEXT, total_hours REAL, total_cost REAL
+- columns: district_key VARCHAR, vendor_id INTEGER, vendor_name VARCHAR, service_year INTEGER, service_month_num INTEGER, service_month VARCHAR, total_hours NUMERIC, total_cost NUMERIC
 
 mv_student_service_code_monthly
 - purpose: Student × service_code hours + cost per month.
-- columns: district_key TEXT, student TEXT, service_code TEXT, service_year INTEGER, service_month_num INTEGER, service_month TEXT, total_hours REAL, total_cost REAL
+- columns: district_key VARCHAR, student VARCHAR, service_code VARCHAR, service_year INTEGER, service_month_num INTEGER, service_month VARCHAR, total_hours NUMERIC, total_cost NUMERIC
 
 mv_provider_service_code_monthly
 - purpose: Clinician × service_code hours + cost per month.
-- columns: district_key TEXT, clinician TEXT, service_code TEXT, service_year INTEGER, service_month_num INTEGER, service_month TEXT, total_hours REAL, total_cost REAL
+- columns: district_key VARCHAR, clinician VARCHAR, service_code VARCHAR, service_year INTEGER, service_month_num INTEGER, service_month VARCHAR, total_hours NUMERIC, total_cost NUMERIC
 
 mv_student_daily_hours
 - purpose: Daily hours + cost per student.
-- columns: district_key TEXT, student TEXT, service_date DATE, total_hours REAL, total_cost REAL
+- columns: district_key VARCHAR, student VARCHAR, service_date DATE, total_hours NUMERIC, total_cost NUMERIC
 
 mv_provider_daily_hours
 - purpose: Daily hours + cost per clinician.
-- columns: district_key TEXT, clinician TEXT, service_date DATE, total_hours REAL, total_cost REAL
+- columns: district_key VARCHAR, clinician VARCHAR, service_date DATE, total_hours NUMERIC, total_cost NUMERIC
 
 mv_student_service_intensity_monthly
 - purpose: Student service_days, hours, and avg_hours_per_day per month.
-- columns: district_key TEXT, student TEXT, service_year INTEGER, service_month_num INTEGER, service_month TEXT, service_days INTEGER, total_hours REAL, avg_hours_per_day REAL
+- columns: district_key VARCHAR, student VARCHAR, service_year INTEGER, service_month_num INTEGER, service_month VARCHAR, service_days INTEGER, total_hours NUMERIC, avg_hours_per_day NUMERIC
 
 mv_district_daily_coverage
 - purpose: District daily hours, cost, #students, #clinicians.
-- columns: district_key TEXT, service_date DATE, total_hours REAL, total_cost REAL, num_students INTEGER, num_clinicians INTEGER
+- columns: district_key VARCHAR, service_date DATE, total_hours NUMERIC, total_cost NUMERIC, num_students INTEGER, num_clinicians INTEGER
 """
 
 def build_logic_system_prompt() -> str:
@@ -303,6 +303,7 @@ def build_logic_system_prompt() -> str:
         "- Follow the SCHOOL YEAR & DATE FILTERING RULES: do not add invoice_date BETWEEN filters for school_year/time_window queries when sql_plan.date_range is null. Apply invoice_date BETWEEN :start_date::date AND :end_date::date only when the planner provides explicit dates or the user asks about invoice submission/processing dates.\n"
         "- When RouterDecision.month_names is provided AND RouterDecision.time_window = 'this_school_year', enforce month/year filters using the injected metadata: WHERE LOWER(i.service_month) = LOWER(:month) AND EXTRACT(YEAR FROM i.invoice_date) = :year. Use the :year value from normalized_intent.time_period.year or planner metadata across invoice_details, student_monthly, and district_monthly without asking for clarification or defaulting to YTD.\n"
         "- Canonical school-year spend by month when a concrete date_range is provided:\n"
+        "-- NOTE: The following example applies ONLY when RouterDecision routes explicitly to invoice_details or provider_breakdown drilldown modes.\n"
         "SELECT LOWER(i.service_month) AS service_month,\n"
         "       SUM(i.total_cost) AS total_spend\n"
         "FROM invoices i\n"
@@ -311,6 +312,7 @@ def build_logic_system_prompt() -> str:
         "GROUP BY LOWER(i.service_month)\n"
         "ORDER BY MIN(i.invoice_date) ASC;\n"
         "- Canonical school-year hours by month when a concrete date_range is provided:\n"
+        "-- NOTE: The following example applies ONLY when RouterDecision routes explicitly to invoice_details or provider_breakdown drilldown modes.\n"
         "SELECT LOWER(i.service_month) AS service_month,\n"
         "       SUM(ili.hours) AS total_hours\n"
         "FROM invoice_line_items ili\n"
@@ -338,8 +340,13 @@ def build_logic_system_prompt() -> str:
         "- • Never use invoices.total_cost or invoice_line_items.cost when answering hours questions.\n"
         "- • Prefer LOWER(i.service_month) for grouping/filters; use invoice_date only for explicit invoice-date questions or year filters/chronological ORDER BY.\n"
         "- • If a student/provider/vendor is missing or ambiguous for hours analytics, set rows=null and note the needed clarification in 'text' before running SQL.\n\n"
+        "-- MV-FIRST RULE:\n"
+        "-- The following SQL patterns are NOT used when RouterDecision.mode\n"
+        "-- maps to any materialized view. They apply ONLY to invoice_details\n"
+        "-- or provider_breakdown modes that require raw row-level data.\n"
         "- Canonical hours templates (reuse these patterns when applicable):\n"
         "-   Student monthly hours:\n"
+        "-     -- NOTE: The following example applies ONLY when RouterDecision routes explicitly to invoice_details or provider_breakdown drilldown modes.\n"
         "-     SELECT\n"
         "-         LOWER(i.service_month) AS service_month,\n"
         "-         SUM(ili.hours) AS total_hours\n"
@@ -350,6 +357,7 @@ def build_logic_system_prompt() -> str:
         "-     GROUP BY LOWER(i.service_month)\n"
         "-     ORDER BY MIN(i.invoice_date) ASC;\n"
         "-   Student year-to-date hours:\n"
+        "-     -- NOTE: The following example applies ONLY when RouterDecision routes explicitly to invoice_details or provider_breakdown drilldown modes.\n"
         "-     SELECT\n"
         "-         LOWER(i.service_month) AS service_month,\n"
         "-         SUM(ili.hours) AS total_hours\n"
@@ -361,6 +369,7 @@ def build_logic_system_prompt() -> str:
         "-     GROUP BY LOWER(i.service_month)\n"
         "-     ORDER BY MIN(i.invoice_date) ASC;\n"
         "-   District hours by month (and vendor monthly hours by district):\n"
+        "-     -- NOTE: The following example applies ONLY when RouterDecision routes explicitly to invoice_details or provider_breakdown drilldown modes.\n"
         "-     SELECT\n"
         "-         LOWER(i.service_month) AS service_month,\n"
         "-         SUM(ili.hours) AS total_hours\n"
@@ -370,6 +379,7 @@ def build_logic_system_prompt() -> str:
         "-     GROUP BY LOWER(i.service_month)\n"
         "-     ORDER BY MIN(i.invoice_date) ASC;\n"
         "-   Provider/clinician hours for a district or student:\n"
+        "-     -- NOTE: The following example applies ONLY when RouterDecision routes explicitly to invoice_details or provider_breakdown drilldown modes.\n"
         "-     SELECT\n"
         "-         ili.clinician AS provider,\n"
         "-         SUM(ili.hours) AS total_hours\n"
@@ -379,6 +389,7 @@ def build_logic_system_prompt() -> str:
         "-     GROUP BY ili.clinician\n"
         "-     ORDER BY total_hours DESC;\n"
         "-   Vendor monthly or YTD hours (filter vendor.name when provided):\n"
+        "-     -- NOTE: The following example applies ONLY when RouterDecision routes explicitly to invoice_details or provider_breakdown drilldown modes.\n"
         "-     SELECT\n"
         "-         LOWER(i.service_month) AS service_month,\n"
         "-         SUM(ili.hours) AS total_hours\n"
@@ -387,10 +398,11 @@ def build_logic_system_prompt() -> str:
         "-     JOIN vendors v ON v.id = i.vendor_id\n"
         "-     WHERE i.district_key = :district_key\n"
         "-       AND LOWER(v.name) LIKE LOWER(:vendor_name)\n"
-        "-       /* optionally add: AND EXTRACT(YEAR FROM i.invoice_date) = EXTRACT(YEAR FROM CURRENT_DATE) for YTD */\n"
+        "-       /* optionally add when RouterDecision.time_window == 'ytd' */\n"
         "-     GROUP BY LOWER(i.service_month)\n"
         "-     ORDER BY MIN(i.invoice_date) ASC;\n"
         "-   Top students by hours (YTD):\n"
+        "-     -- NOTE: The following example applies ONLY when RouterDecision routes explicitly to invoice_details or provider_breakdown drilldown modes.\n"
         "-     SELECT\n"
         "-         LOWER(i.student_name) AS student_name,\n"
         "-         SUM(ili.hours) AS total_hours\n"
@@ -415,8 +427,8 @@ def build_logic_system_prompt() -> str:
         "    • The user explicitly asks about submission/processing dates (invoice_date semantics), OR\n"
         "    • sql_plan.date_range.start_date and sql_plan.date_range.end_date are provided (e.g., explicit calendar dates or calendar years).\n"
         "- For monthly semantics (monthly spend, monthly hours), interpret months using invoices.service_month (month of service). Use invoice_date only for ORDER BY or when the question is explicitly about dates.\n"
-        "- When sql_plan provides a concrete date_range, apply it with invoice_date BETWEEN :start_date AND :end_date.\n"
-        "- For district_summary or student_monthly modes with no month_names but a plan.date_range, rely solely on invoice_date BETWEEN :start_date AND :end_date without adding service_month filters.\n"
+        "- When sql_plan provides a concrete date_range, apply it with invoice_date BETWEEN :start_date::date AND :end_date::date.\n"
+        "- For district_summary or student_monthly modes with no month_names but a plan.date_range, rely solely on invoice_date BETWEEN :start_date::date AND :end_date::date without adding service_month filters.\n"
         "- Do NOT invent default school-year ranges (e.g., never assume July 1..June 30) unless the user supplied exact dates.\n"
         "- When a question is ambiguous between school-year and calendar-year, do NOT guess: set rows=null and put a short clarification note in IR.text.\n\n"
         "HOURS VS SPEND RULES (STRICT):\n"
