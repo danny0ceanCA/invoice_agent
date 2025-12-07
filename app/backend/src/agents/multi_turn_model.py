@@ -613,6 +613,35 @@ class MultiTurnConversationManager:
         if time_window_kind:
             state.last_period_type = time_window_kind
 
+    def _detect_time_followup(
+        self, user_message: Optional[str], state: ConversationState
+    ) -> Optional[Dict[str, str]]:
+        """
+        Detect month-only follow-ups that should inherit the active topic.
+
+        Returns {"month": MonthName} when the message is only a month reference.
+        """
+
+        if not user_message or not state or not state.active_topic:
+            return None
+
+        normalized = re.sub(r"[?.!]", "", user_message).strip().lower()
+        if not normalized:
+            return None
+
+        if self._extract_name(user_message):
+            return None
+
+        month_pattern = (
+            r"^(?:just\s+|only\s+|for\s+|in\s+)?"
+            r"(january|february|march|april|may|june|july|august|september|october|november|december)\b$"
+        )
+        match = re.match(month_pattern, normalized)
+        if not match:
+            return None
+
+        return {"month": match.group(1).title()}
+
     def _compose_fused_query(
         self,
         slots: Dict[str, Any],
@@ -945,6 +974,26 @@ class MultiTurnConversationManager:
 
         decision_type = decision.get("decision")
         slots = decision.get("slots") or {}
+
+        pronoun_slots = self._extract_entities_from_message(user_message, state)
+        if pronoun_slots.get("entity_role") and not slots.get("entity_role"):
+            slots["entity_role"] = pronoun_slots["entity_role"]
+        if pronoun_slots.get("entity_name") and not slots.get("entity_name"):
+            slots["entity_name"] = pronoun_slots["entity_name"]
+
+        time_followup = self._detect_time_followup(user_message, state)
+        if time_followup:
+            slots = self._build_previous_slots(state)
+            slots["time_window_kind"] = "explicit_month"
+            month = time_followup.get("month")
+            state.last_month = month
+            state.last_explicit_month = month
+            state.last_period_type = "explicit_month"
+            decision_type = "time_only_followup"
+            decision["reason"] = (
+                decision.get("reason")
+                or "Month-only follow-up detected; inheriting active topic."
+            )
         previous_query = state.original_query
         if not previous_query and isinstance(state.active_topic, dict):
             previous_query = state.active_topic.get("last_query")
@@ -957,7 +1006,15 @@ class MultiTurnConversationManager:
             fused_query=fused_query,
             user_message=user_message,
         )
+        if pronoun_slots and decision_type is None:
+            decision_type = "fuse"
+
         reason = decision.get("reason")
+
+        if pronoun_slots and decision_type == "clarification":
+            if pronoun_slots.get("entity_name") or state.active_topic.get("value"):
+                decision_type = "fuse"
+                reason = reason or "Resolved pronoun to active topic; fusing."
 
         if decision_type == "clarification":
             state.latest_user_message = user_message
@@ -996,7 +1053,9 @@ class MultiTurnConversationManager:
                 "state": state.to_dict(),
             }
 
-        if decision_type == "fuse":
+        is_time_only_followup = decision_type == "time_only_followup"
+
+        if decision_type in {"fuse", "time_only_followup"}:
             state.latest_user_message = user_message
             state.history.append({"role": "user", "content": user_message})
             fused_query = self._compose_fused_query(slots, user_message, previous_query)
@@ -1029,7 +1088,7 @@ class MultiTurnConversationManager:
                 state.active_topic = {}
             if not state.original_query:
                 state.original_query = fused_query
-            needs_clarification = bool(state.missing_slots)
+            needs_clarification = False if is_time_only_followup else bool(state.missing_slots)
             self.save_state(state, session_id=session_id)
             LOGGER.debug("multi-turn-mti fused", fused_query=fused_query)
             return {
@@ -2173,8 +2232,15 @@ class MultiTurnConversationManager:
         if period_details:
             parts.append(f"Time period is {'; '.join(period_details)}.")
 
+        month_followup = None
+        if state.latest_user_message and state.active_topic:
+            month_followup = self._detect_time_followup(state.latest_user_message, state)
+
         if state.latest_user_message and state.latest_user_message != state.original_query:
-            if state.latest_user_message not in state.resolved_slots.values():
+            if (
+                state.latest_user_message not in state.resolved_slots.values()
+                and not month_followup
+            ):
                 parts.append(f"Additional instruction: {state.latest_user_message}")
 
         return " ".join(part.strip() for part in parts if part).strip()
@@ -2184,6 +2250,35 @@ class MultiTurnConversationManager:
         patterns = self._get_pattern_list("pronoun_followup_starters", [])
         lowered = text.lower()
         return any(p in lowered for p in pronouns) or any(p in lowered for p in patterns)
+
+    def _extract_entities_from_message(
+        self, user_message: Optional[str], state: ConversationState
+    ) -> Dict[str, Optional[str]]:
+        """
+        Resolve pronoun/placeholder references to the active topic when possible.
+        """
+
+        results: Dict[str, Optional[str]] = {}
+        if not user_message or not state or not state.active_topic:
+            return results
+
+        lowered = user_message.lower()
+        active_role = state.active_topic.get("type")
+        active_value = state.active_topic.get("value")
+
+        placeholder_terms = {"the ones", "those ones", "the people", "the kids"}
+        pronoun_hit = bool(
+            re.search(r"\b(he|she|they|him|her|them)\b", lowered)
+            or any(term in lowered for term in placeholder_terms)
+            or any(term in lowered for term in ["that month", "that student"])
+        )
+
+        if pronoun_hit and active_role:
+            results["entity_role"] = active_role
+            if active_value:
+                results["entity_name"] = active_value
+
+        return results
 
     def _contains_provider_focus(self, text: str) -> bool:
         providers = self._get_pattern_list("provider_focus_phrases", [])
