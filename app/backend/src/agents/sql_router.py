@@ -227,6 +227,33 @@ def route_sql(
     if isinstance(month_names, str):
         month_names = [month_names]
 
+    # ------------------------------------------------------------------
+    # TERMINAL RULE FOR DISTRICT-WIDE PROVIDER BREAKDOWN
+    #
+    # Queries like:
+    #   "which agencies provide support to our students"
+    #
+    # are routed as student_provider_breakdown at the district level with
+    # no specific primary entity. In that case, we only want to run a
+    # single-stage query that answers:
+    #   - which vendors, and
+    #   - how much was paid in total.
+    #
+    # There is no second stage, so we must NOT keep
+    # needs_provider_breakdown=True, or the agent loop will re-run the
+    # same RouterDecision over and over until the iteration limit.
+    #
+    # So: if this is a district-scope provider breakdown (no primary
+    # entity), force needs_provider_breakdown = False so the workflow
+    # terminates after one SQL pass.
+    # ------------------------------------------------------------------
+    if (
+        mode == "student_provider_breakdown"
+        and primary_type == "district"
+        and not primary_entities
+    ):
+        needs_provider_breakdown = False
+
     router_decision = RouterDecision(
         mode=mode,
         primary_entity_type=primary_type,

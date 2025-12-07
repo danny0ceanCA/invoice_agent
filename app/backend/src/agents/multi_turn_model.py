@@ -477,6 +477,10 @@ class MultiTurnConversationManager:
             slots.update(previous_slots or {})
             period_info = self._extract_period_info(user_message, state)
             time_window = period_info.get("last_period_type") or period_info.get("last_month")
+            if period_info.get("last_month"):
+                # Carry forward the explicit month label (e.g., "July") so the fused
+                # query keeps natural language that NLV can parse.
+                slots["month_label"] = period_info.get("last_month")
             if time_window == "explicit_month" or period_info.get("last_month"):
                 slots["time_window_kind"] = "explicit_month"
             elif period_info.get("last_period_type"):
@@ -519,6 +523,10 @@ class MultiTurnConversationManager:
                     strict_key, "student_provider_breakdown"
                 )
                 period_info = self._extract_period_info(user_message, state)
+                if period_info.get("last_month"):
+                    # Preserve the explicit month name from the follow-up question
+                    # (e.g., "in July") so it appears in the fused query.
+                    slots["month_label"] = period_info.get("last_month")
                 if period_info.get("last_period_type"):
                     slots["time_window_kind"] = period_info.get("last_period_type")
                 elif period_info.get("last_month"):
@@ -699,6 +707,12 @@ class MultiTurnConversationManager:
         metric = slots.get("metric")
         mode = slots.get("mode")
         time_window_kind = slots.get("time_window_kind")
+        month_label = (
+            slots.get("month_label")
+            or slots.get("last_month")
+            or slots.get("explicit_month")
+            or slots.get("month")
+        )
 
         def metric_phrase(value):
             if value == "hours":
@@ -710,13 +724,18 @@ class MultiTurnConversationManager:
         def time_phrase(kind):
             if not kind or kind == "unspecified":
                 return ""
+            if kind == "explicit_month":
+                # Preserve natural month wording like "July" so NLV can parse it,
+                # falling back to a generic phrase if we don't know the label.
+                if month_label:
+                    return f" for {month_label}"
+                return " for the requested month"
             mapping = {
                 "this_school_year": " for this school year",
                 "last_school_year": " for last school year",
                 "this_month": " for this month",
                 "last_month": " for last month",
                 "ytd": " year to date for this school year",
-                "explicit_month": " for the requested month",
                 "explicit_range": " for the requested date range",
                 "fall": " for the fall term",
                 "winter": " for the winter term",
@@ -1013,6 +1032,31 @@ class MultiTurnConversationManager:
 
         reason = decision.get("reason")
 
+        # ------------------------------------------------------------------
+        # VENDOR GUARD:
+        # Never allow a fused query that says "the vendor" with no vendor_name.
+        #
+        # For example, inputs like:
+        #   "how much are we paying agencies"
+        # should either:
+        #   (a) ask which agency, or
+        #   (b) be routed as "all vendors" at the district level.
+        #
+        # If we see a vendor-mode plan without an entity_name, force a
+        # clarification asking for the vendor_name instead of fusing.
+        # ------------------------------------------------------------------
+        vendor_mode = slots.get("mode") == "vendor_monthly"
+        vendor_plan = slots.get("plan_kind") == "vendor_monthly_spend"
+        vendor_role = slots.get("entity_role") == "vendor"
+        if (vendor_mode or vendor_plan or vendor_role) and not slots.get("entity_name"):
+            state.missing_slots = ["vendor_name"]
+            decision_type = "clarification"
+            reason = reason or (
+                "Which agency or vendor do you want to look at? "
+                "If you mean all agencies, please say 'all agencies'."
+            )
+            decision["reason"] = reason
+
         if pronoun_slots.get("missing_slot"):
             state.missing_slots = [pronoun_slots["missing_slot"]]
             decision_type = "clarification"
@@ -1034,10 +1078,7 @@ class MultiTurnConversationManager:
             state.last_period_start = time_followup.get("last_period_start")
             state.last_period_end = time_followup.get("last_period_end")
             decision_type = "time_only_followup"
-            decision["reason"] = (
-                decision.get("reason")
-                or "Month-only follow-up detected; inheriting active topic."
-            )
+            decision["reason"] = decision.get("reason") or "Month-only follow-up detected; inheriting active topic."
         previous_query = state.original_query
         if not previous_query and isinstance(state.active_topic, dict):
             previous_query = state.active_topic.get("last_query")
