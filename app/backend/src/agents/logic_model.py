@@ -14,7 +14,7 @@ from .domain_config_loader import load_domain_config
 from openai import OpenAI
 
 DB_SCHEMA_HINT = """
-You are querying a SQLite database for a school district invoice system.
+You are querying a Postgres database for a school district invoice system.
 
 ### invoices
 - id INTEGER PRIMARY KEY
@@ -49,7 +49,7 @@ You are querying a SQLite database for a school district invoice system.
 - cost FLOAT                            -- line-item amount
 - service_date VARCHAR(32)
 
-### materialized views (SQLite prototypes, mirrored as Postgres MATERIALIZED VIEWs)
+### materialized views (Postgres MATERIALIZED VIEWs)
 
 mv_student_monthly_hours_cost
 - purpose: Student hours + cost per month (per district, year, month).
@@ -221,11 +221,11 @@ def build_logic_system_prompt() -> str:
 
     existing_prompt = (
         "You are an analytics agent for a school district invoice system. "
-        "You answer questions using SQLite via the run_sql tool and return structured JSON.\n\n"
+        "You answer questions using Postgres via the run_sql tool and return structured JSON.\n\n"
         f"{DB_SCHEMA_HINT}\n\n"
         "HIGH PRIORITY MATERIALIZED VIEW OVERRIDE:\n"
         "- These MV rules OVERRIDE and SUPERSEDE all SQL examples, templates, and\n"
-        "  canonical fallback rules that appear later in this prompt.\n"
+        "  canonical templates that appear later in this prompt.\n"
         "- When RouterDecision.mode matches an MV rule, the model MUST ignore all\n"
         "  earlier raw-table SQL patterns and use the materialized view as the\n"
         "  primary data source.\n"
@@ -256,12 +256,12 @@ def build_logic_system_prompt() -> str:
         "ALWAYS use mv_provider_monthly_hours_cost as the primary source.\n\n"
         "Filter by district_key and clinician (case-insensitive).\n\n"
         "Respect RouterDecision.date_range using service_year, as above.\n\n"
-        "Only fall back to invoice_line_items when the user explicitly asks for line-level or date-level detail that is not present in the MV.\n\n"
+        "Use invoice_line_items only when RouterDecision.mode explicitly requests invoice-level or provider-breakdown drilldowns.\n\n"
         "When RouterDecision.mode == \"student_provider_breakdown\" OR RouterDecision.mode == \"student_provider_year\":\n\n"
         "ALWAYS use mv_student_provider_monthly for monthly student × provider breakdowns.\n\n"
         "Filter by district_key, student, and/or clinician as indicated by RouterDecision.primary_entities.\n\n"
         "Use RouterDecision.date_range to constrain service_year.\n\n"
-        "Only join back to invoice_line_items when the user needs per-day or per-line drilldown.\n\n"
+        "Only join back to invoice_line_items when RouterDecision.mode requests per-day or invoice-level drilldown (invoice_details or provider_breakdown).\n\n"
         "When RouterDecision.mode == \"district_summary\" OR RouterDecision.mode == \"district_monthly\":\n\n"
         "ALWAYS use mv_district_monthly_hours_cost for district-wide monthly hours and cost.\n\n"
         "Filter by district_key and, if needed, by service_year based on RouterDecision.date_range.\n\n"
@@ -272,12 +272,12 @@ def build_logic_system_prompt() -> str:
         "Prefer mv_invoice_summary for invoice-level totals (invoice_id, district_key, invoice_date, total_hours, total_cost, num_students, num_clinicians).\n\n"
         "Use invoices directly ONLY when the user asks for invoice columns that are not available in mv_invoice_summary.\n\n"
         "For service intensity queries (e.g., RouterDecision.mode == \"service_intensity\"):\n\n"
-        "Prefer mv_student_service_intensity_monthly (service_days, total_hours, avg_hours_per_day) and only fall back to invoice_line_items when per-day rows are explicitly required.\n\n"
+        "Prefer mv_student_service_intensity_monthly (service_days, total_hours, avg_hours_per_day) and use invoice_line_items only when RouterDecision routes to invoice_details or provider_breakdown modes that need per-day rows.\n\n"
         "For district daily coverage queries (e.g., RouterDecision.mode == \"district_daily_coverage\"):\n\n"
         "Prefer mv_district_daily_coverage (service_date, total_hours, total_cost, num_students, num_clinicians).\n\n"
         "General rule:\n\n"
         "If RouterDecision.mode maps to a known MV, you MUST use that MV as the primary aggregation source.\n\n"
-        "Only fall back to invoices or invoice_line_items when a required column is not present in any MV OR when the user explicitly asks for raw, line-level drilldown.\n\n"
+        "Use invoices or invoice_line_items only when RouterDecision explicitly routes to invoice_details or provider_breakdown drilldowns that require raw rows.\n\n"
         f"{router_contract}"
         f"{reasoning_rules}\n\n"
         "INPUTS & CONTEXT:\n"
@@ -300,25 +300,25 @@ def build_logic_system_prompt() -> str:
         "NOTE: Materialized view rules override all prior SQL examples.\n"
         "SQL RULES:\n"
         "- Only use columns that exist in the schema.\n"
-        "- Follow the SCHOOL YEAR & DATE FILTERING RULES: do not add invoice_date BETWEEN filters for school_year/time_window queries when sql_plan.date_range is null. Apply invoice_date BETWEEN :start_date AND :end_date only when the planner provides explicit dates or the user asks about invoice submission/processing dates.\n"
-        "- When RouterDecision.month_names is provided AND RouterDecision.time_window = 'this_school_year', enforce month/year filters using the injected metadata: WHERE LOWER(i.service_month) = LOWER(:month) AND strftime('%Y', i.invoice_date) = :year. Use the :year value from normalized_intent.time_period.year or planner metadata across invoice_details, student_monthly, and district_monthly without asking for clarification or defaulting to YTD.\n"
+        "- Follow the SCHOOL YEAR & DATE FILTERING RULES: do not add invoice_date BETWEEN filters for school_year/time_window queries when sql_plan.date_range is null. Apply invoice_date BETWEEN :start_date::date AND :end_date::date only when the planner provides explicit dates or the user asks about invoice submission/processing dates.\n"
+        "- When RouterDecision.month_names is provided AND RouterDecision.time_window = 'this_school_year', enforce month/year filters using the injected metadata: WHERE LOWER(i.service_month) = LOWER(:month) AND EXTRACT(YEAR FROM i.invoice_date) = :year. Use the :year value from normalized_intent.time_period.year or planner metadata across invoice_details, student_monthly, and district_monthly without asking for clarification or defaulting to YTD.\n"
         "- Canonical school-year spend by month when a concrete date_range is provided:\n"
         "SELECT LOWER(i.service_month) AS service_month,\n"
         "       SUM(i.total_cost) AS total_spend\n"
         "FROM invoices i\n"
         "WHERE i.district_key = :district_key\n"
-        "  AND i.invoice_date BETWEEN :start_date AND :end_date\n"
+        "  AND i.invoice_date BETWEEN :start_date::date AND :end_date::date\n"
         "GROUP BY LOWER(i.service_month)\n"
-        "ORDER BY MIN(strftime('%Y-%m', i.invoice_date)) ASC;\n"
+        "ORDER BY MIN(i.invoice_date) ASC;\n"
         "- Canonical school-year hours by month when a concrete date_range is provided:\n"
         "SELECT LOWER(i.service_month) AS service_month,\n"
         "       SUM(ili.hours) AS total_hours\n"
         "FROM invoice_line_items ili\n"
         "JOIN invoices i ON i.id = ili.invoice_id\n"
         "WHERE i.district_key = :district_key\n"
-        "  AND i.invoice_date BETWEEN :start_date AND :end_date\n"
+        "  AND i.invoice_date BETWEEN :start_date::date AND :end_date::date\n"
         "GROUP BY LOWER(i.service_month)\n"
-        "ORDER BY MIN(strftime('%Y-%m', i.invoice_date)) ASC;\n"
+        "ORDER BY MIN(i.invoice_date) ASC;\n"
         "- Money totals rules:\n"
         "- • Use invoices.total_cost ONLY for overall invoice-level totals (no clinician/service breakdown), e.g. 'total invoice cost for August'.\n"
         "- • When you are grouping by clinician, service_code, or other line-item fields, you MUST aggregate invoice_line_items.cost instead of invoices.total_cost.\n"
@@ -348,7 +348,7 @@ def build_logic_system_prompt() -> str:
         "-     WHERE i.district_key = :district_key\n"
         "-       AND LOWER(i.student_name) LIKE LOWER(:student_name)\n"
         "-     GROUP BY LOWER(i.service_month)\n"
-        "-     ORDER BY MIN(strftime('%Y-%m', i.invoice_date)) ASC;\n"
+        "-     ORDER BY MIN(i.invoice_date) ASC;\n"
         "-   Student year-to-date hours:\n"
         "-     SELECT\n"
         "-         LOWER(i.service_month) AS service_month,\n"
@@ -357,9 +357,9 @@ def build_logic_system_prompt() -> str:
         "-     JOIN invoices i ON i.id = ili.invoice_id\n"
         "-     WHERE i.district_key = :district_key\n"
         "-       AND LOWER(i.student_name) LIKE LOWER(:student_name)\n"
-        "-       AND strftime('%Y', i.invoice_date) = strftime('%Y','now')\n"
+        "-       AND EXTRACT(YEAR FROM i.invoice_date) = EXTRACT(YEAR FROM CURRENT_DATE)\n"
         "-     GROUP BY LOWER(i.service_month)\n"
-        "-     ORDER BY MIN(strftime('%Y-%m', i.invoice_date)) ASC;\n"
+        "-     ORDER BY MIN(i.invoice_date) ASC;\n"
         "-   District hours by month (and vendor monthly hours by district):\n"
         "-     SELECT\n"
         "-         LOWER(i.service_month) AS service_month,\n"
@@ -368,7 +368,7 @@ def build_logic_system_prompt() -> str:
         "-     JOIN invoices i ON i.id = ili.invoice_id\n"
         "-     WHERE i.district_key = :district_key\n"
         "-     GROUP BY LOWER(i.service_month)\n"
-        "-     ORDER BY MIN(strftime('%Y-%m', i.invoice_date)) ASC;\n"
+        "-     ORDER BY MIN(i.invoice_date) ASC;\n"
         "-   Provider/clinician hours for a district or student:\n"
         "-     SELECT\n"
         "-         ili.clinician AS provider,\n"
@@ -387,16 +387,16 @@ def build_logic_system_prompt() -> str:
         "-     JOIN vendors v ON v.id = i.vendor_id\n"
         "-     WHERE i.district_key = :district_key\n"
         "-       AND LOWER(v.name) LIKE LOWER(:vendor_name)\n"
-        "-       /* optionally add: AND strftime('%Y', i.invoice_date) = strftime('%Y','now') for YTD */\n"
+        "-       /* optionally add: AND EXTRACT(YEAR FROM i.invoice_date) = EXTRACT(YEAR FROM CURRENT_DATE) for YTD */\n"
         "-     GROUP BY LOWER(i.service_month)\n"
-        "-     ORDER BY MIN(strftime('%Y-%m', i.invoice_date)) ASC;\n"
+        "-     ORDER BY MIN(i.invoice_date) ASC;\n"
         "-   Top students by hours (YTD):\n"
         "-     SELECT\n"
         "-         LOWER(i.student_name) AS student_name,\n"
         "-         SUM(ili.hours) AS total_hours\n"
         "-     FROM invoice_line_items ili\n"
         "-     JOIN invoices i ON i.id = ili.invoice_id\n"
-        "-     WHERE strftime('%Y', i.invoice_date) = strftime('%Y','now')\n"
+        "-     WHERE EXTRACT(YEAR FROM i.invoice_date) = EXTRACT(YEAR FROM CURRENT_DATE)\n"
         "-     GROUP BY LOWER(i.student_name)\n"
         "-     ORDER BY total_hours DESC\n"
         "-     LIMIT 10;\n\n"
@@ -467,10 +467,6 @@ def build_logic_system_prompt() -> str:
         "    entity identifier,\n"
         "    totals per month in the window,\n"
         "    net_change = newest - oldest\n"
-        "- Fallback rule:\n"
-        "    When no entities satisfy strict monotonicity, return the largest movers\n"
-        "    by net_change (positive for increasing queries, negative for decreasing).\n"
-        "    IR.text must note the fallback.\n\n"
         "SQL SAFETY RULES (STRICT):\n"
         "- NEVER reference invoice_line_items.service_month (that column does not exist).\n"
         "- NEVER reference non-existent columns such as: amount_due, invoice_amount, balance_due, vendor_name (unless explicitly selected), or invoice_line_items.month.\n"
@@ -481,7 +477,7 @@ def build_logic_system_prompt() -> str:
         "MONTH GROUPING & ORDERING:\n"
         "- When you GROUP BY month (for example, service_month with an aggregated total_cost), you MUST order the result by calendar month, not by amount, unless the user explicitly asks for 'highest month(s)', 'top month(s)', or a ranking.\n"
         "- You can order months chronologically using either service_month/service_year columns or, if necessary, invoice_date for ORDER BY only. For example:\n"
-        "    ORDER BY MIN(strftime('%Y-%m', invoice_date)) ASC\n"
+        "    ORDER BY MIN(invoice_date) ASC\n"
         "  or, if a numeric month column exists (e.g., service_month_num), use:\n"
         "    ORDER BY service_month_num ASC, service_year ASC\n"
         "- Regardless of how you ORDER BY months, the FILTER for month-based questions MUST use service_month as described above (e.g., WHERE LOWER(service_month) = LOWER('July')).\n"
@@ -494,7 +490,7 @@ def build_logic_system_prompt() -> str:
         "- If user asks about a STUDENT, your SQL must use invoices.student_name with a case-insensitive LIKE match.\n"
         "- If user asks about a VENDOR, JOIN vendors ON vendors.id = invoices.vendor_id and filter vendors.name with LIKE.\n"
         "- If user references a month like 'November', search using LOWER(service_month).\n"
-        "- If user references a year, extract using strftime('%Y', invoice_date).\n"
+        "- If user references a year, extract using EXTRACT(YEAR FROM invoice_date).\n"
         "- Do NOT guess column names. Use only: student_name, vendor_id, vendors.name, service_month, invoice_date, total_cost.\n\n"
         "CLINICIAN QUERIES:\n"
         "- When RouterDecision.needs_provider_breakdown is true or RouterDecision.mode indicates provider-centric analytics (for example, student_provider_breakdown or provider_breakdown), use invoice_line_items joined to invoices and filter by clinician as specified.\n"
@@ -759,12 +755,12 @@ def _build_router_guidance(router_decision: dict[str, Any] | None) -> str:
 
     if mode in {"student_monthly", "district_summary"} and not month_names:
         lines.append(
-            "DATE_RANGE FILTER: When sql_plan.date_range is provided, apply only invoice_date BETWEEN :start_date AND :end_date; do not add service_month filters."
+            "DATE_RANGE FILTER: When sql_plan.date_range is provided, apply only invoice_date BETWEEN :start_date::date AND :end_date::date; do not add service_month filters."
         )
 
     if month_names and time_window == "this_school_year":
         lines.append(
-            "MONTH/YEAR FILTER: For month-only school-year queries, use WHERE LOWER(i.service_month) = LOWER(:month) AND strftime('%Y', i.invoice_date) = :year with the injected month/year. Do not ask for clarification; override any YTD defaults."
+            "MONTH/YEAR FILTER: For month-only school-year queries, use WHERE LOWER(i.service_month) = LOWER(:month) AND EXTRACT(YEAR FROM i.invoice_date) = :year with the injected month/year. Do not ask for clarification; override any YTD defaults."
         )
 
     lines.append(
@@ -949,7 +945,7 @@ SELECT * FROM {mv_name}{where_clause}
                 "content": (
                     "MATERIALIZED VIEW ROUTING:\n"
                     f"- Use materialized view {mv_name} as the primary FROM source for this query.\n"
-                    "- Apply RouterDecision filters to this view unless columns are missing and a fallback is required."
+                    "- Apply RouterDecision filters to this view as provided; do not switch to base tables unless the router explicitly calls for drilldown modes."
                 ),
             }
         )
