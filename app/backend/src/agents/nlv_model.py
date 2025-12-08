@@ -640,6 +640,68 @@ def run_nlv_model(
 
         _strip_inherited_entity_clarifications(payload)
 
+        # ------------------------------------------------------------------
+        # FINAL MONTH/TIME_PERIOD FALLBACK
+        #
+        # If the query clearly names a month but time_period is still empty
+        # and "time_period" is in clarification_needed, infer it using the
+        # current school year and remove the time_period clarification.
+        # ------------------------------------------------------------------
+        clar_list = payload.get("clarification_needed")
+        time_period = payload.get("time_period") or {}
+        if not isinstance(time_period, dict):
+            time_period = {}
+
+        if isinstance(clar_list, list) and "time_period" in clar_list:
+            # Detect a month name in the original user_query
+            month_match = re.search(
+                r"\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|"
+                r"Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|"
+                r"Dec(?:ember)?)\b",
+                user_query,
+                flags=re.IGNORECASE,
+            )
+
+            existing_month = time_period.get("month")
+            existing_year = time_period.get("year")
+
+            if month_match and (existing_month in (None, "")) and (existing_year in (None, "")):
+                month_name = month_match.group(1)
+                today = date.today()
+                school_year_window = _compute_current_school_year(today)
+
+                month_lower = month_name.lower()
+                jul_to_dec = {
+                    "july",
+                    "august",
+                    "september",
+                    "october",
+                    "november",
+                    "december",
+                }
+                if month_lower in jul_to_dec:
+                    inferred_year = school_year_window["school_year"] - 1
+                else:
+                    inferred_year = school_year_window["school_year"]
+
+                time_period.update(
+                    {
+                        "month": month_name,
+                        "year": inferred_year,
+                        "school_year": school_year_window["school_year"],
+                        "start_date": school_year_window["start_date"],
+                        "end_date": school_year_window["end_date"],
+                        "relative": "this_school_year",
+                    }
+                )
+                payload["time_period"] = time_period
+
+                # Strip time_period from clarifications
+                clar_list = [c for c in clar_list if c != "time_period"]
+                payload["clarification_needed"] = clar_list
+                if not clar_list:
+                    payload["requires_clarification"] = False
+
         # Deterministic override: enforce intent from domain_config.plan_kinds when
         # there is a clear, unambiguous match. If config is missing or ambiguous,
         # we safely fall back to the model-chosen intent.
