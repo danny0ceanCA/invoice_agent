@@ -807,6 +807,14 @@ class MultiTurnConversationManager:
         decision_type = decision.get("decision")
         slots = decision.get("slots") or {}
 
+        # Determine the previous query to use as the anchor for fusion.
+        # Prefer the last_query stored on the active_topic, and fall back to the state's original_query.
+        previous_query: Optional[str] = None
+        if isinstance(state.active_topic, dict):
+            previous_query = state.active_topic.get("last_query")
+        if not previous_query:
+            previous_query = state.original_query
+
         previous_slots = self._build_previous_slots(state)
 
         pronoun_slots = self._extract_entities_from_message(user_message, state)
@@ -877,9 +885,6 @@ class MultiTurnConversationManager:
             decision["reason"] = decision.get("reason") or "Month-only follow-up detected; inheriting active topic."
         else:
             slots = self._merge_slots(previous_slots, slots)
-        previous_query = state.original_query
-        if not previous_query and isinstance(state.active_topic, dict):
-            previous_query = state.active_topic.get("last_query")
         fused_query = self._compose_fused_query(slots, user_message, previous_query)
         LOGGER.debug(
             "mti-decision",
@@ -914,8 +919,9 @@ class MultiTurnConversationManager:
 
         if decision_type == "new_topic":
             self.clear_state(session_id)
-            previous_query = None
             prior_original_query = state.original_query
+            # For a new topic, do not chain onto the prior query; start fresh.
+            previous_query = None
             state = self._start_new_thread(user_message, required_slots)
             fused_query = self._compose_fused_query(slots, user_message, previous_query)
             self._apply_mti_slots(state, slots, fused_query)
