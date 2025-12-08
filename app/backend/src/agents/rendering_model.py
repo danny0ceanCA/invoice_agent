@@ -146,6 +146,15 @@ def run_rendering_model(
             "do not fall back to listing all entities. If data is missing, politely "
             "note the gap for the specific target instead of showing a full roster."
         )
+    elif (getattr(ir, "intent", None) == "clinician_student_breakdown"
+          or getattr(ir, "mode", None) == "clinician_student_breakdown") and ir.rows:
+        messages[1]["content"] += (
+            "\n\nRendering guidance: This is a clinician-to-students breakdown. "
+            "IR.rows already contains the students this clinician supports. "
+            "Do NOT say that no data is available or ask for a date range or location. "
+            "Instead, summarize the clinician's caseload, and render the table of students "
+            "from IR.rows."
+        )
     elif _looks_like_list_intent(user_query) or _has_ambiguous_entities(ir.entities):
         messages[1]["content"] += (
             "\n\nRendering guidance: The user asked for a list or entity resolution "
