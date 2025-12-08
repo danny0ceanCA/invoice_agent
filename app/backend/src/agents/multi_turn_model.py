@@ -1206,9 +1206,7 @@ class MultiTurnConversationManager:
             self.save_state(state, session_id=session_id)
             LOGGER.debug("multi-turn-mti clarification", reason=reason)
             return {
-                "session_id": session_id,
                 "needs_clarification": True,
-                "clarification_prompt": clarification_prompt,
                 "fused_query": None,
                 "state": state.to_dict(),
             }
@@ -1221,18 +1219,14 @@ class MultiTurnConversationManager:
             )
             self._apply_mti_slots(state, slots, fused_query)
             state.last_intent_shape = new_intent_shape
-            state.original_query = fused_query
+            state.original_query = user_message
             state.latest_user_message = user_message
             state.history.append({"role": "user", "content": user_message})
             needs_clarification = bool(state.missing_slots)
             self.save_state(state, session_id=session_id)
             LOGGER.debug("multi-turn-mti new_topic", fused_query=fused_query)
             return {
-                "session_id": session_id,
                 "needs_clarification": needs_clarification,
-                "clarification_prompt": self._build_clarification_prompt(state)
-                if needs_clarification
-                else None,
                 "fused_query": fused_query,
                 "state": state.to_dict(),
             }
@@ -1272,16 +1266,12 @@ class MultiTurnConversationManager:
             if state.active_mode in invoice_or_district_modes:
                 state.active_topic = {}
             if not state.original_query:
-                state.original_query = fused_query
+                state.original_query = user_message
             needs_clarification = False if is_time_only_followup else bool(state.missing_slots)
             self.save_state(state, session_id=session_id)
             LOGGER.debug("multi-turn-mti fused", fused_query=fused_query)
             return {
-                "session_id": session_id,
                 "needs_clarification": needs_clarification,
-                "clarification_prompt": self._build_clarification_prompt(state)
-                if needs_clarification
-                else None,
                 "fused_query": fused_query,
                 "state": state.to_dict(),
             }
@@ -1307,9 +1297,7 @@ class MultiTurnConversationManager:
             print(f"  - fusion: {'YES' if fused_query else 'NO'}")
             print(f"  - fused_query: {fused_query or '<none>'}")
             return {
-                "session_id": session_id,
                 "needs_clarification": False,
-                "clarification_prompt": None,
                 "fused_query": "reset",
                 "state": {},
             }
@@ -1410,11 +1398,7 @@ class MultiTurnConversationManager:
             needs_clarification = json_decision.get("decision") == "clarification"
             self.save_state(state, session_id=session_id)
             return {
-                "session_id": session_id,
                 "needs_clarification": needs_clarification,
-                "clarification_prompt": self._build_clarification_prompt(state)
-                if needs_clarification
-                else None,
                 "fused_query": fused_query,
                 "state": state.to_dict(),
             }
@@ -1478,11 +1462,7 @@ class MultiTurnConversationManager:
             print(f"  - fusion: {'YES' if fused_query else 'NO'}")
             print(f"  - fused_query: {fused_query or '<none>'}")
             return {
-                "session_id": session_id,
                 "needs_clarification": needs_clarification,
-                "clarification_prompt": self._build_clarification_prompt(fresh_state)
-                if needs_clarification
-                else None,
                 "fused_query": fused_query,
                 "state": fresh_state.to_dict(),
             }
@@ -1535,11 +1515,7 @@ class MultiTurnConversationManager:
             print(f"  - fusion: {'YES' if fused_query else 'NO'}")
             print(f"  - fused_query: {fused_query or '<none>'}")
             return {
-                "session_id": session_id,
                 "needs_clarification": needs_clarification,
-                "clarification_prompt": self._build_clarification_prompt(state)
-                if needs_clarification
-                else None,
                 "fused_query": fused_query,
                 "state": state.to_dict(),
             }
@@ -1580,11 +1556,7 @@ class MultiTurnConversationManager:
             print(f"  - fusion: {'YES' if fused_query else 'NO'}")
             print(f"  - fused_query: {fused_query or '<none>'}")
             return {
-                "session_id": session_id,
                 "needs_clarification": needs_clarification,
-                "clarification_prompt": self._build_clarification_prompt(state)
-                if needs_clarification
-                else None,
                 "fused_query": fused_query,
                 "state": state.to_dict(),
             }
@@ -1633,11 +1605,7 @@ class MultiTurnConversationManager:
             print(f"  - fusion: {'YES' if fused_query else 'NO'}")
             print(f"  - fused_query: {fused_query or '<none>'}")
             return {
-                "session_id": session_id,
                 "needs_clarification": needs_clarification,
-                "clarification_prompt": self._build_clarification_prompt(state)
-                if needs_clarification
-                else None,
                 "fused_query": fused_query,
                 "state": state.to_dict(),
             }
@@ -1733,9 +1701,7 @@ class MultiTurnConversationManager:
         print(f"  - fusion: {'YES' if fused_query else 'NO'}")
         print(f"  - fused_query: {fused_query or '<none>'}")
         return {
-            "session_id": session_id,
             "needs_clarification": needs_clarification,
-            "clarification_prompt": self._build_clarification_prompt(state) if needs_clarification else None,
             "fused_query": fused_query,
             "state": state.to_dict(),
         }

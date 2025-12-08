@@ -536,9 +536,7 @@ class Workflow:
                         multi_turn_state = dict(state)
                 if isinstance(fused, str) and fused.strip():
                     fused_query = fused.strip()
-                    query = fused_query
-                else:
-                    query = query.strip()
+                query = query.strip()
             except Exception as exc:
                 LOGGER.warning("multi_turn_fusion_failed", error=str(exc))
                 query = query.strip()
@@ -549,10 +547,9 @@ class Workflow:
         #     query = _maybe_apply_active_student_filter(query, active_filters)
 
         start_time = perf_counter()
-        nlv_query = fused_query or context.query
         normalized_intent = run_nlv_model(
-            user_query=nlv_query,
-            user_context=context.user_context,
+            user_query=context.query,
+            user_context={**context.user_context, "multi_turn_state": multi_turn_state},
             client=agent.client,
             model=agent.nlv_model,
             system_prompt=self.nlv_system_prompt,
