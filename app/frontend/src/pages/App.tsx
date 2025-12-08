@@ -210,7 +210,7 @@ export function App() {
       <main className="mx-auto max-w-4xl px-6 py-10">
         {!isAuthenticated && (
           <div className="hero-card">
-            <h2 className="hero-title">A clearer way to monitor district spending</h2>
+            <h2 className="hero-title">A Clearer Way To Monitor District Spending</h2>
             <ul className="hero-list">
               <li>Review vendor submissions with full transparency</li>
               <li>Track service hours and costs at the student level</li>
