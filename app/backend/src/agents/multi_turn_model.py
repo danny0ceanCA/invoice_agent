@@ -588,6 +588,66 @@ class MultiTurnConversationManager:
                 "fused_query": fused_query,
             }
 
+        ###########################################################################
+        # ⭐ UNIVERSAL TIME-SHIFT MODE-PERSISTENCE RULE
+        #
+        # If the user sends a pure time-follow-up such as:
+        #   "now August?", "what about September?", "and October?"
+        #
+        # …AND we have a previous analytic mode (student_monthly, student_provider_breakdown,
+        # vendor_monthly, district_monthly, etc.)
+        #
+        # …THEN the agent should:
+        #    ✔ Keep the SAME analytic mode
+        #    ✔ Keep the SAME plan_kind
+        #    ✔ Keep the SAME metric
+        #    ✔ Keep the SAME entity/entity_role
+        #    ✔ ONLY update the month / time_window_kind
+        #
+        # This causes provider breakdown → provider breakdown (next month),
+        # vendor analytics → vendor analytics next month,
+        # student_monthly → student_monthly next month,
+        # district_monthly → district_monthly next month, etc.
+        #
+        # This is the correct natural human interpretation of:
+        #     “Now August?” / “What about October?”
+        #
+        # AND it fixes the issue Daniel encountered where the mode reverted
+        # from student_provider_breakdown → student_monthly_spend incorrectly.
+        ###########################################################################
+
+        prev_mode = (previous_slots or {}).get("mode")
+
+        if prev_mode and self._is_time_only(user_message):
+            slots = dict(previous_slots or {})
+
+            # Extract month/time period
+            period_info = self._extract_period_info(user_message, state)
+
+            if period_info.get("last_month"):
+                slots["time_window_kind"] = "explicit_month"
+                slots["month_label"] = period_info["last_month"]
+            elif period_info.get("last_period_type"):
+                slots["time_window_kind"] = period_info["last_period_type"]
+
+            # DO NOT CHANGE:
+            # - mode
+            # - metric
+            # - plan_kind
+            # - entity_role
+            # - entity_name
+            #
+            # We intentionally preserve the entire analytic shape.
+
+            fused_query = self._compose_fused_query(slots, user_message)
+
+            return {
+                "decision": "fuse",
+                "reason": "universal analytic shape carryover for time-only follow-up",
+                "slots": slots,
+                "fused_query": fused_query,
+            }
+
         # provider_time_followup (pronoun + provider/time focus)
         if decision_types.get("provider_time_followup") and previous_slots.get("entity_role") == "student":
             pronoun_hit = self._contains_pronoun(text)
