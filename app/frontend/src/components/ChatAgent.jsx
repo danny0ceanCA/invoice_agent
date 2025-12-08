@@ -139,14 +139,14 @@ function ChatAgent({ districtKey }) {
           ? data.html
           : `<p>${(data?.text || "").replace(/</g, "&lt;")}</p>`;
       const timingHtml = formatTimingHtml(data?.timings);
+      if (timingHtml) {
+        console.info("Analytics response timings", timingHtml);
+      }
 
-      setMessages((prev) => {
-        const next = [...prev, { role: "assistant", content: safeHtml, html: true }];
-        if (timingHtml) {
-          next.push({ role: "assistant", content: timingHtml, html: true });
-        }
-        return next;
-      });
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: safeHtml, html: true },
+      ]);
     } catch (err) {
       const msg =
         err instanceof Error ? err.message : "Unexpected analytics error.";
