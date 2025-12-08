@@ -70,6 +70,7 @@ class ConversationState:
     active_mode: Optional[str] = None
     last_metric: Optional[str] = None
     last_plan_kind: Optional[str] = None
+    last_intent_shape: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -96,6 +97,7 @@ class ConversationState:
             active_mode=data.get("active_mode"),
             last_metric=data.get("last_metric"),
             last_plan_kind=data.get("last_plan_kind"),
+            last_intent_shape=data.get("last_intent_shape"),
         )
 
 
@@ -329,6 +331,48 @@ class MultiTurnConversationManager:
 
         # otherwise, do not fallback
         return None
+
+    def _infer_intent_shape(self, text: str) -> str:
+        """
+        Returns a coarse analytic intent category for fusion decisions:
+        Possible return values:
+            "student_metrics"
+            "provider_breakdown"
+            "district_metrics"
+            "invoice_details"
+            "list_entities"
+            "unknown"
+        Use simple keyword heuristics only.
+        Must NOT import domain_config or planner/router modules.
+        """
+
+        msg = (text or "").lower()
+        if not msg:
+            return "unknown"
+
+        provider_terms = ["provider", "providers", "clinician", "clinicians", "nurse", "nurses"]
+        if any(term in msg for term in provider_terms):
+            return "provider_breakdown"
+
+        district_terms = ["district", "district-wide", "district wide", "across district"]
+        if any(term in msg for term in district_terms):
+            return "district_metrics"
+
+        invoice_terms = ["invoice", "invoice number", "line items", "line item"]
+        if any(term in msg for term in invoice_terms):
+            return "invoice_details"
+
+        list_terms = ["list", "show students", "show student list", "show clinicians", "show providers"]
+        if any(term in msg for term in list_terms):
+            return "list_entities"
+
+        cost_terms = ["cost", "spend", "hours", "hour", "monthly"]
+        if any(term in msg for term in cost_terms) and not any(
+            term in msg for term in provider_terms
+        ):
+            return "student_metrics"
+
+        return "unknown"
 
     def _run_mti(self, state: ConversationState, user_message: str) -> Optional[dict]:
         """
@@ -1052,6 +1096,7 @@ class MultiTurnConversationManager:
         session_id: str,
         user_message: str,
         required_slots: Optional[List[str]],
+        new_intent_shape: Optional[str],
     ) -> Optional[Dict[str, Any]]:
         """Apply an MTI decision to the state and return a response payload."""
 
@@ -1070,6 +1115,12 @@ class MultiTurnConversationManager:
         )
 
         reason = decision.get("reason")
+
+        intent_mismatch = (
+            state.last_intent_shape is not None
+            and new_intent_shape is not None
+            and new_intent_shape != state.last_intent_shape
+        )
 
         # ------------------------------------------------------------------
         # VENDOR GUARD:
@@ -1102,6 +1153,11 @@ class MultiTurnConversationManager:
             decision["reason"] = reason or "Need invoice number from previous list."
             if pronoun_slots.get("clarification_prompt"):
                 decision["reason"] = pronoun_slots["clarification_prompt"]
+
+        if intent_mismatch and decision_type != "new_topic":
+            decision_type = "new_topic"
+            decision["reason"] = reason or "Analytic intent changed; starting new topic."
+            reason = decision["reason"]
 
         time_followup = self._detect_time_followup(user_message, state)
         if time_followup:
@@ -1164,6 +1220,7 @@ class MultiTurnConversationManager:
                 slots, user_message, previous_query=None
             )
             self._apply_mti_slots(state, slots, fused_query)
+            state.last_intent_shape = new_intent_shape
             state.original_query = fused_query
             state.latest_user_message = user_message
             state.history.append({"role": "user", "content": user_message})
@@ -1187,6 +1244,7 @@ class MultiTurnConversationManager:
             state.history.append({"role": "user", "content": user_message})
             fused_query = self._compose_fused_query(slots, user_message, previous_query)
             self._apply_mti_slots(state, slots, fused_query)
+            state.last_intent_shape = new_intent_shape
             if state.active_topic:
                 state.active_topic["last_query"] = fused_query
 
@@ -1258,6 +1316,7 @@ class MultiTurnConversationManager:
 
         user_message = user_message.strip()
         state = self.get_state(session_id)
+        new_intent_shape = self._infer_intent_shape(user_message)
 
         active_mode = getattr(state, "active_mode", None)
         last_query = None
@@ -1265,6 +1324,11 @@ class MultiTurnConversationManager:
             last_query = state.active_topic.get("last_query")
         if last_query is None:
             last_query = state.original_query
+        intent_mismatch = (
+            state.last_intent_shape is not None
+            and new_intent_shape is not None
+            and new_intent_shape != state.last_intent_shape
+        )
 
         mti_decision: Optional[Dict[str, Any]] = None
         if self.multi_turn_config:
@@ -1275,7 +1339,12 @@ class MultiTurnConversationManager:
 
         if mti_decision:
             applied = self._apply_mti_decision(
-                mti_decision, state, session_id, user_message, required_slots
+                mti_decision,
+                state,
+                session_id,
+                user_message,
+                required_slots,
+                new_intent_shape,
             )
             if applied:
                 fused_query = applied.get("fused_query")
@@ -1321,18 +1390,22 @@ class MultiTurnConversationManager:
             and last_session_id == session_id
             and active_topic_valid
             and state.original_query is not None
+            and not intent_mismatch
         )
 
         if message_is_time_only and not time_only_followup:
             return _reset_thread_and_return()
 
-        json_decision = self._apply_json_decision_rules(
-            self._build_previous_slots(state), user_message, state
-        )
+        json_decision = None
+        if not intent_mismatch:
+            json_decision = self._apply_json_decision_rules(
+                self._build_previous_slots(state), user_message, state
+            )
         if json_decision:
             self._apply_mti_slots(
                 state, json_decision.get("slots", {}), json_decision.get("fused_query")
             )
+            state.last_intent_shape = new_intent_shape
             fused_query = json_decision.get("fused_query") or user_message
             needs_clarification = json_decision.get("decision") == "clarification"
             self.save_state(state, session_id=session_id)
@@ -1521,6 +1594,8 @@ class MultiTurnConversationManager:
         )
 
         starts_new_topic = self._starts_new_topic(user_message, state)
+        if intent_mismatch:
+            starts_new_topic = True
 
         if starts_new_topic and not is_list_followup and not is_short_wh_followup:
             state = self._start_new_thread(user_message, required_slots)
@@ -1620,6 +1695,7 @@ class MultiTurnConversationManager:
 
         needs_clarification = bool(state.missing_slots)
         fused_query = self.build_fused_query(state)
+        state.last_intent_shape = new_intent_shape
         extracted_name = self._extract_name(user_message)
 
         if message_is_time_only and time_only_followup:
@@ -1683,6 +1759,7 @@ class MultiTurnConversationManager:
             last_month=period_info.get("last_month"),
             last_explicit_month=period_info.get("last_explicit_month"),
             last_year_window=period_info.get("last_year_window"),
+            last_intent_shape=self._infer_intent_shape(user_message),
         )
 
     def _is_list_intent(self, query: str) -> bool:
