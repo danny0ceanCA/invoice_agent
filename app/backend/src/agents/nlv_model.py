@@ -422,6 +422,40 @@ def _strip_inherited_entity_clarifications(payload: dict[str, Any]) -> None:
             payload["requires_clarification"] = False
 
 
+def _is_time_only_followup_query(user_query: str) -> bool:
+    """
+    Heuristic: return True when the query looks like a time-only follow-up.
+    E.g., "what about August?", "now July", "this month", "last month",
+    "what about this school year", etc., and does NOT include explicit metric
+    or intent keywords like cost, spend, hours, providers, invoices, trend, compare.
+    """
+    if not user_query:
+        return False
+    text = user_query.strip().lower()
+
+    # Month names and common time phrases
+    month_terms = [
+        "january", "february", "march", "april", "may", "june",
+        "july", "august", "september", "october", "november", "december",
+        "this month", "last month", "this school year", "last school year",
+        "this year", "last year", "ytd", "year to date"
+    ]
+
+    # Metric/intent keywords that indicate a new semantic intent
+    intent_terms = [
+        "cost", "spend", "charges", "hours", "hrs", "providers",
+        "provider", "clinician", "nurse", "invoices", "invoice",
+        "trend", "compare", "vs", "versus", "top", "highest"
+    ]
+
+    mentions_month = any(term in text for term in month_terms)
+    mentions_intent = any(term in text for term in intent_terms)
+
+    # If it mentions time but no explicit new metric/intent terms,
+    # treat as "time-only follow-up".
+    return mentions_month and not mentions_intent
+
+
 def run_nlv_model(
     *,
     user_query: str,
@@ -708,6 +742,23 @@ def run_nlv_model(
         explicit_intent = _deterministic_intent_from_config(user_query)
         if explicit_intent:
             payload["intent"] = explicit_intent
+
+        # Intent carryover for time-only follow-ups
+        try:
+            from typing import Mapping
+
+            mt_state = None
+            if isinstance(user_context, Mapping):
+                mt_state = user_context.get("multi_turn_state")
+            last_plan_kind = None
+            if isinstance(mt_state, Mapping):
+                last_plan_kind = mt_state.get("last_plan_kind")
+        except Exception:
+            mt_state = None
+            last_plan_kind = None
+
+        if last_plan_kind and _is_time_only_followup_query(user_query or ""):
+            payload["intent"] = last_plan_kind
 
         return payload
     except Exception:
