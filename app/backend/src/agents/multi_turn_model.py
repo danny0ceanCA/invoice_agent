@@ -268,6 +268,43 @@ class MultiTurnConversationManager:
             "time_window_kind": getattr(state, "last_period_type", None),
         }
 
+    def _merge_slots(
+        self,
+        previous: Dict[str, Optional[str]],
+        current: Dict[str, Optional[str]],
+        reset_keys: Optional[List[str]] = None,
+    ) -> Dict[str, Optional[str]]:
+        """
+        Merge two slot dictionaries with clear precedence.
+
+        - ``current`` values always take precedence when provided.
+        - ``previous`` values fill in only when ``current`` is missing.
+        - Keys listed in ``reset_keys`` are forced to ``None``.
+        """
+
+        result: Dict[str, Optional[str]] = {}
+        reset_keys = reset_keys or []
+        all_keys = set(previous.keys()) | set(current.keys()) | set(reset_keys)
+
+        for key in all_keys:
+            if key in reset_keys:
+                result[key] = None
+                continue
+
+            current_value = current.get(key)
+            previous_value = previous.get(key)
+
+            if current_value is not None:
+                result[key] = current_value
+                continue
+
+            if previous_value is not None:
+                result[key] = previous_value
+            else:
+                result[key] = None
+
+        return result
+
     def _fallback_decision(self, user_message: str) -> Optional[str]:
         """
         Only fallback when MTI *clearly* cannot classify something
@@ -1024,11 +1061,13 @@ class MultiTurnConversationManager:
         decision_type = decision.get("decision")
         slots = decision.get("slots") or {}
 
+        previous_slots = self._build_previous_slots(state)
+
         pronoun_slots = self._extract_entities_from_message(user_message, state)
-        if pronoun_slots.get("entity_role") and not slots.get("entity_role"):
-            slots["entity_role"] = pronoun_slots["entity_role"]
-        if pronoun_slots.get("entity_name") and not slots.get("entity_name"):
-            slots["entity_name"] = pronoun_slots["entity_name"]
+        slots = self._merge_slots(
+            pronoun_slots,
+            slots,
+        )
 
         reason = decision.get("reason")
 
@@ -1066,7 +1105,7 @@ class MultiTurnConversationManager:
 
         time_followup = self._detect_time_followup(user_message, state)
         if time_followup:
-            slots = self._build_previous_slots(state)
+            slots = self._merge_slots(previous_slots, slots)
             slots["time_window_kind"] = time_followup.get(
                 "time_window_kind", "explicit_month"
             )
@@ -1079,6 +1118,8 @@ class MultiTurnConversationManager:
             state.last_period_end = time_followup.get("last_period_end")
             decision_type = "time_only_followup"
             decision["reason"] = decision.get("reason") or "Month-only follow-up detected; inheriting active topic."
+        else:
+            slots = self._merge_slots(previous_slots, slots)
         previous_query = state.original_query
         if not previous_query and isinstance(state.active_topic, dict):
             previous_query = state.active_topic.get("last_query")
