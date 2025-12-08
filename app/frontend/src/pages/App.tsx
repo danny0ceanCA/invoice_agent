@@ -143,7 +143,7 @@ export function App() {
   } else if (!isAuthenticated) {
     mainContent = (
       <div className="space-y-3 text-sm text-slate-600">
-        <p>Please log in to access the invoice automation portal.</p>
+        <p>Please log in to access CareSpend Analytics.</p>
         <button
           type="button"
           className="rounded bg-amber-500 px-3 py-2 text-sm font-semibold text-white shadow transition hover:bg-amber-600"
