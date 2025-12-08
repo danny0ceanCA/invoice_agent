@@ -555,6 +555,12 @@ class Workflow:
             system_prompt=self.nlv_system_prompt,
             temperature=agent.nlv_temperature,
         )
+        current_intent = normalized_intent.get("intent") if isinstance(normalized_intent, Mapping) else None
+        if agent.multi_turn_manager and session_id:
+            try:
+                agent.multi_turn_manager.update_last_plan_kind(session_id, current_intent)
+            except Exception as exc:  # pragma: no cover - defensive
+                LOGGER.warning("multi_turn_state_update_failed", error=str(exc))
         _record_stage_duration(context, "nlv_model", start_time)
 
         LOGGER.info(

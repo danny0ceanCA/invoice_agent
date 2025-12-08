@@ -170,6 +170,13 @@ class MultiTurnConversationManager:
         except Exception:
             pass
 
+    def update_last_plan_kind(self, session_id: str, plan_kind: Optional[str]) -> None:
+        if not plan_kind:
+            return
+        state = self.get_state(session_id)
+        state.last_plan_kind = plan_kind
+        self.save_state(state, session_id=session_id)
+
     def _get_pattern_list(
         self, key: str, default: Optional[List[str]] = None
     ) -> List[str]:
@@ -1284,23 +1291,67 @@ class MultiTurnConversationManager:
         user_message: str,
         required_slots: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
+        def _state_value(state_obj: Any, key: str) -> Any:
+            if hasattr(state_obj, key):
+                try:
+                    return getattr(state_obj, key)
+                except Exception:
+                    return None
+            if isinstance(state_obj, dict):
+                return state_obj.get(key)
+            return None
+
+        def _state_to_dict(state_obj: Any) -> Dict[str, Any]:
+            if hasattr(state_obj, "to_dict"):
+                try:
+                    return state_obj.to_dict()  # type: ignore[call-arg]
+                except Exception:
+                    pass
+            try:
+                return dict(state_obj or {})
+            except Exception:
+                return {}
+
+        def _log_and_return(
+            needs_clarification: bool, fused_query: Optional[str], state_obj: Any
+        ) -> Dict[str, Any]:
+            state_dict = _state_to_dict(state_obj)
+            print("[multi-turn-debug] FUSION TRACE:")
+            print(f"  - session_id: {session_id}")
+            print(f"  - active_topic: {_state_value(state_obj, 'active_topic')}")
+            print(f"  - original_query: {_state_value(state_obj, 'original_query')}")
+            print(f"  - latest_user_message: {user_message}")
+            print(f"  - last_plan_kind: {_state_value(state_obj, 'last_plan_kind')}")
+            print(f"  - last_period_start: {_state_value(state_obj, 'last_period_start')}")
+            print(f"  - last_period_end: {_state_value(state_obj, 'last_period_end')}")
+            print(f"  - last_month: {_state_value(state_obj, 'last_month')}")
+            print(f"  - fusion: {'YES' if fused_query else 'NO'}")
+            print(f"  - fused_query: {fused_query or '<none>'}")
+
+            LOGGER.debug(
+                "multi-turn-return",
+                session_id=session_id,
+                needs_clarification=needs_clarification,
+                fused_query=fused_query,
+                state=state_dict,
+            )
+
+            return {
+                "needs_clarification": needs_clarification,
+                "fused_query": fused_query,
+                "state": state_dict,
+            }
+
         if user_message.strip().lower() == "reset please":
             self.clear_state(session_id)
             print("[multi-turn] state cleared by user command", flush=True)
             state = ConversationState()
             fused_query = locals().get("fused_query")
-            print("[multi-turn-debug] FUSION TRACE:")
-            print(f"  - session_id: {session_id}")
-            print(f"  - active_topic: {state.active_topic}")
-            print(f"  - original_query: {state.original_query}")
-            print(f"  - latest_user_message: {user_message}")
-            print(f"  - fusion: {'YES' if fused_query else 'NO'}")
-            print(f"  - fused_query: {fused_query or '<none>'}")
-            return {
-                "needs_clarification": False,
-                "fused_query": "reset",
-                "state": {},
-            }
+            return _log_and_return(
+                False,
+                "reset",
+                {},
+            )
 
         user_message = user_message.strip()
         state = self.get_state(session_id)
@@ -1336,14 +1387,8 @@ class MultiTurnConversationManager:
             )
             if applied:
                 fused_query = applied.get("fused_query")
-                print("[multi-turn-debug] FUSION TRACE:")
-                print(f"  - session_id: {session_id}")
-                print(f"  - active_topic: {applied.get('state', {}).get('active_topic')}")
-                print(f"  - original_query: {applied.get('state', {}).get('original_query')}")
-                print(f"  - latest_user_message: {user_message}")
-                print(f"  - fusion: {'YES' if fused_query else 'NO'}")
-                print(f"  - fused_query: {fused_query or '<none>'}")
-                return applied
+                needs_clarification = bool(applied.get("needs_clarification"))
+                return _log_and_return(needs_clarification, fused_query, state)
 
         def _classify_mode(text: str) -> Optional[str]:
             t = text.lower()
@@ -1397,11 +1442,7 @@ class MultiTurnConversationManager:
             fused_query = json_decision.get("fused_query") or user_message
             needs_clarification = json_decision.get("decision") == "clarification"
             self.save_state(state, session_id=session_id)
-            return {
-                "needs_clarification": needs_clarification,
-                "fused_query": fused_query,
-                "state": state.to_dict(),
-            }
+            return _log_and_return(needs_clarification, fused_query, state)
 
         # ============================================================
         # VISUAL FUSION LOG TREE
@@ -1454,18 +1495,7 @@ class MultiTurnConversationManager:
             print(f"[multi-turn] safe_new_thread: {user_message!r}", flush=True)
             self.save_state(fresh_state, session_id=session_id)
             fused_query = locals().get("fused_query")
-            print("[multi-turn-debug] FUSION TRACE:")
-            print(f"  - session_id: {session_id}")
-            print(f"  - active_topic: {state.active_topic}")
-            print(f"  - original_query: {state.original_query}")
-            print(f"  - latest_user_message: {user_message}")
-            print(f"  - fusion: {'YES' if fused_query else 'NO'}")
-            print(f"  - fused_query: {fused_query or '<none>'}")
-            return {
-                "needs_clarification": needs_clarification,
-                "fused_query": fused_query,
-                "state": fresh_state.to_dict(),
-            }
+            return _log_and_return(needs_clarification, fused_query, fresh_state)
 
         if self._should_reset_topic(user_message, state):
             return _reset_thread_and_return()
@@ -1507,18 +1537,7 @@ class MultiTurnConversationManager:
             )
             self.save_state(state, session_id=session_id)
             fused_query = locals().get("fused_query")
-            print("[multi-turn-debug] FUSION TRACE:")
-            print(f"  - session_id: {session_id}")
-            print(f"  - active_topic: {state.active_topic}")
-            print(f"  - original_query: {state.original_query}")
-            print(f"  - latest_user_message: {user_message}")
-            print(f"  - fusion: {'YES' if fused_query else 'NO'}")
-            print(f"  - fused_query: {fused_query or '<none>'}")
-            return {
-                "needs_clarification": needs_clarification,
-                "fused_query": fused_query,
-                "state": state.to_dict(),
-            }
+            return _log_and_return(needs_clarification, fused_query, state)
 
         if not has_active_topic:
             state = self._start_new_thread(user_message, required_slots)
@@ -1548,18 +1567,7 @@ class MultiTurnConversationManager:
             self.save_state(state, session_id=session_id)
 
             fused_query = locals().get("fused_query")
-            print("[multi-turn-debug] FUSION TRACE:")
-            print(f"  - session_id: {session_id}")
-            print(f"  - active_topic: {state.active_topic}")
-            print(f"  - original_query: {state.original_query}")
-            print(f"  - latest_user_message: {user_message}")
-            print(f"  - fusion: {'YES' if fused_query else 'NO'}")
-            print(f"  - fused_query: {fused_query or '<none>'}")
-            return {
-                "needs_clarification": needs_clarification,
-                "fused_query": fused_query,
-                "state": state.to_dict(),
-            }
+            return _log_and_return(needs_clarification, fused_query, state)
 
         is_short_wh_followup = (
             self._is_short_wh_followup(user_message) if has_active_topic else False
@@ -1597,18 +1605,7 @@ class MultiTurnConversationManager:
             self.save_state(state, session_id=session_id)
 
             fused_query = locals().get("fused_query")
-            print("[multi-turn-debug] FUSION TRACE:")
-            print(f"  - session_id: {session_id}")
-            print(f"  - active_topic: {state.active_topic}")
-            print(f"  - original_query: {state.original_query}")
-            print(f"  - latest_user_message: {user_message}")
-            print(f"  - fusion: {'YES' if fused_query else 'NO'}")
-            print(f"  - fused_query: {fused_query or '<none>'}")
-            return {
-                "needs_clarification": needs_clarification,
-                "fused_query": fused_query,
-                "state": state.to_dict(),
-            }
+            return _log_and_return(needs_clarification, fused_query, state)
 
         # Follow-up message keeps the existing thread
         state.history.append({"role": "user", "content": user_message})
@@ -1693,18 +1690,7 @@ class MultiTurnConversationManager:
         self.save_state(state, session_id=session_id)
 
         fused_query = locals().get("fused_query")
-        print("[multi-turn-debug] FUSION TRACE:")
-        print(f"  - session_id: {session_id}")
-        print(f"  - active_topic: {state.active_topic}")
-        print(f"  - original_query: {state.original_query}")
-        print(f"  - latest_user_message: {user_message}")
-        print(f"  - fusion: {'YES' if fused_query else 'NO'}")
-        print(f"  - fused_query: {fused_query or '<none>'}")
-        return {
-            "needs_clarification": needs_clarification,
-            "fused_query": fused_query,
-            "state": state.to_dict(),
-        }
+        return _log_and_return(needs_clarification, fused_query, state)
 
     def _start_new_thread(
         self, user_message: str, required_slots: Optional[List[str]]
