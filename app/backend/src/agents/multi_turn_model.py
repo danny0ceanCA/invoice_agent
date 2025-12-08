@@ -905,17 +905,21 @@ class MultiTurnConversationManager:
 
         if decision_type == "new_topic":
             self.clear_state(session_id)
+            previous_query = None
+            prior_original_query = state.original_query
             state = self._start_new_thread(user_message, required_slots)
-            fused_query = self._compose_fused_query(
-                slots, user_message, previous_query=None
-            )
+            fused_query = self._compose_fused_query(slots, user_message, previous_query)
             self._apply_mti_slots(state, slots, fused_query)
             state.last_intent_shape = new_intent_shape
-            state.original_query = user_message
+            if prior_original_query is None:
+                state.original_query = user_message
+            else:
+                state.original_query = prior_original_query
             state.latest_user_message = user_message
             state.history.append({"role": "user", "content": user_message})
             needs_clarification = bool(state.missing_slots)
             self.save_state(state, session_id=session_id)
+            print("[multi-turn-debug] USING _compose_fused_query:", fused_query)
             LOGGER.debug("multi-turn-mti new_topic", fused_query=fused_query)
             return {
                 "needs_clarification": needs_clarification,
@@ -961,6 +965,7 @@ class MultiTurnConversationManager:
                 state.original_query = user_message
             needs_clarification = False if is_time_only_followup else bool(state.missing_slots)
             self.save_state(state, session_id=session_id)
+            print("[multi-turn-debug] USING _compose_fused_query:", fused_query)
             LOGGER.debug("multi-turn-mti fused", fused_query=fused_query)
             return {
                 "needs_clarification": needs_clarification,
@@ -1073,6 +1078,11 @@ class MultiTurnConversationManager:
             if applied:
                 fused_query = applied.get("fused_query")
                 needs_clarification = bool(applied.get("needs_clarification"))
+                if fused_query:
+                    print(
+                        "[multi-turn-debug] USING _compose_fused_query:",
+                        fused_query,
+                    )
                 return _log_and_return(needs_clarification, fused_query, state)
 
         def _classify_mode(text: str) -> Optional[str]:
@@ -1120,13 +1130,13 @@ class MultiTurnConversationManager:
                 self._build_previous_slots(state), user_message, state
             )
         if json_decision:
-            self._apply_mti_slots(
-                state, json_decision.get("slots", {}), json_decision.get("fused_query")
-            )
+            slots = json_decision.get("slots", {}) or {}
+            fused_query = self._compose_fused_query(slots, user_message, last_query)
+            self._apply_mti_slots(state, slots, fused_query)
             state.last_intent_shape = new_intent_shape
-            fused_query = json_decision.get("fused_query") or user_message
             needs_clarification = json_decision.get("decision") == "clarification"
             self.save_state(state, session_id=session_id)
+            print("[multi-turn-debug] USING _compose_fused_query:", fused_query)
             return _log_and_return(needs_clarification, fused_query, state)
 
         # ============================================================
@@ -1344,7 +1354,7 @@ class MultiTurnConversationManager:
         self._attempt_slot_fill(state, user_message, allow_fallback_value=True)
 
         needs_clarification = bool(state.missing_slots)
-        fused_query = self.build_fused_query(state)
+        fused_query = self._compose_fused_query({}, user_message, last_query)
         state.last_intent_shape = new_intent_shape
         extracted_name = self._extract_name(user_message)
 
@@ -1373,8 +1383,7 @@ class MultiTurnConversationManager:
             }
 
         self.save_state(state, session_id=session_id)
-
-        fused_query = locals().get("fused_query")
+        print("[multi-turn-debug] USING _compose_fused_query:", fused_query)
         return _log_and_return(needs_clarification, fused_query, state)
 
     def _start_new_thread(
