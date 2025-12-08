@@ -525,6 +525,7 @@ class Workflow:
 
         # Multi-turn fusion: incorporate follow-up context into a fused query
         multi_turn_state: dict[str, Any] | None = None
+        fused_query: str | None = None
         if agent.multi_turn_manager and session_id:
             try:
                 fusion = agent.multi_turn_manager.process_user_message(session_id, query)
@@ -534,7 +535,8 @@ class Workflow:
                     if isinstance(state, Mapping):
                         multi_turn_state = dict(state)
                 if isinstance(fused, str) and fused.strip():
-                    query = fused.strip()
+                    fused_query = fused.strip()
+                    query = fused_query
                 else:
                     query = query.strip()
             except Exception as exc:
@@ -547,8 +549,9 @@ class Workflow:
         #     query = _maybe_apply_active_student_filter(query, active_filters)
 
         start_time = perf_counter()
+        nlv_query = fused_query or context.query
         normalized_intent = run_nlv_model(
-            user_query=query,
+            user_query=nlv_query,
             user_context=context.user_context,
             client=agent.client,
             model=agent.nlv_model,
