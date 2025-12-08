@@ -13,6 +13,42 @@ from .json_utils import _extract_json_object
 LOGGER = structlog.get_logger(__name__)
 
 
+# Deterministic mapping from plan_kinds (intent) to router modes.
+# This lets domain_config.json be the source of truth for "what kind of
+# report is this?", while still allowing safe fallback when a plan_kind
+# is not listed here.
+PLAN_KIND_TO_MODE: dict[str, str] = {
+    # Student-level monthly spend/hours
+    "student_monthly_spend": "student_monthly",
+    "student_monthly_hours": "student_monthly",
+    # Lists
+    "student_list": "student_list",
+    "clinician_list": "clinician_list",
+    # Invoices
+    "student_invoices": "invoice_details",
+    "vendor_invoices": "invoice_details",
+    # Vendor & district monthly spend
+    "vendor_monthly_spend": "vendor_monthly",
+    "district_monthly_spend": "district_monthly",
+    # Provider breakdown
+    "student_provider_breakdown": "student_provider_breakdown",
+    # Caseload & clinician/student breakdown
+    "caseload": "provider_caseload_monthly",
+    "clinician_student_breakdown": "clinician_student_breakdown",
+    # Service code / coverage / intensity
+    "district_service_code_spend": "district_service_code_monthly",
+    "student_service_code_monthly": "student_service_code_monthly",
+    "provider_service_code_monthly": "provider_service_code_monthly",
+    "student_year_summary": "student_year_summary",
+    "student_daily_hours": "student_daily",
+    "provider_daily_hours": "provider_daily",
+    "district_daily_coverage": "district_daily",
+    "student_service_intensity": "student_service_intensity_monthly",
+    # Top invoices
+    "top_invoices": "top_invoices",
+}
+
+
 @dataclass
 class RouterDecision:
     mode: str  # e.g. "student_monthly", "invoice_details", "provider_breakdown"
@@ -44,6 +80,7 @@ def route_sql(
     """
 
     # 1) Infer default values
+    # NOTE: plan["kind"] comes from SQL planner and should align with plan_kinds in domain_config.
     plan = sql_plan or {}
     ents = entities or {}
     intent = normalized_intent or {}
@@ -66,6 +103,7 @@ def route_sql(
     date_range = plan.get("date_range") if isinstance(plan.get("date_range"), dict) else None
     metrics = plan.get("metrics") or []
 
+    # Match router modes based on domain_config.router_modes[*].triggers
     q_lower = user_query.lower()
     matched_modes: list[str] = []
     if isinstance(router_modes, dict):
@@ -74,6 +112,16 @@ def route_sql(
             for trigger in triggers:
                 if isinstance(trigger, str) and trigger.lower() in q_lower:
                     matched_modes.append(mode_key)
+
+    # Prefer a mode derived from the plan kind when available, using
+    # PLAN_KIND_TO_MODE as the authoritative mapping from plan_kinds
+    # to router modes. This lets domain_config.json lead routing when
+    # it has a clear opinion, while still allowing trigger/LLM-based
+    # routing as a fallback.
+    plan_kind = plan.get("kind") or intent.get("intent")
+    plan_kind_mode = PLAN_KIND_TO_MODE.get(plan_kind) if isinstance(plan_kind, str) else None
+    print("[DOMAIN-CONFIG-DEBUG][ROUTER] plan_kind:", plan_kind)
+    print("[DOMAIN-CONFIG-DEBUG][ROUTER] plan_kind_mode:", plan_kind_mode)
 
     prioritized_modes = [
         "invoice_details",
@@ -125,12 +173,25 @@ def route_sql(
         ]
     ) and not top_invoices_intent
 
-    needs_provider_breakdown = any(
-        kw in q_lower for kw in ["provider", "clinician", "hours by provider", "who provided"]
+    # Provider breakdown detection should come from domain_config where possible.
+    # We combine:
+    #   1) plan_kind == "student_provider_breakdown" (authoritative intent), and
+    #   2) router_modes.student_provider_breakdown.triggers, if present.
+    provider_mode_cfg = router_modes.get("student_provider_breakdown", {}) if isinstance(router_modes, dict) else {}
+    provider_triggers = provider_mode_cfg.get("triggers", []) if isinstance(provider_mode_cfg, dict) else []
+    provider_trigger_hit = any(
+        isinstance(kw, str) and kw.lower() in q_lower for kw in provider_triggers
+    )
+    needs_provider_breakdown = (
+        (plan_kind == "student_provider_breakdown") or provider_trigger_hit
     ) and not top_invoices_intent
 
     # Modes
-    mode = triggered_mode
+    # Prefer plan_kind_mode when available; otherwise fall back to the mode
+    # inferred from router_modes triggers. This keeps domain_config.plan_kinds
+    # in charge when it has a clear mapping, while still allowing the existing
+    # trigger-based routing to handle uncovered cases.
+    mode = plan_kind_mode or triggered_mode
 
     if top_invoices_intent or plan.get("kind") == "top_invoices":
         mode = "top_invoices"
