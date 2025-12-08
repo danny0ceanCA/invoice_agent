@@ -319,6 +319,56 @@ def _apply_this_school_year_override(user_query: str, payload: dict[str, Any]) -
             payload["requires_clarification"] = False
 
 
+def _inherit_active_entity_from_context(
+    user_context: dict[str, Any] | None, payload: dict[str, Any]
+) -> None:
+    """
+    If there is an active topic in the user_context, and the normalized intent did
+    not provide an explicit entity, inherit that entity.
+
+    Expected context shape (if present):
+
+    {
+      "active_topic": {
+        "type": "student" | "clinician" | "vendor",
+        "value": "<display name>"
+      },
+      ... other keys ...
+    }
+    """
+
+    if not isinstance(user_context, dict):
+        return
+
+    active_topic = user_context.get("active_topic")
+    if not isinstance(active_topic, dict):
+        return
+
+    topic_type = active_topic.get("type")
+    topic_value = active_topic.get("value")
+    if not topic_type or not topic_value:
+        return
+
+    entities = payload.get("entities") or {}
+    if not isinstance(entities, dict):
+        entities = {}
+
+    scope = payload.get("scope")
+
+    if topic_type == "student" and not entities.get("student_name"):
+        entities["student_name"] = topic_value
+        payload["scope"] = "single_student"
+    elif topic_type == "clinician" and not entities.get("clinician_name"):
+        entities["clinician_name"] = topic_value
+        payload["scope"] = "provider"
+    elif topic_type == "vendor" and not entities.get("vendor_name"):
+        entities["vendor_name"] = topic_value
+        if scope in (None, ""):
+            payload["scope"] = "vendor"
+
+    payload["entities"] = entities
+
+
 def _contains_total_keywords(user_query: str) -> bool:
     """Check whether the query asks for totals or spend."""
 
@@ -348,6 +398,28 @@ def _has_time_reference(user_query: str, time_period: dict[str, Any] | None) -> 
         return True
 
     return False
+
+
+def _strip_inherited_entity_clarifications(payload: dict[str, Any]) -> None:
+    clar_list = payload.get("clarification_needed")
+    entities = payload.get("entities")
+    if not isinstance(clar_list, list) or not isinstance(entities, dict):
+        return
+
+    scope = payload.get("scope")
+    if len(clar_list) == 1:
+        key = clar_list[0]
+        if key == "student_name" and entities.get("student_name") and scope == "single_student":
+            clar_list = []
+        elif key == "clinician_name" and entities.get("clinician_name") and scope == "provider":
+            clar_list = []
+        elif key == "vendor_name" and entities.get("vendor_name") and scope == "vendor":
+            clar_list = []
+
+    if len(clar_list) != len(payload.get("clarification_needed", [])):
+        payload["clarification_needed"] = clar_list
+        if not clar_list:
+            payload["requires_clarification"] = False
 
 
 def run_nlv_model(
@@ -396,6 +468,41 @@ def run_nlv_model(
             parsed.get("clarification_needed"), list
         ):
             payload["clarification_needed"] = []
+
+        _inherit_active_entity_from_context(user_context, payload)
+
+        # --------------------------------------------------------------------
+        # Provider-style follow-ups should default to the active topic
+        # --------------------------------------------------------------------
+        provider_terms = [
+            "who provided support",
+            "who provided care",
+            "who supported",
+            "which nurse",
+            "which clinicians",
+            "which providers",
+            "who helped",
+            "who worked with",
+        ]
+        text_lower = (user_query or "").lower()
+        active_topic = user_context.get("active_topic") if isinstance(user_context, dict) else None
+        if any(term in text_lower for term in provider_terms) and isinstance(active_topic, dict):
+            entities = payload.get("entities") or {}
+            if not isinstance(entities, dict):
+                entities = {}
+            active_type = active_topic.get("type")
+            active_value = active_topic.get("value")
+
+            if active_type == "student" and active_value and not entities.get("student_name"):
+                entities["student_name"] = active_value
+                if payload.get("scope") in (None, ""):
+                    payload["scope"] = "single_student"
+            elif active_type == "clinician" and active_value and not entities.get("clinician_name"):
+                entities["clinician_name"] = active_value
+                if payload.get("scope") in (None, ""):
+                    payload["scope"] = "provider"
+
+            payload["entities"] = entities
 
         # ------------------------------------------------------------
         # Detect explicit month + year (e.g., "September 2025")
@@ -449,7 +556,12 @@ def run_nlv_model(
             if isinstance(time_period, dict):
                 existing_year = time_period.get("year")
 
-            if month_only and existing_year is None:
+            explicit_year_in_query = bool(
+                re.search(r"\b\d{4}\b", user_query)
+                or re.search(r"['’]\d{2}\b", user_query)
+            )
+
+            if month_only and (existing_year in (None, "")) and not explicit_year_in_query:
                 today = date.today()
                 school_year_window = _compute_current_school_year(today)
                 month_name = month_only.group(1)
@@ -525,6 +637,8 @@ def run_nlv_model(
         # Deterministic override for "this school year" / "this year" semantics.
         if not explicit_month_year_found:
             _apply_this_school_year_override(user_query, payload)
+
+        _strip_inherited_entity_clarifications(payload)
 
         # Deterministic override: enforce intent from domain_config.plan_kinds when
         # there is a clear, unambiguous match. If config is missing or ambiguous,
