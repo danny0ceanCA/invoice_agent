@@ -547,8 +547,11 @@ class Workflow:
         #     query = _maybe_apply_active_student_filter(query, active_filters)
 
         start_time = perf_counter()
+        # Prefer fused_query for NLV if available; otherwise use the original raw query.
+        nlv_query = fused_query or context.query
+
         normalized_intent = run_nlv_model(
-            user_query=context.query,
+            user_query=nlv_query,
             user_context={**context.user_context, "multi_turn_state": multi_turn_state},
             client=agent.client,
             model=agent.nlv_model,

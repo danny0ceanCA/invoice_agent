@@ -775,11 +775,20 @@ class MultiTurnConversationManager:
         previous_query: Optional[str] = None,
     ) -> str:
         """
-        Always preserve the user_message semantics and append it to the previous query.
+        Always preserve the prior query semantics and append the new instruction.
+
+        If previous_query is present, we construct:
+            "<previous_query>. Additional instruction: <user_message>"
+
+        Otherwise, we just return the user_message itself (first message in thread).
         """
+        user_message = (user_message or "").strip()
         if previous_query:
+            previous_query = str(previous_query).strip()
+            if not previous_query:
+                return user_message
             return f"{previous_query}. Additional instruction: {user_message}".strip()
-        return user_message.strip()
+        return user_message
 
     def _apply_mti_decision(
         self,
