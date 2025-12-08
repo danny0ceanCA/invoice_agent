@@ -334,7 +334,8 @@
         "provider distribution for this student",
         "see support breakdown",
         "show me agency staff",
-        "providers who worked with the student"
+        "providers who worked with the student",
+        "who provided care for"
       ],
       "entity_role": "student",
       "metric": "cost",
