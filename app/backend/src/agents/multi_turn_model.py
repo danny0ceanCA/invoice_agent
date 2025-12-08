@@ -589,6 +589,82 @@ class MultiTurnConversationManager:
             }
 
         ###########################################################################
+        # ⭐ CROSS-ENTITY ANALYTIC SHAPE CARRYOVER RULE
+        #
+        # When the user switches to a NEW STUDENT / CLINICIAN / VENDOR by simply
+        # stating the name *without an analytic phrase*, the system should:
+        #
+        #    ✔ Preserve mode          (student_monthly, provider_breakdown, etc.)
+        #    ✔ Preserve plan_kind     (student_monthly_spend, student_provider_breakdown, etc.)
+        #    ✔ Preserve metric        (cost, hours, caseload)
+        #    ✔ Preserve time_window   (month, explicit range, school year, etc.)
+        #    ✔ Change ONLY entity_role and entity_name
+        #
+        # Example:
+        # "Show me who supported Chloe Taylor in September."
+        # → "Jack Garcia"
+        #     → Should produce provider breakdown for Jack Garcia in September.
+        #
+        # Example:
+        # "Show vendor spend for BrightCare."
+        # → "Always Home Nursing"
+        #     → Should produce the SAME vendor report for the new vendor.
+        #
+        # This behavior matches BI tool expectations AND natural human language.
+        ###########################################################################
+
+        extracted_name = self._extract_name(user_message)
+        prev_role = previous_slots.get("entity_role")
+        prev_name = previous_slots.get("entity_name")
+        prev_mode = previous_slots.get("mode")
+        prev_plan_kind = previous_slots.get("plan_kind")
+
+        # Conditions to activate cross-entity carryover:
+        # 1. We have a previous analytic mode.
+        # 2. User message contains ONLY a name (no analytic commands).
+        # 3. This name is different from the previous entity.
+        # 4. No metric switch phrases or provider-focus phrases are present.
+        # 5. No time-only shift (handled by universal time-shift rule).
+
+        if (
+            extracted_name
+            and prev_mode
+            and prev_name
+            and extracted_name.lower() != str(prev_name).lower()
+            and not self._contains_provider_focus(user_message.lower())
+            and not self._is_time_only(user_message)
+            and not self._contains_time_phrase(user_message.lower())
+        ):
+            slots = dict(previous_slots)
+
+            # Swap ONLY the entity
+            slots["entity_name"] = extracted_name
+
+            # Infer role based on previous role (student/provider/vendor)
+            # This avoids misclassifying a new name.
+            if prev_role:
+                slots["entity_role"] = prev_role
+
+            # DO NOT change:
+            # - mode (defines analytic shape)
+            # - plan_kind (defines semantic intent)
+            # - metric (cost/hours/caseload)
+            # - time_window_kind (keep month/year)
+
+            fused_query = self._compose_fused_query(slots, user_message)
+
+            return {
+                "decision": "fuse",
+                "reason": "entity-only follow-up; analytic shape carried over",
+                "slots": slots,
+                "fused_query": fused_query,
+            }
+
+        ###########################################################################
+        # ⭐ UNIVERSAL TIME-SHIFT MODE-PERSISTENCE RULE (already added earlier)
+        ###########################################################################
+
+        ###########################################################################
         # ⭐ UNIVERSAL TIME-SHIFT MODE-PERSISTENCE RULE
         #
         # If the user sends a pure time-follow-up such as:
