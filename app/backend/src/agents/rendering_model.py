@@ -8,15 +8,20 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any
+from typing import Any, Mapping
 
 import structlog
 from openai import OpenAI
 
 from .ir import AnalyticsEntities, AnalyticsIR
 from .json_utils import _extract_json_object
+from .district_analytics_agent import _render_html_table
 
 LOGGER = structlog.get_logger(__name__)
+
+
+def render_table_html(rows: list[dict[str, Any]], columns: Any | None = None) -> str:
+    return _render_html_table(rows)
 
 
 # Rationale: The rendering stage now calls a real OpenAI model while keeping the
@@ -88,6 +93,23 @@ def run_rendering_model(
     """
 
     insights = insights or []
+
+    ir_payload: Mapping[str, Any] = ir if isinstance(ir, Mapping) else ir.model_dump()
+
+    # SHORT-CIRCUIT: student_list never needs clarification if rows exist
+    if (
+        ir_payload.get("intent") == "student_list"
+        or ir_payload.get("mode") == "student_list"
+    ) and (not ir_payload.get("requires_clarification")) and isinstance(
+        ir_payload.get("rows"), list
+    ) and len(ir_payload["rows"]) > 0:
+        return {
+            "text": "",
+            "html": render_table_html(
+                ir_payload["rows"], ir_payload.get("columns")
+            ),
+            "rows": ir_payload["rows"],
+        }
 
     def _looks_like_list_intent(query: str) -> bool:
         lowered = query.lower()
