@@ -33,6 +33,7 @@ from .rendering_model import build_rendering_system_prompt, run_rendering_model
 from .sql_router import build_sql_router_system_prompt, run_sql_router_model
 from .sql_planner_model import build_sql_planner_system_prompt, run_sql_planner_model
 from .validator_model import build_validator_system_prompt, run_validator_model
+from .render_utils import render_html_table as _render_html_table
 
 LOGGER = structlog.get_logger(__name__)
 
@@ -1240,91 +1241,6 @@ def _safe_html(text: str) -> str:
 
 def _strip_html(s: str) -> str:
     return re.sub(r"<[^>]*>", "", s or "").strip()
-
-
-def _render_html_table(rows: Sequence[Mapping[str, Any]]) -> str:
-    """
-    Render a generic HTML table from rows, applying basic formatting rules:
-
-    - Columns with amount-like names (e.g., total_cost, total_spend, amount, cost)
-      are rendered as currency ($X,XXX.XX) and tagged with class="amount-col".
-    - Columns with date-like names (e.g., invoice_date, service_date, created_at)
-      are rendered as date-only (YYYY-MM-DD), stripping any time component.
-    - All other values are rendered as plain text.
-    - The table is wrapped in <div class="table-wrapper"><table class="analytics-table">...</table></div>
-      to align with analytics styling.
-    """
-    if not rows:
-        return "<div class=\"table-wrapper\"><table class=\"analytics-table\"></table></div>"
-
-    headers = list(rows[0].keys())
-
-    amount_like = {
-        "total_cost",
-        "total_spend",
-        "amount",
-        "cost",
-        "highest_amount",
-        "provider_cost",
-        "code_total",
-        "daily_cost",
-    }
-    date_like = {
-        "invoice_date",
-        "service_date",
-        "created_at",
-        "last_modified",
-    }
-
-    header_html = "".join(f"<th>{escape(str(header))}</th>" for header in headers)
-    body_rows: list[str] = []
-
-    for row in rows:
-        cells_html: list[str] = []
-        for header in headers:
-            key = str(header)
-            raw = row.get(header, "")
-
-            # Currency formatting for amount-like columns
-            if key in amount_like:
-                try:
-                    value = float(raw)
-                    display = f"${value:,.2f}"
-                except Exception:
-                    display = str(raw)
-                cell_html = f"<td class=\"amount-col\">{escape(display)}</td>"
-
-            # Date-only formatting for date-like columns
-            elif key in date_like:
-                text = str(raw)
-                # Split off time if present (supports 'YYYY-MM-DD HH:MM:SS' or ISO 'YYYY-MM-DDTHH:MM:SS')
-                if "T" in text:
-                    date_part = text.split("T", 1)[0]
-                else:
-                    date_part = text.split(" ", 1)[0]
-                cell_html = f"<td>{escape(date_part)}</td>"
-
-            # Default plain text
-            else:
-                cell_html = f"<td>{escape(str(raw))}</td>"
-
-            cells_html.append(cell_html)
-
-        body_rows.append("<tr>" + "".join(cells_html) + "</tr>")
-
-    body_html = "".join(body_rows)
-    return (
-        "<div class=\"table-wrapper\">"
-        "<table class=\"analytics-table\">"
-        "<thead><tr>"
-        f"{header_html}"
-        "</tr></thead>"
-        "<tbody>"
-        f"{body_html}"
-        "</tbody>"
-        "</table>"
-        "</div>"
-    )
 
 
 def _month_sort_key(month_str: Any) -> int:

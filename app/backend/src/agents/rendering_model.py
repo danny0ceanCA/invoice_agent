@@ -15,13 +15,9 @@ from openai import OpenAI
 
 from .ir import AnalyticsEntities, AnalyticsIR
 from .json_utils import _extract_json_object
-from .district_analytics_agent import _render_html_table
+from .render_utils import render_html_table as render_table_html
 
 LOGGER = structlog.get_logger(__name__)
-
-
-def render_table_html(rows: list[dict[str, Any]], columns: Any | None = None) -> str:
-    return _render_html_table(rows)
 
 
 # Rationale: The rendering stage now calls a real OpenAI model while keeping the
