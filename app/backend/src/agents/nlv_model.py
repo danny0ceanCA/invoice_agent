@@ -760,6 +760,59 @@ def run_nlv_model(
         if last_plan_kind and _is_time_only_followup_query(user_query or ""):
             payload["intent"] = last_plan_kind
 
+        # Provider-style intent override when we have an active student topic.
+        try:
+            from typing import Mapping
+
+            text_lower = (user_query or "").lower()
+            # Heuristic phrases that indicate a provider breakdown question.
+            provider_phrases = [
+                "who provided care",
+                "who provides care",
+                "who supported",
+                "who provides services",
+                "who provided services",
+                "which clinicians worked with",
+                "which clinician worked with",
+                "which nurse supported",
+                "which provider helped",
+                "who helped the student",
+                "who was the provider",
+            ]
+
+            looks_like_provider_question = any(phrase in text_lower for phrase in provider_phrases)
+
+            # Do NOT apply provider override for pure time-only follow-ups like "what about August?"
+            is_time_only_followup = _is_time_only_followup_query(user_query or "")
+
+            mt_state = None
+            if isinstance(user_context, Mapping):
+                mt_state = user_context.get("multi_turn_state")
+            active_topic = None
+            if isinstance(mt_state, Mapping):
+                active_topic = mt_state.get("active_topic")
+
+            has_active_student = (
+                isinstance(active_topic, Mapping)
+                and active_topic.get("type") == "student"
+                and active_topic.get("value")
+            )
+
+            if looks_like_provider_question and has_active_student and not is_time_only_followup:
+                student_name_from_topic = str(active_topic.get("value"))
+                entities = payload.get("entities") or {}
+                if not isinstance(entities, dict):
+                    entities = {}
+                # If model did not already set student_name, fill it from active topic.
+                if not entities.get("student_name"):
+                    entities["student_name"] = student_name_from_topic
+                payload["entities"] = entities
+                payload["intent"] = "student_provider_breakdown"
+                payload["scope"] = "single_student"
+        except Exception:
+            # Best-effort override only; never crash NLV on failure.
+            pass
+
         return payload
     except Exception:
         return _default_payload()
