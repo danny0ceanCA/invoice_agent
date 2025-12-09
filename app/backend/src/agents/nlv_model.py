@@ -782,9 +782,6 @@ def run_nlv_model(
 
             looks_like_provider_question = any(phrase in text_lower for phrase in provider_phrases)
 
-            # Do NOT apply provider override for pure time-only follow-ups like "what about August?"
-            is_time_only_followup = _is_time_only_followup_query(user_query or "")
-
             mt_state = None
             if isinstance(user_context, Mapping):
                 mt_state = user_context.get("multi_turn_state")
@@ -798,7 +795,7 @@ def run_nlv_model(
                 and active_topic.get("value")
             )
 
-            if looks_like_provider_question and has_active_student and not is_time_only_followup:
+            if looks_like_provider_question and has_active_student:
                 student_name_from_topic = str(active_topic.get("value"))
                 entities = payload.get("entities") or {}
                 if not isinstance(entities, dict):
