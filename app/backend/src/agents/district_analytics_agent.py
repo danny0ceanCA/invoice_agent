@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import json
 from dataclasses import dataclass, field
+import hashlib
 from html import escape
 from time import perf_counter
 import time
@@ -17,6 +18,7 @@ from sqlalchemy import text as sql_text
 from sqlalchemy.engine import Engine
 
 from app.backend.src.core.config import get_settings
+from app.backend.src.core.redis_cache import RedisAnalyticsCache
 from app.backend.src.core.memory import ConversationMemory, RedisConversationMemory
 from app.backend.src.db import get_engine
 from app.backend.src.services.s3 import get_s3_client
@@ -36,6 +38,7 @@ from .sql_planner_model import build_sql_planner_system_prompt, run_sql_planner_
 from .validator_model import build_validator_system_prompt, run_validator_model
 
 LOGGER = structlog.get_logger(__name__)
+CACHE = RedisAnalyticsCache()
 
 
 def log_timing(stage, start, end):
@@ -578,6 +581,25 @@ class Workflow:
             normalized_intent=normalized_intent,
         )
 
+        nlv_intent_json = json.dumps(normalized_intent or {}, sort_keys=True)
+        cache_key = hashlib.sha256(nlv_intent_json.encode("utf-8")).hexdigest()
+
+        cached_response = CACHE.get(cache_key)
+        if cached_response:
+            LOGGER.info("cache_hit", key=cache_key)
+            try:
+                return AgentResponse(**cached_response)
+            except Exception as exc:  # pragma: no cover - defensive
+                LOGGER.warning("cache_deserialize_failed", key=cache_key, error=str(exc))
+
+        LOGGER.info("cache_miss", key=cache_key)
+
+        def _cache_and_return(payload: Mapping[str, Any]) -> AgentResponse:
+            response = _finalise_response(payload, context)
+            CACHE.set(cache_key, response.dict())
+            LOGGER.info("cache_write", key=cache_key)
+            return response
+
         known_entities = _load_district_entities(self.engine, context.district_key)
 
         start_time = perf_counter()
@@ -670,7 +692,7 @@ class Workflow:
                 temperature=agent.render_temperature,
                 )
                 _record_stage_duration(context, "rendering_model", start_time)
-                return _finalise_response(render_payload, context)
+                return _cache_and_return(render_payload)
 
             start_time = perf_counter()
             start = time.monotonic()
@@ -696,7 +718,7 @@ class Workflow:
                 temperature=agent.render_temperature,
             )
             _record_stage_duration(context, "rendering_model", start_time)
-            return _finalise_response(render_payload, context)
+            return _cache_and_return(render_payload)
 
         start_time = perf_counter()
         start = time.monotonic()
@@ -780,7 +802,7 @@ class Workflow:
                 temperature=agent.render_temperature,
                 )
                 _record_stage_duration(context, "rendering_model", start_time)
-                return _finalise_response(render_payload, context)
+                return _cache_and_return(render_payload)
 
             start_time = perf_counter()
             start = time.monotonic()
@@ -806,7 +828,7 @@ class Workflow:
                 temperature=agent.render_temperature,
             )
             _record_stage_duration(context, "rendering_model", start_time)
-            return _finalise_response(render_payload, context)
+            return _cache_and_return(render_payload)
 
         start_time = perf_counter()
         start = time.monotonic()
@@ -901,7 +923,7 @@ class Workflow:
                         else:
                             context.last_rows = rows
                             payload = {"text": "", "rows": rows, "html": None}
-                        return _finalise_response(payload, context)
+                        return _cache_and_return(payload)
 
                 # Otherwise, fall back to invoice-scope provider breakdown using invoice_numbers from the last rows
                 inv_values = {
@@ -952,7 +974,7 @@ class Workflow:
                             context.last_rows = rows
                             payload = {"text": "", "rows": rows, "html": None}
 
-                        return _finalise_response(payload, context)
+                        return _cache_and_return(payload)
 
             start_time = perf_counter()
             start = time.monotonic()
@@ -1018,7 +1040,7 @@ class Workflow:
                                 "rows": None,
                                 "html": _safe_html(error_text),
                             }
-                            return _finalise_response(payload, context)
+                            return _cache_and_return(payload)
                         tool_payload = {"tool": tool.name, "error": str(exc)}
                         tool_result = None
 
@@ -1074,7 +1096,7 @@ class Workflow:
 
                 text = raw_content.strip() or "No response provided."
                 fallback_payload = {"text": text, "rows": context.last_rows, "html": None}
-                return _finalise_response(fallback_payload, context)
+                return _cache_and_return(fallback_payload)
 
             logic_ir = _payload_to_ir(payload, context.last_rows)
 
@@ -1155,7 +1177,7 @@ class Workflow:
                 system_prompt=self.rendering_system_prompt,
                 temperature=agent.render_temperature,
                 )
-                return _finalise_response(render_payload, context)
+                return _cache_and_return(render_payload)
 
             start_time = perf_counter()
             insight_result = run_insight_model(
@@ -1179,7 +1201,7 @@ class Workflow:
                 temperature=agent.render_temperature,
             )
             _record_stage_duration(context, "rendering_model", start_time)
-            return _finalise_response(render_payload, context)
+            return _cache_and_return(render_payload)
 
         raise RuntimeError("Agent workflow exceeded iteration limit.")
 
