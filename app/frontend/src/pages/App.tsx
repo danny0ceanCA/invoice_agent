@@ -10,6 +10,7 @@ import DistrictDashboard from "./DistrictDashboard.jsx";
 import AdminDashboard from "./AdminDashboard.jsx";
 import AdminUserDashboard from "./AdminUserDashboard.jsx";
 import AdminCreateDistrict from "./AdminCreateDistrict.jsx";
+import AdminAnalyticsDashboard from "./AdminAnalyticsDashboard.jsx";
 import VendorDistrictKeys from "./VendorDistrictKeys.jsx";
 import VendorInvoiceForm from "./VendorInvoiceForm.jsx";
 import Analytics from "./Analytics.jsx";
@@ -116,6 +117,12 @@ export function App() {
       <Route
         path="/admin/districts/new"
         element={profile?.role === "admin" ? <AdminCreateDistrict /> : <Navigate to="/" replace />}
+      />
+      <Route
+        path="/admin/analytics"
+        element={
+          profile?.role === "admin" ? <AdminAnalyticsDashboard /> : <Navigate to="/" replace />
+        }
       />
       <Route
         path="/vendor/district-keys"
