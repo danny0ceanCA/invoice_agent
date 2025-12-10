@@ -458,22 +458,23 @@ async def _execute_responses_workflow(query: str, context: Mapping[str, Any]) ->
 
             ra = getattr(response, "required_action", None)
 
-            def _submit_tool_outputs() -> Any:
-                return client.responses.submit_tool_outputs(
+            def _continue_with_tools() -> Any:
+                return client.responses.create(
+                    model=DEFAULT_MODEL,
                     response_id=response.id,
                     tool_outputs=tool_results,
                 )
 
             LOGGER.info(
                 "analytics_agent_submitting_tool_results",
-                previous_response_id=response.id,
+                response_id=response.id,
                 num_results=len(tool_results),
             )
 
             if ra is not None and getattr(ra, "type", None) == "submit_tool_outputs":
-                response = await asyncio.to_thread(_submit_tool_outputs)
+                response = await asyncio.to_thread(_continue_with_tools)
             else:
-                response = await asyncio.to_thread(_submit_tool_outputs)
+                response = await asyncio.to_thread(_continue_with_tools)
             # Loop again: model may chain more tools or produce a final message
             continue
 
