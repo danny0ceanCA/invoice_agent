@@ -645,6 +645,7 @@ class Workflow:
                 enqueue_prefetch_jobs(
                     normalized_intent=normalized_intent,
                     router_decision=router_decision.to_dict() if router_decision else None,
+                    last_rows=context.last_rows,
                     district_key=context.district_key,
                     user_id=context.user_context.get("user_id") if isinstance(context.user_context, dict) else None,
                 )
