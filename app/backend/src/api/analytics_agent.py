@@ -386,14 +386,21 @@ async def _process_tool_calls_to_contents(tool_calls: Any) -> list[dict[str, Any
 
         # REQUIRED FORMAT:
         #   developer role
-        #     content[type="tool_result"]
+        #     content[type="input_text"]
+        #       text = {"tool_result": {"tool_call_id": <id>, "output": <raw_json>}}
         #
         # This is the only valid way to return tool outputs to the Responses API.
+        wrapped = {
+            "tool_result": {
+                "tool_call_id": call_id,
+                "output": result,
+            }
+        }
+
         outputs.append(
             {
                 "tool_call_id": call_id,
-                "type": "tool_result",
-                "output": json.dumps(result, default=_json_default),
+                "text": json.dumps(wrapped, default=_json_default),
             }
         )
 
@@ -460,16 +467,10 @@ async def _execute_responses_workflow(query: str, context: Mapping[str, Any]) ->
             if not tool_results:
                 raise RuntimeError("Model requested tools but none could be executed.")
 
-            # Convert results into REQUIRED developer → tool_result messages
+            # Convert results into REQUIRED developer → input_text messages
             developer_blocks: list[dict[str, Any]] = []
             for tr in tool_results:
-                developer_blocks.append(
-                    {
-                        "type": "tool_result",
-                        "tool_call_id": tr["tool_call_id"],
-                        "output": tr["output"],
-                    }
-                )
+                developer_blocks.append({"type": "input_text", "text": tr["text"]})
 
             def _continue_with_tools() -> Any:
                 return client.responses.create(
