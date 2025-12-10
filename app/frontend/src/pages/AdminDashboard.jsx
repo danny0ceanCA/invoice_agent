@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { KeyRound, Users2 } from "lucide-react";
+import { BarChart3, KeyRound, Users2 } from "lucide-react";
 import { useAuth0 } from "@auth0/auth0-react";
 
 import { listDistricts } from "../api/adminDistricts";
@@ -104,6 +104,31 @@ export default function AdminDashboard({ currentUser }) {
             </p>
             <span className="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-amber-600">
               Issue district keys
+              <span aria-hidden="true" className="transition-transform group-hover:translate-x-1">
+                →
+              </span>
+            </span>
+          </Link>
+
+          <Link
+            to="/admin/analytics"
+            className="group flex h-full flex-col justify-between rounded-xl border border-teal-100 bg-gradient-to-r from-teal-50 via-cyan-50 to-slate-50 p-6 text-teal-900 shadow-sm transition-transform duration-200 ease-out hover:-translate-y-1 hover:shadow-xl"
+            aria-label="Open system analytics dashboard"
+          >
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-sm font-medium uppercase tracking-wide text-teal-600">Observability</p>
+                <h3 className="mt-2 text-xl font-semibold text-teal-950">System Analytics</h3>
+              </div>
+              <div className="rounded-full bg-teal-100 p-2 text-teal-600">
+                <BarChart3 className="h-6 w-6" aria-hidden="true" />
+              </div>
+            </div>
+            <p className="mt-4 text-sm leading-relaxed text-teal-800">
+              Inspect cache, materialized reports, and prefetch activity across analytics services.
+            </p>
+            <span className="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-teal-600">
+              View system analytics
               <span aria-hidden="true" className="transition-transform group-hover:translate-x-1">
                 →
               </span>
