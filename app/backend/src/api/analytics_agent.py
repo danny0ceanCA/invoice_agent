@@ -336,31 +336,23 @@ def _collect_tool_calls_container(response: Any) -> Any | None:
 
 async def _process_tool_calls_to_contents(tool_calls: Any) -> list[dict[str, Any]]:
     """
-    Execute model-requested tool calls and return results formatted in the
-    developer/input_text style required by the OpenAI Responses API.
+    Execute tool calls and return OpenAI-compliant continuation messages:
+    Developer messages containing `type="tool_result"` content blocks.
     """
-    # Normalize container
+
     if isinstance(tool_calls, dict):
         calls = tool_calls.get("tool_calls", []) or []
     else:
         calls = getattr(tool_calls, "tool_calls", []) or []
 
-    developer_blocks: list[dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
 
     for call in calls:
-        if isinstance(call, Mapping):
-            function = call.get("function")
-            call_id = call.get("id")
-        else:
-            function = getattr(call, "function", None)
-            call_id = getattr(call, "id", None)
+        fn = call.get("function") if isinstance(call, Mapping) else getattr(call, "function", None)
+        call_id = call.get("id") if isinstance(call, Mapping) else getattr(call, "id", None)
 
-        if isinstance(function, Mapping):
-            name = function.get("name")
-            args_raw = function.get("arguments")
-        else:
-            name = getattr(function, "name", None) if function else None
-            args_raw = getattr(function, "arguments", None) if function else None
+        name = fn.get("name")
+        args_raw = fn.get("arguments")
 
         try:
             args = json.loads(args_raw or "{}")
@@ -369,30 +361,24 @@ async def _process_tool_calls_to_contents(tool_calls: Any) -> list[dict[str, Any
 
         try:
             if name == "run_sql":
-                query = str(args.get("query", "")).strip()
-                result = await asyncio.to_thread(run_sql, query)
+                q = args.get("query", "")
+                output = await asyncio.to_thread(run_sql, q)
             elif name == "list_s3":
-                prefix = str(args.get("prefix", "")).strip()
+                prefix = args.get("prefix", "")
                 max_items = int(args.get("max_items", 100))
-                result = await asyncio.to_thread(list_s3, prefix, max_items)
+                output = await asyncio.to_thread(list_s3, prefix, max_items)
             else:
-                result = {"error": f"Unknown tool {name}"}
+                output = {"error": f"Unknown tool {name}"}
         except Exception as exc:
-            result = {"error": str(exc)}
+            output = {"error": str(exc)}
 
-        payload = {
+        results.append({
+            "type": "tool_result",
             "tool_call_id": call_id,
-            "output": result,
-        }
+            "output": json.dumps(output, default=_json_default)
+        })
 
-        developer_blocks.append(
-            {
-                "type": "input_text",
-                "text": json.dumps(payload, default=_json_default),
-            }
-        )
-
-    return developer_blocks
+    return results
 
 
 async def _execute_responses_workflow(query: str, context: Mapping[str, Any]) -> Any:
@@ -451,11 +437,10 @@ async def _execute_responses_workflow(query: str, context: Mapping[str, Any]) ->
         # If the model asked for tools (either via required_action or directly in output), run them
         container = _collect_tool_calls_container(response)
         if container:
+            # NEW: proper tool_result continuation
             tool_results = await _process_tool_calls_to_contents(container)
             if not tool_results:
                 raise RuntimeError("Model requested tools but none could be executed.")
-
-            developer_blocks = tool_results
 
             def _continue_with_tools() -> Any:
                 return client.responses.create(
@@ -464,7 +449,7 @@ async def _execute_responses_workflow(query: str, context: Mapping[str, Any]) ->
                     input=[
                         {
                             "role": "developer",
-                            "content": developer_blocks,
+                            "content": tool_results,
                         }
                     ],
                     tools=TOOLS,
