@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from typing import Any
 
 import structlog
@@ -162,10 +163,16 @@ def run_rendering_model(
         )
 
     try:
+        start = time.monotonic()
         response = client.chat.completions.create(
             model=model,
             messages=messages,
             temperature=temperature,
+        )
+        LOGGER.info(
+            "latency",
+            stage="Rendering Model",
+            duration_ms=(time.monotonic() - start) * 1000,
         )
         try:
             assistant_content = response.choices[0].message.content if response.choices else None
