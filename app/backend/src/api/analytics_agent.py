@@ -141,41 +141,44 @@ def list_s3(prefix: str, max_items: int = 100) -> list[dict[str, Any]]:
     return objects
 
 
-# Flat tool shape compatible with your current SDK usage
 TOOLS = [
     {
         "type": "function",
-        "name": "run_sql",
-        "description": "Execute a read-only SQL SELECT query.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "A complete SQL SELECT statement.",
-                }
+        "function": {
+            "name": "run_sql",
+            "description": "Execute a read-only SQL SELECT query.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "A complete SQL SELECT statement.",
+                    }
+                },
+                "required": ["query"],
+                "additionalProperties": False,
             },
-            "required": ["query"],
-            "additionalProperties": False,
         },
     },
     {
         "type": "function",
-        "name": "list_s3",
-        "description": "List invoice files in your S3 bucket.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "prefix": {"type": "string"},
-                "max_items": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 500,
-                    "default": 100,
+        "function": {
+            "name": "list_s3",
+            "description": "List invoice files in your S3 bucket.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prefix": {"type": "string"},
+                    "max_items": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 500,
+                        "default": 100,
+                    },
                 },
+                "required": ["prefix"],
+                "additionalProperties": False,
             },
-            "required": ["prefix"],
-            "additionalProperties": False,
         },
     },
 ]
