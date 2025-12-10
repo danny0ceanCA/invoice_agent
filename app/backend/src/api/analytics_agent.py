@@ -5,6 +5,7 @@ from __future__ import annotations
 from html import escape
 import asyncio
 import json
+import time
 from typing import Any, Iterable, Mapping
 
 import boto3
@@ -96,7 +97,9 @@ def run_sql(query: str) -> list[dict[str, Any]]:
 
     rows: list[dict[str, Any]] = []
     with engine.connect() as connection:
+        start = time.monotonic()
         result = connection.execute(sql_text(query))
+        LOGGER.info("latency", stage="SQL Execution", duration_ms=(time.monotonic() - start) * 1000)
         for row in result:
             rows.append(dict(row._mapping))
     return rows

@@ -7,6 +7,7 @@ import json
 from dataclasses import dataclass, field
 from html import escape
 from time import perf_counter
+import time
 from typing import Any, Mapping, Sequence
 
 import structlog
@@ -35,6 +36,10 @@ from .sql_planner_model import build_sql_planner_system_prompt, run_sql_planner_
 from .validator_model import build_validator_system_prompt, run_validator_model
 
 LOGGER = structlog.get_logger(__name__)
+
+
+def log_timing(stage, start, end):
+    LOGGER.info("latency", stage=stage, duration_ms=(end - start) * 1000)
 
 DEFAULT_MODEL = "gpt-4.1-mini"  # used for all supporting models
 LOGIC_MODEL = "gpt-5.1"  # only for logic_model
@@ -547,6 +552,7 @@ class Workflow:
         #     query = _maybe_apply_active_student_filter(query, active_filters)
 
         start_time = perf_counter()
+        start = time.monotonic()
         # Prefer fused_query for NLV if available; otherwise use the original raw query.
         nlv_query = fused_query or context.query
 
@@ -558,6 +564,7 @@ class Workflow:
             system_prompt=self.nlv_system_prompt,
             temperature=agent.nlv_temperature,
         )
+        log_timing("NLV", start, time.monotonic())
         current_intent = normalized_intent.get("intent") if isinstance(normalized_intent, Mapping) else None
         if agent.multi_turn_manager and session_id:
             try:
@@ -574,6 +581,7 @@ class Workflow:
         known_entities = _load_district_entities(self.engine, context.district_key)
 
         start_time = perf_counter()
+        start = time.monotonic()
         entity_result = run_entity_resolution_model(
             user_query=query,
             normalized_intent=normalized_intent,
@@ -584,6 +592,7 @@ class Workflow:
             system_prompt=self.entity_resolution_system_prompt,
             temperature=agent.entity_temperature,
         )
+        log_timing("Entity Resolution", start, time.monotonic())
         _record_stage_duration(context, "entity_resolution_model", start_time)
 
         resolved_intent = entity_result.get("normalized_intent") or normalized_intent
@@ -611,6 +620,7 @@ class Workflow:
             logic_ir = _payload_to_ir(payload, context.last_rows)
 
             start_time = perf_counter()
+            start = time.monotonic()
             br_result = run_business_rule_model(
                 ir=logic_ir,
                 entities=resolved_entities,
@@ -620,11 +630,13 @@ class Workflow:
                 system_prompt=self.business_rule_system_prompt,
                 temperature=agent.business_rule_temperature,
             )
+            log_timing("Business Rule Model", start, time.monotonic())
             _record_stage_duration(context, "business_rule_model", start_time)
             br_ir_dict = br_result.get("ir") if isinstance(br_result.get("ir"), dict) else None
             effective_ir = _payload_to_ir(br_ir_dict, context.last_rows) if br_ir_dict else logic_ir
 
             start_time = perf_counter()
+            start = time.monotonic()
             validator_result = run_validator_model(
                 ir=effective_ir,
                 client=agent.client,
@@ -632,6 +644,7 @@ class Workflow:
                 system_prompt=self.validator_system_prompt,
                 temperature=agent.validator_temperature,
             )
+            log_timing("Validator Model", start, time.monotonic())
             _record_stage_duration(context, "validator_model", start_time)
             is_valid = bool(validator_result.get("valid", True))
 
@@ -660,6 +673,7 @@ class Workflow:
                 return _finalise_response(render_payload, context)
 
             start_time = perf_counter()
+            start = time.monotonic()
             insight_result = run_insight_model(
                 ir=effective_ir,
                 client=agent.client,
@@ -667,6 +681,7 @@ class Workflow:
                 system_prompt=self.insight_system_prompt,
                 temperature=agent.insight_temperature,
             )
+            log_timing("Insight Model", start, time.monotonic())
             _record_stage_duration(context, "insight_model", start_time)
             insights = insight_result.get("insights") or []
 
@@ -684,6 +699,7 @@ class Workflow:
             return _finalise_response(render_payload, context)
 
         start_time = perf_counter()
+        start = time.monotonic()
         sql_plan_result = run_sql_planner_model(
             user_query=query,
             normalized_intent=resolved_intent,
@@ -694,6 +710,7 @@ class Workflow:
             system_prompt=self.sql_planner_system_prompt,
             temperature=agent.sql_planner_temperature,
         )
+        log_timing("SQL Planner", start, time.monotonic())
         _record_stage_duration(context, "sql_planner_model", start_time)
 
         plan = sql_plan_result.get("plan")
@@ -713,6 +730,7 @@ class Workflow:
             logic_ir = _payload_to_ir(payload, context.last_rows)
 
             start_time = perf_counter()
+            start = time.monotonic()
             br_result = run_business_rule_model(
                 ir=logic_ir,
                 entities=resolved_entities,
@@ -722,11 +740,13 @@ class Workflow:
                 system_prompt=self.business_rule_system_prompt,
                 temperature=agent.business_rule_temperature,
             )
+            log_timing("Business Rule Model", start, time.monotonic())
             _record_stage_duration(context, "business_rule_model", start_time)
             br_ir_dict = br_result.get("ir") if isinstance(br_result.get("ir"), dict) else None
             effective_ir = _payload_to_ir(br_ir_dict, context.last_rows) if br_ir_dict else logic_ir
 
             start_time = perf_counter()
+            start = time.monotonic()
             validator_result = run_validator_model(
                 ir=effective_ir,
                 client=agent.client,
@@ -734,6 +754,7 @@ class Workflow:
                 system_prompt=self.validator_system_prompt,
                 temperature=agent.validator_temperature,
             )
+            log_timing("Validator Model", start, time.monotonic())
             _record_stage_duration(context, "validator_model", start_time)
             is_valid = bool(validator_result.get("valid", True))
 
@@ -762,6 +783,7 @@ class Workflow:
                 return _finalise_response(render_payload, context)
 
             start_time = perf_counter()
+            start = time.monotonic()
             insight_result = run_insight_model(
                 ir=effective_ir,
                 client=agent.client,
@@ -769,6 +791,7 @@ class Workflow:
                 system_prompt=self.insight_system_prompt,
                 temperature=agent.insight_temperature,
             )
+            log_timing("Insight Model", start, time.monotonic())
             _record_stage_duration(context, "insight_model", start_time)
             insights = insight_result.get("insights") or []
 
@@ -786,6 +809,7 @@ class Workflow:
             return _finalise_response(render_payload, context)
 
         start_time = perf_counter()
+        start = time.monotonic()
         router_decision = run_sql_router_model(
             user_query=query,
             sql_plan=plan,
@@ -797,6 +821,7 @@ class Workflow:
             system_prompt=self.router_system_prompt,
             temperature=agent.router_temperature,
         )
+        log_timing("SQL Router", start, time.monotonic())
         _record_stage_duration(context, "sql_router_model", start_time)
 
         messages: list[dict[str, Any]] = [
@@ -930,6 +955,7 @@ class Workflow:
                         return _finalise_response(payload, context)
 
             start_time = perf_counter()
+            start = time.monotonic()
             message = run_logic_model(
                 agent.client,
                 model=agent.logic_model,
@@ -938,6 +964,7 @@ class Workflow:
                 temperature=agent.logic_temperature,
                 router_decision=router_decision.to_dict(),
             )
+            log_timing("Logic Model", start, time.monotonic())
             _record_stage_duration(context, "logic_model", start_time)
             tool_calls = message.tool_calls or []
             assistant_message: dict[str, Any] = {
