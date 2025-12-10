@@ -1065,7 +1065,19 @@ class Workflow:
                             "content": tool_message,
                         }
                     )
-                continue
+                # Instead of calling Logic Model again, finalize immediately
+                final_payload = {
+                    "text": "",
+                    "rows": context.last_rows,
+                    "html": None,
+                    "entities": {
+                        "students": resolved_entities.get("students", []),
+                        "providers": resolved_entities.get("providers", []),
+                        "vendors": resolved_entities.get("vendors", []),
+                        "invoices": resolved_entities.get("invoices", []),
+                    },
+                }
+                return _cache_and_return(final_payload)
 
             raw_content = message.content or ""
 
@@ -1073,29 +1085,18 @@ class Workflow:
                 payload = json.loads(raw_content)
             except json.JSONDecodeError:
                 LOGGER.warning("agent_invalid_json", iteration=iteration, content=raw_content)
-
-                # Give the model a chance to correct its format instead of immediately
-                # returning raw text to the user. This tends to occur when the model
-                # answers conversationally without wrapping the response in the required
-                # JSON object, which leaves the UI without tables or numbers. Prompt the
-                # model to retry with the correct structure and, if needed, invoke tools.
-                if iteration < agent.workflow.max_iterations - 1:
-                    messages.append(
-                        {
-                            "role": "system",
-                            "content": (
-                                "The prior assistant message was not valid JSON. "
-                                "Respond again using a single JSON object with keys "
-                                "'text', 'rows', and 'html'. Do not include plain text "
-                                "outside that object. If data is required, call the "
-                                "available tools (run_sql or list_s3) before returning."
-                            ),
-                        }
-                    )
-                    continue
-
-                text = raw_content.strip() or "No response provided."
-                fallback_payload = {"text": text, "rows": context.last_rows, "html": None}
+                # Skip logic retries — finalize using last known SQL rows or empty
+                fallback_payload = {
+                    "text": "Invalid JSON from logic model.",
+                    "rows": context.last_rows,
+                    "html": None,
+                    "entities": {
+                        "students": resolved_entities.get("students", []),
+                        "providers": resolved_entities.get("providers", []),
+                        "vendors": resolved_entities.get("vendors", []),
+                        "invoices": resolved_entities.get("invoices", []),
+                    },
+                }
                 return _cache_and_return(fallback_payload)
 
             logic_ir = _payload_to_ir(payload, context.last_rows)
