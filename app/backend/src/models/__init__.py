@@ -12,6 +12,7 @@ from .user import User
 from .vendor import Vendor
 from .student import Student
 from .clinician import Clinician
+from .materialized_report import MaterializedReport
 
 __all__ = [
     "Approval",
@@ -26,4 +27,5 @@ __all__ = [
     "DistrictMembership",
     "Student",
     "Clinician",
+    "MaterializedReport",
 ]

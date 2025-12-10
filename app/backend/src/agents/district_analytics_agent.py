@@ -22,6 +22,7 @@ from app.backend.src.core.redis_cache import RedisAnalyticsCache
 from app.backend.src.core.memory import ConversationMemory, RedisConversationMemory
 from app.backend.src.db import get_engine
 from app.backend.src.services.s3 import get_s3_client
+from app.backend.src.services.materialized_report_service import persist_materialized_report
 from .multi_turn_model import MultiTurnConversationManager
 from .business_rule_model import build_business_rule_system_prompt, run_business_rule_model
 from .entity_resolution_model import (
@@ -596,8 +597,23 @@ class Workflow:
 
         def _cache_and_return(payload: Mapping[str, Any]) -> AgentResponse:
             response = _finalise_response(payload, context)
+
+            # Persist to Redis
             CACHE.set(cache_key, response.dict())
             LOGGER.info("cache_write", key=cache_key)
+
+            # Best-effort persistence to Postgres as a materialized report
+            try:
+                persist_materialized_report(
+                    engine=self.engine,
+                    district_key=context.district_key,
+                    cache_key=cache_key,
+                    normalized_intent=normalized_intent,
+                    router_decision=router_decision.to_dict() if router_decision else None,
+                    agent_response=response.dict(),
+                )
+            except Exception as exc:  # pragma: no cover - defensive
+                LOGGER.warning("persist_materialized_report_wrapper_failed", error=str(exc))
             return response
 
         known_entities = _load_district_entities(self.engine, context.district_key)
