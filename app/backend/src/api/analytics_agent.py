@@ -333,13 +333,13 @@ def _collect_tool_calls_container(response: Any) -> Any | None:
     return None
 
 
-async def _process_tool_calls_to_contents(tool_calls: Any) -> list[dict[str, str]]:
+async def _process_tool_calls_to_contents(tool_calls: Any) -> list[dict[str, Any]]:
     """
-    Execute the model-requested tool calls and return content items of type 'tool_result'
-    suitable for a Responses.create continuation (previous_response_id).
+    Execute the model-requested tool calls and return assistant messages suitable for a
+    Responses.create continuation (previous_response_id).
 
-    Each item shape:
-      {"type": "tool_result", "tool_call_id": "...", "output": "<string JSON result>"}
+    New OpenAI Responses format requires a complete assistant message with
+    content[type=output_text] instead of "tool_result" blocks.
     """
     # Normalize container
     if isinstance(tool_calls, dict):
@@ -347,7 +347,10 @@ async def _process_tool_calls_to_contents(tool_calls: Any) -> list[dict[str, str
     else:
         calls = getattr(tool_calls, "tool_calls", []) or []
 
-    contents: list[dict[str, str]] = []
+    # NEW FORMAT REQUIRED BY OPENAI:
+    # Instead of returning {"type":"tool_result"}, we now generate a complete
+    # assistant message with content[type=output_text].
+    messages: list[dict[str, Any]] = []
 
     for call in calls:
         if isinstance(call, Mapping):
@@ -382,16 +385,21 @@ async def _process_tool_calls_to_contents(tool_calls: Any) -> list[dict[str, str
         except Exception as exc:
             result = {"error": str(exc)}
 
-        contents.append(
+        # NEW assistant-response message block
+        messages.append(
             {
-                "type": "tool_result",
+                "role": "assistant",
                 "tool_call_id": call_id,
-                # IMPORTANT: field must be 'output' and it must be a STRING
-                "output": json.dumps(result, default=_json_default),
+                "content": [
+                    {
+                        "type": "output_text",
+                        "text": json.dumps(result, default=_json_default),
+                    }
+                ],
             }
         )
 
-    return contents
+    return messages
 
 
 async def _execute_responses_workflow(query: str, context: Mapping[str, Any]) -> Any:
@@ -450,16 +458,17 @@ async def _execute_responses_workflow(query: str, context: Mapping[str, Any]) ->
         # If the model asked for tools (either via required_action or directly in output), run them
         container = _collect_tool_calls_container(response)
         if container:
-            tool_result_contents = await _process_tool_calls_to_contents(container)
-            if not tool_result_contents:
+            # Now returns fully-formed assistant messages instead of tool_result blocks
+            continuation_messages = await _process_tool_calls_to_contents(container)
+            if not continuation_messages:
                 raise RuntimeError("Model requested tools but none could be executed.")
 
-            # Continue the run by sending back tool_result content for each call
+            # NEW continuation call format (OpenAI requires assistant-role messages)
             def _continue_with_tool_results() -> Any:
                 return client.responses.create(
                     model=DEFAULT_MODEL,
                     previous_response_id=response.id,
-                    input=[{"role": "developer", "content": tool_result_contents}],
+                    input=continuation_messages,  # direct assistant messages
                     tools=TOOLS,
                     tool_choice="auto",
                 )
@@ -467,8 +476,8 @@ async def _execute_responses_workflow(query: str, context: Mapping[str, Any]) ->
             LOGGER.info(
                 "analytics_agent_submitting_tool_results",
                 previous_response_id=response.id,
-                num_results=len(tool_result_contents),
-                tool_call_ids=[c.get("tool_call_id") for c in tool_result_contents],
+                num_results=len(continuation_messages),
+                tool_call_ids=[c.get("tool_call_id") for c in continuation_messages],
             )
 
             response = await asyncio.to_thread(_continue_with_tool_results)
