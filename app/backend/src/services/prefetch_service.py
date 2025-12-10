@@ -14,13 +14,15 @@ LOGGER = structlog.get_logger(__name__)
 
 def _derive_prefetch_queries(
     normalized_intent: dict[str, Any] | None,
+    last_rows: list[dict[str, Any]] | None,
     router_decision: Mapping[str, Any] | None,
 ) -> list[str]:
     """Derive a small set of likely follow-up natural-language queries.
 
     Minimal v1 behavior:
     - If the user asked for student_monthly_spend (cost) for a student,
-      prefetch the hours query for the same student.
+      prefetch the hours query, provider breakdown, service code breakdown,
+      and latest invoice details for the same student when available.
     """
 
     if not isinstance(normalized_intent, dict):
@@ -39,7 +41,36 @@ def _derive_prefetch_queries(
     if intent == "student_monthly_spend":
         queries.append(f"i want to see the hours for {student_name}")
 
-    # Future: add provider breakdown, year summary, etc.
+        # ---------------------------
+        # Option A Prefetch Additions
+        # ---------------------------
+
+        # Provider breakdown
+        queries.append(f"provider breakdown for {student_name}")
+
+        # Service code breakdown
+        queries.append(f"service code breakdown for {student_name}")
+
+        # Invoice details for latest month (if last_rows available)
+        if isinstance(last_rows, list) and last_rows:
+            # Expect last_rows to have "service_month"
+            try:
+                months = [
+                    row.get("service_month")
+                    for row in last_rows
+                    if isinstance(row.get("service_month"), str)
+                ]
+                if months:
+                    # Use the most recent month (last in order)
+                    latest_month = months[-1]
+                    queries.append(
+                        f"invoice details for {student_name} in {latest_month}"
+                    )
+            except Exception as exc:  # defensive
+                LOGGER.warning(
+                    "prefetch_latest_month_failed",
+                    error=str(exc),
+                )
 
     return queries
 
@@ -47,6 +78,7 @@ def _derive_prefetch_queries(
 def enqueue_prefetch_jobs(
     *,
     normalized_intent: dict[str, Any] | None,
+    last_rows: list[dict[str, Any]] | None,
     router_decision: Mapping[str, Any] | None,
     district_key: str,
     user_id: int | None,
@@ -57,7 +89,7 @@ def enqueue_prefetch_jobs(
     """
 
     try:
-        queries = _derive_prefetch_queries(normalized_intent, router_decision)
+        queries = _derive_prefetch_queries(normalized_intent, last_rows, router_decision)
         if not queries:
             return
 
