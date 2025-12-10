@@ -335,13 +335,8 @@ def _collect_tool_calls_container(response: Any) -> Any | None:
 
 async def _process_tool_calls_to_contents(tool_calls: Any) -> list[dict[str, Any]]:
     """
-    Execute model-requested tool calls and return results formatted in the ONLY format
-    OpenAI still supports for tool continuation:
-
-        developer message → content[type="tool_result"]
-
-    NOTE: assistant messages may NOT contain tool_result anymore, but developer messages
-    CAN. This is REQUIRED so the model can associate tool_call_id → output.
+    Execute model-requested tool calls and return results formatted in the
+    developer/input_text style required by the OpenAI Responses API.
     """
     # Normalize container
     if isinstance(tool_calls, dict):
@@ -349,7 +344,7 @@ async def _process_tool_calls_to_contents(tool_calls: Any) -> list[dict[str, Any
     else:
         calls = getattr(tool_calls, "tool_calls", []) or []
 
-    outputs: list[dict[str, Any]] = []
+    developer_blocks: list[dict[str, Any]] = []
 
     for call in calls:
         if isinstance(call, Mapping):
@@ -384,27 +379,19 @@ async def _process_tool_calls_to_contents(tool_calls: Any) -> list[dict[str, Any
         except Exception as exc:
             result = {"error": str(exc)}
 
-        # REQUIRED FORMAT:
-        #   developer role
-        #     content[type="input_text"]
-        #       text = {"tool_result": {"tool_call_id": <id>, "output": <raw_json>}}
-        #
-        # This is the only valid way to return tool outputs to the Responses API.
-        wrapped = {
-            "tool_result": {
-                "tool_call_id": call_id,
-                "output": result,
-            }
+        payload = {
+            "tool_call_id": call_id,
+            "output": result,
         }
 
-        outputs.append(
+        developer_blocks.append(
             {
-                "tool_call_id": call_id,
-                "text": json.dumps(wrapped, default=_json_default),
+                "type": "input_text",
+                "text": json.dumps(payload, default=_json_default),
             }
         )
 
-    return outputs
+    return developer_blocks
 
 
 async def _execute_responses_workflow(query: str, context: Mapping[str, Any]) -> Any:
@@ -467,10 +454,7 @@ async def _execute_responses_workflow(query: str, context: Mapping[str, Any]) ->
             if not tool_results:
                 raise RuntimeError("Model requested tools but none could be executed.")
 
-            # Convert results into REQUIRED developer → input_text messages
-            developer_blocks: list[dict[str, Any]] = []
-            for tr in tool_results:
-                developer_blocks.append({"type": "input_text", "text": tr["text"]})
+            developer_blocks = tool_results
 
             def _continue_with_tools() -> Any:
                 return client.responses.create(
