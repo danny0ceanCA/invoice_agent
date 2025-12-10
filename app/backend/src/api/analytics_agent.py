@@ -333,7 +333,11 @@ def _collect_tool_calls_container(response: Any) -> Any | None:
 async def _process_tool_calls_to_contents(tool_calls: Any) -> list[dict[str, Any]]:
     """
     Execute tool calls and return OpenAI-compliant continuation messages:
-    Developer messages containing `type="tool_result"` content blocks.
+    developer messages containing `type="tool_result"` content blocks.
+
+    This function must be defensive: if the tool call payload from the model does
+    not match the expected shape, we should emit an "unknown tool" error instead
+    of raising.
     """
 
     if isinstance(tool_calls, dict):
@@ -344,14 +348,21 @@ async def _process_tool_calls_to_contents(tool_calls: Any) -> list[dict[str, Any
     results: list[dict[str, Any]] = []
 
     for call in calls:
-        fn = call.get("function") if isinstance(call, Mapping) else getattr(call, "function", None)
-        call_id = call.get("id") if isinstance(call, Mapping) else getattr(call, "id", None)
+        # Normalize structure from either dict or SDK object
+        if isinstance(call, Mapping):
+            fn = call.get("function") or {}
+            call_id = call.get("id") or call.get("tool_call_id")
+        else:
+            fn = getattr(call, "function", None) or {}
+            call_id = getattr(call, "id", None) or getattr(call, "tool_call_id", None)
 
-        name = fn.get("name")
-        args_raw = fn.get("arguments")
+        name = fn.get("name") if isinstance(fn, Mapping) else None
+        args_raw = fn.get("arguments") if isinstance(fn, Mapping) else None
 
         try:
-            args = json.loads(args_raw or "{}")
+            args = json.loads(args_raw or "{}") if isinstance(args_raw, str) else (args_raw or {})
+            if not isinstance(args, Mapping):
+                args = {}
         except Exception:
             args = {}
 
@@ -364,7 +375,7 @@ async def _process_tool_calls_to_contents(tool_calls: Any) -> list[dict[str, Any
                 max_items = int(args.get("max_items", 100))
                 output = await asyncio.to_thread(list_s3, prefix, max_items)
             else:
-                output = {"error": f"Unknown tool {name}"}
+                output = {"error": f"Unknown or malformed tool call: {name!r}"}
         except Exception as exc:
             output = {"error": str(exc)}
 
