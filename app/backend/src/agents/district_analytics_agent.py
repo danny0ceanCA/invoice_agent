@@ -21,6 +21,7 @@ from app.backend.src.core.config import get_settings
 from app.backend.src.core.redis_cache import RedisAnalyticsCache
 from app.backend.src.core.memory import ConversationMemory, RedisConversationMemory
 from app.backend.src.db import get_engine
+from app.backend.src.services.prefetch_service import enqueue_prefetch_jobs
 from app.backend.src.services.s3 import get_s3_client
 from app.backend.src.services.materialized_report_service import (
     fetch_materialized_report,
@@ -621,6 +622,8 @@ class Workflow:
         LOGGER.info("cache_miss", key=cache_key)
 
         def _cache_and_return(payload: Mapping[str, Any]) -> AgentResponse:
+            # router_decision will be populated later in the workflow; we only read it here.
+            nonlocal router_decision
             response = _finalise_response(payload, context)
 
             # Persist to Redis
@@ -637,6 +640,15 @@ class Workflow:
                     router_decision=router_decision.to_dict() if router_decision else None,
                     agent_response=response.dict(),
                 )
+
+                # Best-effort enqueue of prefetch jobs based on the current report.
+                enqueue_prefetch_jobs(
+                    normalized_intent=normalized_intent,
+                    router_decision=router_decision.to_dict() if router_decision else None,
+                    district_key=context.district_key,
+                    user_id=context.user_context.get("user_id") if isinstance(context.user_context, dict) else None,
+                )
+
             except Exception as exc:  # pragma: no cover - defensive
                 LOGGER.warning("persist_materialized_report_wrapper_failed", error=str(exc))
             return response
