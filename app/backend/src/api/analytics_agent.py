@@ -335,11 +335,13 @@ def _collect_tool_calls_container(response: Any) -> Any | None:
 
 async def _process_tool_calls_to_contents(tool_calls: Any) -> list[dict[str, Any]]:
     """
-    Execute the model-requested tool calls and return serialized results suitable for
-    a Responses.create continuation.
+    Execute model-requested tool calls and return results formatted in the ONLY format
+    OpenAI still supports for tool continuation:
 
-    Each entry in the returned list will contain an "output" string that can be passed
-    back to the model as developer input_text blocks.
+        developer message → content[type="tool_result"]
+
+    NOTE: assistant messages may NOT contain tool_result anymore, but developer messages
+    CAN. This is REQUIRED so the model can associate tool_call_id → output.
     """
     # Normalize container
     if isinstance(tool_calls, dict):
@@ -382,9 +384,15 @@ async def _process_tool_calls_to_contents(tool_calls: Any) -> list[dict[str, Any
         except Exception as exc:
             result = {"error": str(exc)}
 
+        # REQUIRED FORMAT:
+        #   developer role
+        #     content[type="tool_result"]
+        #
+        # This is the only valid way to return tool outputs to the Responses API.
         outputs.append(
             {
                 "tool_call_id": call_id,
+                "type": "tool_result",
                 "output": json.dumps(result, default=_json_default),
             }
         )
@@ -452,17 +460,27 @@ async def _execute_responses_workflow(query: str, context: Mapping[str, Any]) ->
             if not tool_results:
                 raise RuntimeError("Model requested tools but none could be executed.")
 
-            # Convert each tool output to a developer input_text block
-            developer_blocks = []
+            # Convert results into REQUIRED developer → tool_result messages
+            developer_blocks: list[dict[str, Any]] = []
             for tr in tool_results:
-                output_str = tr.get("output") or "{}"
-                developer_blocks.append({"type": "input_text", "text": output_str})
+                developer_blocks.append(
+                    {
+                        "type": "tool_result",
+                        "tool_call_id": tr["tool_call_id"],
+                        "output": tr["output"],
+                    }
+                )
 
             def _continue_with_tools() -> Any:
                 return client.responses.create(
                     model=DEFAULT_MODEL,
                     previous_response_id=response.id,
-                    input=[{"role": "developer", "content": developer_blocks}],
+                    input=[
+                        {
+                            "role": "developer",
+                            "content": developer_blocks,
+                        }
+                    ],
                     tools=TOOLS,
                     tool_choice="auto",
                 )
