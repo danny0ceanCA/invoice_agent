@@ -332,12 +332,14 @@ def _collect_tool_calls_container(response: Any) -> Any | None:
 
 async def _process_tool_calls_to_contents(tool_calls: Any) -> list[dict[str, Any]]:
     """
-    Execute tool calls and return OpenAI-compliant continuation messages:
-    developer messages containing `type="tool_result"` content blocks.
+    Execute tool calls and return OpenAI-compliant tool_outputs for
+    responses.submit_tool_outputs. Each entry is:
 
-    This function must be defensive: if the tool call payload from the model does
-    not match the expected shape, we should emit an "unknown tool" error instead
-    of raising.
+        {"tool_call_id": "<id>", "output": "<JSON-stringified result>"}
+
+    This function is defensive: if the tool call payload from the model does
+    not match the expected shape, we emit an "unknown tool" error instead of
+    raising.
     """
 
     if isinstance(tool_calls, dict):
@@ -379,11 +381,12 @@ async def _process_tool_calls_to_contents(tool_calls: Any) -> list[dict[str, Any
         except Exception as exc:
             output = {"error": str(exc)}
 
-        results.append({
-            "type": "tool_result",
-            "tool_call_id": call_id,
-            "output": json.dumps(output, default=_json_default)
-        })
+        results.append(
+            {
+                "tool_call_id": call_id,
+                "output": json.dumps(output, default=_json_default),
+            }
+        )
 
     return results
 
@@ -444,23 +447,16 @@ async def _execute_responses_workflow(query: str, context: Mapping[str, Any]) ->
         # If the model asked for tools (either via required_action or directly in output), run them
         container = _collect_tool_calls_container(response)
         if container:
-            # NEW: proper tool_result continuation
             tool_results = await _process_tool_calls_to_contents(container)
             if not tool_results:
                 raise RuntimeError("Model requested tools but none could be executed.")
 
-            def _continue_with_tools() -> Any:
-                return client.responses.create(
-                    model=DEFAULT_MODEL,
-                    previous_response_id=response.id,
-                    input=[
-                        {
-                            "role": "developer",
-                            "content": tool_results,
-                        }
-                    ],
-                    tools=TOOLS,
-                    tool_choice="auto",
+            ra = getattr(response, "required_action", None)
+
+            def _submit_tool_outputs() -> Any:
+                return client.responses.submit_tool_outputs(
+                    response_id=response.id,
+                    tool_outputs=tool_results,
                 )
 
             LOGGER.info(
@@ -469,7 +465,10 @@ async def _execute_responses_workflow(query: str, context: Mapping[str, Any]) ->
                 num_results=len(tool_results),
             )
 
-            response = await asyncio.to_thread(_continue_with_tools)
+            if ra is not None and getattr(ra, "type", None) == "submit_tool_outputs":
+                response = await asyncio.to_thread(_submit_tool_outputs)
+            else:
+                response = await asyncio.to_thread(_submit_tool_outputs)
             # Loop again: model may chain more tools or produce a final message
             continue
 
