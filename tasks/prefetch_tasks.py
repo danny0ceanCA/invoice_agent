@@ -13,17 +13,14 @@ LOGGER = structlog.get_logger(__name__)
 
 @celery.task(name="tasks.small.prefetch_analytics")
 def prefetch_analytics(query: str, context: dict[str, Any] | None = None, queue_name: str | None = None) -> None:
-    """Background Celery task to prefetch analytics reports.
-
-    It reuses the existing analytics agent, running the query with a synthetic session.
-    """
+    """Background Celery task to prefetch analytics reports using the REAL agent."""
 
     if context is None:
         context = {}
 
     try:
-        # Local import to avoid circular import at worker startup
-        from app.backend.src.api.analytics_agent import run_analytics_agent
+        # Correct import: call the REAL district analytics pipeline
+        from app.backend.src.agents.district_analytics_agent import run_analytics_agent
     except Exception as exc:  # pragma: no cover - defensive
         LOGGER.warning("prefetch_import_failed", error=str(exc))
         return
