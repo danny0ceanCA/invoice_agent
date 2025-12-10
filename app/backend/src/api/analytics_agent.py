@@ -458,9 +458,8 @@ async def _execute_responses_workflow(query: str, context: Mapping[str, Any]) ->
 
             ra = getattr(response, "required_action", None)
 
-            def _continue_with_tools() -> Any:
-                return client.responses.create(
-                    model=DEFAULT_MODEL,
+            def _submit_tool_outputs() -> Any:
+                return client.responses.submit_tool_outputs(
                     response_id=response.id,
                     tool_outputs=tool_results,
                 )
@@ -472,9 +471,9 @@ async def _execute_responses_workflow(query: str, context: Mapping[str, Any]) ->
             )
 
             if ra is not None and getattr(ra, "type", None) == "submit_tool_outputs":
-                response = await asyncio.to_thread(_continue_with_tools)
+                response = await asyncio.to_thread(_submit_tool_outputs)
             else:
-                response = await asyncio.to_thread(_continue_with_tools)
+                response = await asyncio.to_thread(_submit_tool_outputs)
             # Loop again: model may chain more tools or produce a final message
             continue
 
