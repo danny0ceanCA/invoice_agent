@@ -1,6 +1,7 @@
 """Helpers for persisting materialized analytics reports."""
 
 from __future__ import annotations
+from datetime import datetime
 
 from typing import Any
 
@@ -73,3 +74,40 @@ def persist_materialized_report(
             cache_key=cache_key,
             error=str(exc),
         )
+
+
+def fetch_materialized_report(
+    *,
+    engine: Engine,
+    cache_key: str,
+    district_key: str,
+) -> dict[str, Any] | None:
+    """Fetch a materialized report from Postgres by cache_key + district.
+
+    Returns:
+        A dictionary payload (AgentResponse JSON) or None.
+    """
+    try:
+        with Session(engine) as session:
+            report = session.query(MaterializedReport).filter(
+                MaterializedReport.cache_key == cache_key,
+                MaterializedReport.district_key == district_key,
+            ).one_or_none()
+
+            if report is None:
+                return None
+
+            # Update last_accessed_at
+            report.last_accessed_at = datetime.utcnow()
+            session.commit()
+
+            return report.payload
+
+    except Exception as exc:  # pragma: no cover
+        LOGGER.warning(
+            "fetch_materialized_report_failed",
+            cache_key=cache_key,
+            district_key=district_key,
+            error=str(exc),
+        )
+        return None

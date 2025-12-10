@@ -22,7 +22,10 @@ from app.backend.src.core.redis_cache import RedisAnalyticsCache
 from app.backend.src.core.memory import ConversationMemory, RedisConversationMemory
 from app.backend.src.db import get_engine
 from app.backend.src.services.s3 import get_s3_client
-from app.backend.src.services.materialized_report_service import persist_materialized_report
+from app.backend.src.services.materialized_report_service import (
+    fetch_materialized_report,
+    persist_materialized_report,
+)
 from .multi_turn_model import MultiTurnConversationManager
 from .business_rule_model import build_business_rule_system_prompt, run_business_rule_model
 from .entity_resolution_model import (
@@ -592,6 +595,28 @@ class Workflow:
                 return AgentResponse(**cached_response)
             except Exception as exc:  # pragma: no cover - defensive
                 LOGGER.warning("cache_deserialize_failed", key=cache_key, error=str(exc))
+
+        # ----------------------------
+        # Step 5.2: Postgres Fallback
+        # ----------------------------
+
+        pg_cached = fetch_materialized_report(
+            engine=self.engine,
+            cache_key=cache_key,
+            district_key=context.district_key,
+        )
+
+        if pg_cached:
+            LOGGER.info("pg_cache_hit", key=cache_key)
+            try:
+                # Rehydrate into AgentResponse so UI layer stays consistent
+                return AgentResponse(**pg_cached)
+            except Exception as exc:
+                LOGGER.warning(
+                    "pg_cache_deserialize_failed",
+                    key=cache_key,
+                    error=str(exc),
+                )
 
         LOGGER.info("cache_miss", key=cache_key)
 
