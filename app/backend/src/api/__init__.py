@@ -17,6 +17,7 @@ from . import (
     users,
     vendors,
 )
+from .admin import analytics as admin_analytics
 
 __all__ = [
     "admin",
@@ -34,4 +35,5 @@ __all__ = [
     "users",
     "vendors",
     "analytics_agent",
+    "admin_analytics",
 ]

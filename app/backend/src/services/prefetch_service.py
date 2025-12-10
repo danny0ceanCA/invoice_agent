@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import json
+import time
 import uuid
 from typing import Any, Mapping
 
 import structlog
+from redis import Redis
 
+from app.backend.src.core.config import get_settings
+from app.backend.src.services.prefetch_throttle import should_throttle_prefetch
 from tasks.worker import celery
 
 LOGGER = structlog.get_logger(__name__)
@@ -88,10 +93,27 @@ def enqueue_prefetch_jobs(
     Best-effort only; failures are logged and never affect the main response.
     """
 
+    settings = get_settings()
+
     try:
         queries = _derive_prefetch_queries(normalized_intent, last_rows, router_decision)
         if not queries:
             return
+
+        throttle, reason = should_throttle_prefetch(
+            settings=settings,
+            district_key=district_key,
+            normalized_intent=normalized_intent,
+            router_decision=router_decision,
+            num_predicted_queries=len(queries),
+        )
+        if throttle:
+            LOGGER.warning(
+                "prefetch_throttled", reason=reason, district_key=district_key
+            )
+            return
+
+        now_ts = time.time()
 
         for q in queries:
             session_id = f"prefetch-{uuid.uuid4()}"
@@ -114,5 +136,19 @@ def enqueue_prefetch_jobs(
             district_key=district_key,
             num_queries=len(queries),
         )
+
+        try:
+            client = Redis.from_url(settings.redis_url, decode_responses=True)
+            client.set(f"prefetch:last_ts:{district_key}", now_ts)
+            history_entry = {
+                "district_key": district_key,
+                "queries": queries,
+                "ts": now_ts,
+                "reason": "enqueued",
+            }
+            client.lpush("prefetch:history", json.dumps(history_entry))
+            client.ltrim("prefetch:history", 0, 49)
+        except Exception as exc:  # pragma: no cover - defensive
+            LOGGER.warning("prefetch_history_record_failed", error=str(exc))
     except Exception as exc:  # pragma: no cover - defensive
         LOGGER.warning("enqueue_prefetch_jobs_failed", error=str(exc))
