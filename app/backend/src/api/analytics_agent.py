@@ -335,11 +335,11 @@ def _collect_tool_calls_container(response: Any) -> Any | None:
 
 async def _process_tool_calls_to_contents(tool_calls: Any) -> list[dict[str, Any]]:
     """
-    Execute the model-requested tool calls and return assistant messages suitable for a
-    Responses.create continuation (previous_response_id).
+    Execute the model-requested tool calls and return serialized results suitable for
+    a Responses.create continuation.
 
-    New OpenAI Responses format requires a complete assistant message with
-    content[type=output_text] instead of "tool_result" blocks.
+    Each entry in the returned list will contain an "output" string that can be passed
+    back to the model as developer input_text blocks.
     """
     # Normalize container
     if isinstance(tool_calls, dict):
@@ -347,10 +347,7 @@ async def _process_tool_calls_to_contents(tool_calls: Any) -> list[dict[str, Any
     else:
         calls = getattr(tool_calls, "tool_calls", []) or []
 
-    # NEW FORMAT REQUIRED BY OPENAI:
-    # Instead of returning {"type":"tool_result"}, we now generate a complete
-    # assistant message with content[type=output_text].
-    messages: list[dict[str, Any]] = []
+    outputs: list[dict[str, Any]] = []
 
     for call in calls:
         if isinstance(call, Mapping):
@@ -385,21 +382,14 @@ async def _process_tool_calls_to_contents(tool_calls: Any) -> list[dict[str, Any
         except Exception as exc:
             result = {"error": str(exc)}
 
-        # NEW assistant-response message block
-        messages.append(
+        outputs.append(
             {
-                "role": "assistant",
                 "tool_call_id": call_id,
-                "content": [
-                    {
-                        "type": "output_text",
-                        "text": json.dumps(result, default=_json_default),
-                    }
-                ],
+                "output": json.dumps(result, default=_json_default),
             }
         )
 
-    return messages
+    return outputs
 
 
 async def _execute_responses_workflow(query: str, context: Mapping[str, Any]) -> Any:
@@ -458,17 +448,21 @@ async def _execute_responses_workflow(query: str, context: Mapping[str, Any]) ->
         # If the model asked for tools (either via required_action or directly in output), run them
         container = _collect_tool_calls_container(response)
         if container:
-            # Now returns fully-formed assistant messages instead of tool_result blocks
-            continuation_messages = await _process_tool_calls_to_contents(container)
-            if not continuation_messages:
+            tool_results = await _process_tool_calls_to_contents(container)
+            if not tool_results:
                 raise RuntimeError("Model requested tools but none could be executed.")
 
-            # NEW continuation call format (OpenAI requires assistant-role messages)
-            def _continue_with_tool_results() -> Any:
+            # Convert each tool output to a developer input_text block
+            developer_blocks = []
+            for tr in tool_results:
+                output_str = tr.get("output") or "{}"
+                developer_blocks.append({"type": "input_text", "text": output_str})
+
+            def _continue_with_tools() -> Any:
                 return client.responses.create(
                     model=DEFAULT_MODEL,
                     previous_response_id=response.id,
-                    input=continuation_messages,  # direct assistant messages
+                    input=[{"role": "developer", "content": developer_blocks}],
                     tools=TOOLS,
                     tool_choice="auto",
                 )
@@ -476,11 +470,10 @@ async def _execute_responses_workflow(query: str, context: Mapping[str, Any]) ->
             LOGGER.info(
                 "analytics_agent_submitting_tool_results",
                 previous_response_id=response.id,
-                num_results=len(continuation_messages),
-                tool_call_ids=[c.get("tool_call_id") for c in continuation_messages],
+                num_results=len(tool_results),
             )
 
-            response = await asyncio.to_thread(_continue_with_tool_results)
+            response = await asyncio.to_thread(_continue_with_tools)
             # Loop again: model may chain more tools or produce a final message
             continue
 
