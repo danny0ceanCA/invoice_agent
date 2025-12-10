@@ -33,6 +33,7 @@ from .api import (
     users,
 )
 from app.api import analytics_agent
+from app.backend.src.api.admin.analytics import router as admin_analytics_router
 from .core.logging import configure_logging
 
 
@@ -61,6 +62,7 @@ def create_app() -> FastAPI:
     app.include_router(admin.router, prefix="/api")
     app.include_router(admin_users.router, prefix="/api")
     app.include_router(admin_districts.router, prefix="/api")
+    app.include_router(admin_analytics_router, prefix="/api")
     app.include_router(users.router, prefix="/api")
     app.include_router(vendors.router, prefix="/api")
     app.include_router(districts.router, prefix="/api")
