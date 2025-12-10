@@ -107,7 +107,8 @@ function ChatAgent({ districtKey }) {
         district_key: districtKey,
       });
 
-      const res = await fetch(`${API_BASE_URL}/agents/analytics`, {
+      // 🔥 NEW ANALYTICS PIPELINE ENDPOINT (NLV → ER → Planner → Router → Logic → Render Model)
+      const res = await fetch(`${API_BASE_URL}/analytics/agent`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -134,10 +135,42 @@ function ChatAgent({ districtKey }) {
         );
       }
 
-      const safeHtml =
-        typeof data?.html === "string" && data.html.trim().length
-          ? data.html
-          : `<p>${(data?.text || "").replace(/</g, "&lt;")}</p>`;
+      // -----------------------------
+      // ⭐ NEW: rows table rendering
+      // -----------------------------
+      function renderRowsTable(rows) {
+        if (!Array.isArray(rows) || rows.length === 0) return "";
+        const headers = Object.keys(rows[0]);
+        const headerHtml = headers.map((h) => `<th>${h}</th>`).join("");
+        const rowsHtml = rows
+          .map((row) => {
+            const cells = headers
+              .map((h) => `<td>${String(row[h] ?? "")}</td>`)
+              .join("");
+            return `<tr>${cells}</tr>`;
+          })
+          .join("");
+        return `
+          <div class="table-wrapper">
+            <table class="analytics-table">
+              <thead><tr>${headerHtml}</tr></thead>
+              <tbody>${rowsHtml}</tbody>
+            </table>
+          </div>
+        `;
+      }
+
+      let combinedHtml = "";
+      if (data?.rows) {
+        combinedHtml += renderRowsTable(data.rows);
+      }
+      if (typeof data?.html === "string" && data.html.trim().length > 0) {
+        combinedHtml += data.html;
+      } else {
+        combinedHtml += `<p>${(data?.text || "").replace(/</g, "&lt;")}</p>`;
+      }
+
+      const safeHtml = combinedHtml;
       const timingHtml = formatTimingHtml(data?.timings);
 
       setMessages((prev) => {

@@ -53,7 +53,7 @@ export default function Analytics() {
         Ask questions using the AI Analytics Assistant to generate reports instantly.
       </p>
 
-      {/* Chat card */}
+      {/* Uses ChatAgent → now points to /api/analytics/agent after patch */}
       <div className="rounded-2xl border border-slate-200 bg-white shadow-sm max-w-[960px] mx-auto">
         <div className="border-b border-slate-100 px-4 py-3">
           <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">
