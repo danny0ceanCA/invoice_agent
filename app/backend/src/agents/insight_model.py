@@ -10,6 +10,7 @@ from openai import OpenAI
 
 from .ir import AnalyticsIR
 from .json_utils import _extract_json_object
+from .thin_ir_insights import reduce_ir_for_insights
 
 LOGGER = structlog.get_logger(__name__)
 
@@ -30,8 +31,13 @@ SCOPE & SAFETY
 INPUT
 - You will receive:
   {
-    "ir": { ...AnalyticsIR as JSON... }
+    "data": {
+        "numeric": {...},
+        "categories": {...},
+        "entities": {...}
+    }
   }
+Use these lists to infer trends and relationships.
 - The key field for insights is 'ir.rows', which may be:
     * null,
     * an empty list, or
@@ -74,7 +80,7 @@ def run_insight_model(
         {"role": "system", "content": system_prompt},
         {
             "role": "user",
-            "content": json.dumps({"ir": ir.model_dump()}, default=str),
+            "content": json.dumps({"data": reduce_ir_for_insights(ir)}, default=str),
         },
     ]
 
