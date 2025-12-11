@@ -63,8 +63,11 @@ export default function Analytics() {
             Ask natural-language questions about invoices, vendors, students, monthly totals, or spending.
           </p>
         </div>
-        <div className="px-4 py-4 flex-1 min-h-0 overflow-hidden">
-          <ChatAgent districtKey={districtKey} />
+        {/* Chat fills remaining space */}
+        <div className="px-4 py-4 flex-1 min-h-0 overflow-hidden flex flex-col">
+          <div className="flex-1 min-h-0 overflow-hidden">
+            <ChatAgent districtKey={districtKey} />
+          </div>
         </div>
       </div>
     </div>
