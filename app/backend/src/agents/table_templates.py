@@ -77,7 +77,53 @@ def _format_value(value: Any) -> str:
 
 
 def _is_numeric(value: Any) -> bool:
-    return _utils()._is_numeric(value)
+    """Return True for int/float but not bool."""
+
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+# Minimal schema registry for modes that currently leak redundant columns.
+# This is by *category* (router mode), not by every MV.
+SCHEMA_REGISTRY: dict[str, dict[str, List[str]]] = {
+    # Student roster – use mv_student_list but only expose student
+    "student_list": {
+        "columns": ["student"],
+    },
+    # Provider roster – use mv_clinician_list but only expose clinician
+    "clinician_list": {
+        "columns": ["clinician"],
+    },
+    # Top invoices report – hide internal IDs; show only key invoice info
+    "top_invoices": {
+        "columns": ["invoice_number", "invoice_date", "total_cost"],
+    },
+}
+
+
+def _filter_rows_for_mode(rows: list[dict[str, Any]], mode: str | None) -> list[dict[str, Any]]:
+    """
+    Apply minimal schema filtering for modes that should not show all MV columns.
+
+    This is category-based (router mode), not MV-based. It trims redundant columns
+    like district_key and ID fields for list/top-invoices style reports.
+    """
+    if not rows:
+        return rows
+
+    schema = SCHEMA_REGISTRY.get(mode or "")
+    if not schema:
+        return rows
+
+    cols = schema.get("columns") or []
+    if not cols:
+        return rows
+
+    filtered: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        filtered.append({col: row.get(col) for col in cols})
+    return filtered
 
 
 def _safe_rows(ir: AnalyticsIR) -> list[dict[str, Any]]:
@@ -385,9 +431,38 @@ def table_service_code_monthly(ir: AnalyticsIR) -> str:
 
 
 def table_generic(ir: AnalyticsIR) -> str:
+    """
+    Fallback table renderer for modes that don't yet have a dedicated template.
+
+    To avoid leaking internal MV columns (like district_key), we apply the
+    minimal schema registry for known modes (student_list, clinician_list,
+    top_invoices) before delegating to build_html_table.
+    """
     from .thin_ir_rendering import build_html_table
 
-    return build_html_table(ir)
+    mode = getattr(ir, "mode", None)
+    try:
+        # Filter rows according to schema if available
+        if ir.rows:
+            filtered_rows = _filter_rows_for_mode(list(ir.rows), mode)
+        else:
+            filtered_rows = ir.rows
+
+        # Build a shallow copy IR with filtered rows so build_html_table sees
+        # only the user-facing columns.
+        ir_copy = AnalyticsIR(
+            text=ir.text,
+            select=ir.select,
+            rows=filtered_rows,
+            html=ir.html,
+            entities=ir.entities,
+            rows_field_present=ir.rows_field_present,
+            mode=mode,
+        )
+    except Exception:
+        ir_copy = ir
+
+    return build_html_table(ir_copy)
 
 
 TEMPLATE_MAP: dict[str, Callable[[AnalyticsIR], str]] = {
@@ -396,6 +471,7 @@ TEMPLATE_MAP: dict[str, Callable[[AnalyticsIR], str]] = {
     "invoice_details": table_invoice_details,
     "district_monthly": table_district_monthly,
     "district_service_code_monthly": table_service_code_monthly,
+    # student_list, clinician_list, top_invoices use table_generic + schema registry
 }
 
 
