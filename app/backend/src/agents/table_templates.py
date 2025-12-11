@@ -115,6 +115,20 @@ def _format_month(value: Any) -> str:
     return text
 
 
+# -------- NEW: parse service_date into datetime --------
+def _parse_service_date(value: Any):
+    """Turn strings like '9/1/2025' or '2025-09-01' into datetime objects for sorting."""
+    if not value:
+        return datetime.max
+    text = str(value).strip()
+    for fmt in ("%m/%d/%Y", "%-m/%-d/%Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(text, fmt)
+        except Exception:
+            continue
+    return datetime.max
+
+
 def _numeric_value(value: Any) -> float | None:
     if _is_numeric(value):
         try:
@@ -254,6 +268,12 @@ def table_invoice_details(ir: AnalyticsIR) -> str:
     rows = _safe_rows(ir)
     if not rows:
         return ""
+
+    # Sort rows by parsed service_date for correct chronological ordering
+    rows = sorted(
+        rows,
+        key=lambda r: _parse_service_date(r.get("service_date"))
+    )
 
     headers = [
         "Invoice #",
