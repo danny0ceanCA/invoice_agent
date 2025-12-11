@@ -624,7 +624,62 @@ class Workflow:
         def _cache_and_return(payload: Mapping[str, Any]) -> AgentResponse:
             # router_decision will be populated later in the workflow; we only read it here.
             nonlocal router_decision
-            response = _finalise_response(payload, context)
+
+            render_payload: Mapping[str, Any] | None = None
+            ir: AnalyticsIR | None = None
+
+            if isinstance(payload, Mapping):
+                render_payload = dict(payload)
+
+            if not (isinstance(render_payload, Mapping) and render_payload.get("_rendered")):
+                ir = _payload_to_ir(payload, context.last_rows)
+                render_payload = ir.to_payload()
+
+                insights: list[str] = []
+                if ir.rows is not None:
+                    try:
+                        start_time = perf_counter()
+                        start = time.monotonic()
+                        insights_result = run_insight_model(
+                            ir=ir,
+                            client=agent.client,
+                            model=agent.insight_model,
+                            system_prompt=self.insight_system_prompt,
+                            temperature=agent.insight_temperature,
+                        )
+                        log_timing("Insight Model", start, time.monotonic())
+                        _record_stage_duration(context, "insight_model", start_time)
+                        insights = insights_result.get("insights") or []
+                    except Exception as exc:  # pragma: no cover - defensive
+                        LOGGER.warning("insight_model_failed", error=str(exc))
+
+                    if ir.rows is not None:
+                        try:
+                            start_time = perf_counter()
+                            start = time.monotonic()
+                            render_payload = run_rendering_model(
+                                user_query=context.query,
+                                ir=ir,
+                                insights=insights,
+                                client=agent.client,
+                                model=agent.render_model,
+                                system_prompt=self.rendering_system_prompt,
+                                temperature=agent.render_temperature,
+                            )
+                            log_timing("Rendering Model", start, time.monotonic())
+                            _record_stage_duration(context, "rendering_model", start_time)
+                        except Exception as exc:  # pragma: no cover - defensive
+                            LOGGER.warning("rendering_model_failed", error=str(exc))
+                            render_payload = ir.to_payload()
+            if isinstance(render_payload, dict):
+                render_payload.pop("_rendered", None)
+                if "rows" not in render_payload and ir and ir.rows is not None:
+                    render_payload["rows"] = ir.rows
+            else:
+                ir = ir or _payload_to_ir(payload, context.last_rows)
+                render_payload = ir.to_payload()
+
+            response = _finalise_response(render_payload, context)
 
             # Persist to Redis
             CACHE.set(cache_key, response.dict())
@@ -736,15 +791,18 @@ class Workflow:
                     entities=None,
                 )
                 start_time = perf_counter()
+                start = time.monotonic()
                 render_payload = run_rendering_model(
-                user_query=context.query,
-                ir=safe_ir,
-                insights=[],
-                client=agent.client,
-                model=agent.render_model,
-                system_prompt=self.rendering_system_prompt,
-                temperature=agent.render_temperature,
+                    user_query=context.query,
+                    ir=safe_ir,
+                    insights=[],
+                    client=agent.client,
+                    model=agent.render_model,
+                    system_prompt=self.rendering_system_prompt,
+                    temperature=agent.render_temperature,
                 )
+                render_payload["_rendered"] = True
+                log_timing("Rendering Model", start, time.monotonic())
                 _record_stage_duration(context, "rendering_model", start_time)
                 return _cache_and_return(render_payload)
 
@@ -762,6 +820,7 @@ class Workflow:
             insights = insight_result.get("insights") or []
 
             start_time = perf_counter()
+            start = time.monotonic()
             render_payload = run_rendering_model(
                 user_query=context.query,
                 ir=effective_ir,
@@ -771,6 +830,8 @@ class Workflow:
                 system_prompt=self.rendering_system_prompt,
                 temperature=agent.render_temperature,
             )
+            render_payload["_rendered"] = True
+            log_timing("Rendering Model", start, time.monotonic())
             _record_stage_duration(context, "rendering_model", start_time)
             return _cache_and_return(render_payload)
 
@@ -846,15 +907,18 @@ class Workflow:
                     entities=None,
                 )
                 start_time = perf_counter()
+                start = time.monotonic()
                 render_payload = run_rendering_model(
-                user_query=context.query,
-                ir=safe_ir,
-                insights=[],
-                client=agent.client,
-                model=agent.render_model,
-                system_prompt=self.rendering_system_prompt,
-                temperature=agent.render_temperature,
+                    user_query=context.query,
+                    ir=safe_ir,
+                    insights=[],
+                    client=agent.client,
+                    model=agent.render_model,
+                    system_prompt=self.rendering_system_prompt,
+                    temperature=agent.render_temperature,
                 )
+                render_payload["_rendered"] = True
+                log_timing("Rendering Model", start, time.monotonic())
                 _record_stage_duration(context, "rendering_model", start_time)
                 return _cache_and_return(render_payload)
 
@@ -872,6 +936,7 @@ class Workflow:
             insights = insight_result.get("insights") or []
 
             start_time = perf_counter()
+            start = time.monotonic()
             render_payload = run_rendering_model(
                 user_query=context.query,
                 ir=effective_ir,
@@ -881,6 +946,8 @@ class Workflow:
                 system_prompt=self.rendering_system_prompt,
                 temperature=agent.render_temperature,
             )
+            render_payload["_rendered"] = True
+            log_timing("Rendering Model", start, time.monotonic())
             _record_stage_duration(context, "rendering_model", start_time)
             return _cache_and_return(render_payload)
 
@@ -1223,15 +1290,20 @@ class Workflow:
                     html=None,
                     entities=None,
                 )
+                start_time = perf_counter()
+                start = time.monotonic()
                 render_payload = run_rendering_model(
-                user_query=context.query,
-                ir=safe_ir,
-                insights=[],
-                client=agent.client,
-                model=agent.render_model,
-                system_prompt=self.rendering_system_prompt,
-                temperature=agent.render_temperature,
+                    user_query=context.query,
+                    ir=safe_ir,
+                    insights=[],
+                    client=agent.client,
+                    model=agent.render_model,
+                    system_prompt=self.rendering_system_prompt,
+                    temperature=agent.render_temperature,
                 )
+                render_payload["_rendered"] = True
+                log_timing("Rendering Model", start, time.monotonic())
+                _record_stage_duration(context, "rendering_model", start_time)
                 return _cache_and_return(render_payload)
 
             start_time = perf_counter()
@@ -1246,6 +1318,7 @@ class Workflow:
             insights = insight_result.get("insights") or []
 
             start_time = perf_counter()
+            start = time.monotonic()
             render_payload = run_rendering_model(
                 user_query=context.query,
                 ir=effective_ir,
@@ -1255,6 +1328,8 @@ class Workflow:
                 system_prompt=self.rendering_system_prompt,
                 temperature=agent.render_temperature,
             )
+            render_payload["_rendered"] = True
+            log_timing("Rendering Model", start, time.monotonic())
             _record_stage_duration(context, "rendering_model", start_time)
             return _cache_and_return(render_payload)
 
