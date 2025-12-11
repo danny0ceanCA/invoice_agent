@@ -54,7 +54,7 @@ export default function Analytics() {
       </p>
 
       {/* Chat card */}
-      <div className="rounded-2xl border border-slate-200 bg-white shadow-sm max-w-[960px] mx-auto">
+      <div className="rounded-2xl border border-slate-200 bg-white shadow-sm max-w-[960px] mx-auto flex flex-col h-[700px] max-h-[700px] min-h-0 overflow-hidden">
         <div className="border-b border-slate-100 px-4 py-3">
           <p className="text-xs font-semibold uppercase tracking-widest text-amber-500">
             AI Analytics Assistant
@@ -63,7 +63,7 @@ export default function Analytics() {
             Ask natural-language questions about invoices, vendors, students, monthly totals, or spending.
           </p>
         </div>
-        <div className="px-4 py-4">
+        <div className="px-4 py-4 flex-1 min-h-0 overflow-hidden">
           <ChatAgent districtKey={districtKey} />
         </div>
       </div>
