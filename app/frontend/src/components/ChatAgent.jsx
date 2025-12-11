@@ -318,27 +318,44 @@ function ChatAgent({ districtKey }) {
 
       {/* Input bar with Home button */}
       <div className="border-t border-slate-200 p-3 bg-white min-w-0">
-        <div className="flex gap-3 items-center">
-          <form onSubmit={handleSend} className="flex gap-3 flex-1">
+        <div className="flex items-center gap-3">
+
+          {/* INPUT FIELD */}
+          <form onSubmit={handleSend} className="flex flex-1 items-center gap-3">
             <input
               type="text"
-              className="flex-1 min-w-0 border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-amber-400"
+              className="
+                flex-1 min-w-0 border border-slate-300 rounded-lg px-4 py-3 text-[0.95rem]
+                shadow-sm bg-white placeholder-slate-400
+                focus:ring-2 focus:ring-amber-400 focus:outline-none
+              "
               placeholder="Ask a question about invoices…"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               disabled={sending}
             />
+
+            {/* SEND BUTTON */}
             <button
               type="submit"
               disabled={sending}
-              className="bg-amber-500 text-white px-4 py-2 rounded-lg text-sm font-semibold shadow hover:bg-amber-600 disabled:opacity-50"
+              className="
+                bg-amber-500 text-white px-5 py-3 rounded-lg text-[0.85rem] font-semibold
+                shadow-sm hover:bg-amber-600 transition disabled:opacity-50
+                whitespace-nowrap
+              "
             >
               {sending ? "…" : "Send"}
             </button>
           </form>
+
+          {/* HOME BUTTON */}
           <Link
             to="/"
-            className="inline-flex items-center rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+            className="
+              inline-flex items-center rounded-lg border border-slate-300 px-4 py-3
+              text-[0.85rem] font-medium text-slate-700 shadow-sm hover:bg-slate-50
+            "
           >
             Home
           </Link>
