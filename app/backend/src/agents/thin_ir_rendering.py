@@ -158,8 +158,8 @@ def build_html_table(ir: AnalyticsIR) -> str:
     columns: List[str] = list(rows[0].keys())
 
     # Detect numeric columns and pre-compute totals / maxima
-    # NEW: restrict sparkline features ONLY to these columns
-    SPARKLINE_COLUMNS = {"total_cost", "total_hours"}
+    # NEW: restrict sparklines ONLY to total_cost (cleaner UX)
+    SPARKLINE_COLUMNS = {"total_cost"}
 
 
     numeric_columns = set()
@@ -232,8 +232,7 @@ def build_html_table(ir: AnalyticsIR) -> str:
             cell_content = _escape_html(display)
 
             # ================================
-            # NEW LOGIC: Sparklines ONLY for
-            # total_cost and total_hours
+            # NEW LOGIC: Sparklines ONLY for total_cost
             # ================================
             if col in SPARKLINE_COLUMNS and _is_numeric(raw):
                 max_value = col_max_values.get(col, 0.0)
