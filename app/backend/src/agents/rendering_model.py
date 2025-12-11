@@ -16,6 +16,7 @@ from openai import OpenAI
 
 from .ir import AnalyticsEntities, AnalyticsIR
 from .json_utils import _extract_json_object
+from .thin_ir_rendering import reduce_ir_for_rendering, build_html_table
 
 LOGGER = structlog.get_logger(__name__)
 
@@ -30,11 +31,18 @@ def build_rendering_system_prompt() -> str:
     return """
 You are the user-facing, conversational voice for an analytics agent. You receive:
 - The original user query.
-- The structured analytics IR as JSON (source of truth for data, entities, and rows).
-  IR.rows is the definitive table; use it directly and do not regenerate or invent rows.
-- You may also receive a separate 'insights' list (plain strings) from an upstream model.
-  When provided, you should use them to populate the <ul class="insights-list"> in HTML and
-  optionally reference the most important insight in the 'text' summary.
+- A reduced analytics summary object (thin IR) that describes:
+  • what columns are present,
+  • how many rows there are,
+  • simple numeric summaries (totals/min/max),
+  • entity context (students/providers/vendors),
+  • upstream insights (plain strings).
+- You do NOT see full row-level data. The system renders the actual <table> HTML separately.
+
+You also receive a special instruction:
+- When you generate HTML, you MUST insert the exact placeholder token {{TABLE_HTML}}
+  exactly once where the data table should appear. The system will replace this token
+  with a pre-rendered <table> built from IR.rows.
 
 You produce a JSON object: {"text": str, "html": str|null}. Nothing else.
 
@@ -47,21 +55,20 @@ Tone and behavior
 text requirements
 - 1–3 sentences, plain English only (no HTML tags or markdown).
 - Highlight the most important insights (totals, key months, top providers/students). Do not restate every table row.
-- If IR indicates missing info (e.g., needs student, vendor, or date range), politely ask for that clarification.
+- If the thin IR indicates missing info (e.g., no rows, no numeric summaries, or ambiguous scope), politely ask for that clarification.
 - When provider breakdowns or invoice detail rows are present, name the month or scope explicitly so follow-up questions like "another month" or "show line items" stay natural.
 
 html requirements
 - All visual structure lives here; text stays plain.
-- Start with summary cards (2–4) when numeric metrics are available: use
+- Start with summary cards (2–4) when numeric metrics are available from the thin IR: use
   <div class="summary-cards"> with child <div class="card"> blocks containing
   <div class="label"> and <div class="value">.
-- Always include the data table when IR.rows is non-empty using:
-  <div class="table-wrapper"><table class="analytics-table"> ... </table></div>.
-  Use <th> headers that match IR columns; apply classes like "amount-col" for money, "hours-col" for hours, and "total-row" for totals.
+- Always include the data table by placing the {{TABLE_HTML}} placeholder where the table
+  should appear. Do NOT attempt to regenerate table rows or headers yourself.
 - Add an insights list near the end when appropriate using <ul class="insights-list"> with 2–4 bullets focused on trends, concentration, or anomalies.
 - Optional bar charts only when data supports rankings/time trends. Use:
   <div class="bar-chart"> with rows of <div class="bar-row">, label spans, bar divs with width percentages, and value spans. Keep chart consistent with IR rows.
-- For student-by-month style questions, you may render a pivot table (students as rows, months as columns, plus totals) while keeping IR.rows as the data source.
+- For student-by-month style questions, you may conceptually describe a pivot-style layout, but the actual HTML table will be injected via {{TABLE_HTML}}.
 - Do not add sensitive pay rate columns (rate, hourly_rate, pay_rate) even if present; focus on cost, hours, dates, and entities.
 - If no data/needs clarification, html can be empty or a brief note; never expose IR JSON.
 
@@ -131,11 +138,14 @@ def run_rendering_model(
             "content": (
                 "User query:\n"
                 f"{user_query}\n\n"
-                "Structured IR:\n"
-                f"{json.dumps(ir.model_dump(), default=str)}\n\n"
-                "Insights (may be empty):\n"
-                f"{json.dumps(insights or [], default=str)}\n\n"
-                "Your job: Convert IR and insights into a user-facing explanation. "
+                "Thin analytics summary (JSON):\n"
+                f"{json.dumps(reduce_ir_for_rendering(ir, insights), default=str)}\n\n"
+                "Rendering instructions:\n"
+                "- You do NOT see the full table rows.\n"
+                "- The system will inject the actual <table> HTML separately.\n"
+                "- When you build HTML, insert the exact token {{TABLE_HTML}} once where the data table should go.\n"
+                "- Use the thin summary and insights to decide what to highlight in the text and optional summary cards.\n\n"
+                "Your job: Convert the thin IR and upstream insights into a user-facing explanation. "
                 'Return ONLY a JSON object of the form {"text": str, "html": str|null}.'
             ),
         },
@@ -180,16 +190,41 @@ def run_rendering_model(
             LOGGER.warning("llm_missing_content", error=str(exc))
             raise
 
-        parsed = _extract_json_object(assistant_content or "{}")
+        parsed = _extract_json_object(assistant_content or "{}") or {}
+
+        # Extract text/html from model output with safe defaults.
+        text_value = str(parsed.get("text", "")).strip()
+        html_value = parsed.get("html")
+
+        table_html = build_html_table(ir)
+        final_html: str | None
+
+        if not table_html:
+            # No rows → no table; trust model's html or None.
+            final_html = html_value if isinstance(html_value, str) else None
+        else:
+            placeholder = "{{TABLE_HTML}}"
+            if isinstance(html_value, str) and html_value:
+                if placeholder in html_value:
+                    final_html = html_value.replace(placeholder, table_html)
+                else:
+                    # If the model forgot the placeholder, append table at the end
+                    # so the UI still shows data while keeping the LLM payload small.
+                    final_html = html_value + table_html
+            else:
+                # No html from the model: just return the table.
+                final_html = table_html
+
         return {
-            "text": str(parsed.get("text", "")).strip(),
-            "html": parsed.get("html"),
+            "text": text_value,
+            "html": final_html,
             "rows": ir.rows,
         }
     except Exception as exc:
         LOGGER.warning("rendering_model_failed", error=str(exc))
+        table_html = build_html_table(ir)
         return {
             "text": "Here is an updated summary.",
-            "html": None,
+            "html": table_html or None,
             "rows": ir.rows,
         }
