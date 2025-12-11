@@ -18,6 +18,7 @@ from sqlalchemy.engine import Engine
 from app.backend.src.core.config import get_settings
 from app.backend.src.core.security import get_current_user
 from app.backend.src.models import User
+from app.backend.src.agents.rendering_model import run_rendering_model as run_render_model
 
 LOGGER = structlog.get_logger(__name__)
 
@@ -522,6 +523,13 @@ async def run_agent(request: dict, user: User = Depends(get_current_user)) -> di
         ) from exc
 
     final_output = _extract_final_output(response)
+    # OPTIONAL: run render_model if available
+    try:
+        enhanced = run_render_model(final_output)
+        if isinstance(enhanced, dict):
+            final_output = enhanced
+    except Exception as e:
+        LOGGER.warning("render_model_failed", error=str(e))
     text, html = _format_final_output(final_output)
 
     response_payload: dict[str, Any] = {"text": text, "html": html}
