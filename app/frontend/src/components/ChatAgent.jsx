@@ -328,6 +328,7 @@ function ChatAgent({ districtKey }) {
               onChange={(e) => setInput(e.target.value)}
               disabled={sending}
             />
+
             <button
               type="submit"
               disabled={sending}
@@ -336,6 +337,7 @@ function ChatAgent({ districtKey }) {
               {sending ? "…" : "Send"}
             </button>
           </form>
+
           <Link
             to="/"
             className="inline-flex items-center rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
