@@ -90,6 +90,44 @@ def _escape_html(value: Any) -> str:
     )
 
 
+# ============================
+# Formatting Utilities
+# ============================
+
+def _format_value(value: Any) -> str:
+    """Format numeric values to 2 decimals; leave others alone."""
+    if isinstance(value, float):
+        return f"{value:,.2f}"
+    return str(value)
+
+
+def _format_date(value: Any) -> str:
+    """Convert timestamp or datetime string to YYYY-MM-DD."""
+    if not value:
+        return ""
+    text = str(value)
+    # Remove time if present
+    if "T" in text:
+        return text.split("T")[0]
+    return text.split(" ")[0]
+
+
+def _class_for_column(col: str) -> str:
+    """Return semantic class name for CSS based on column content."""
+    col_lower = col.lower()
+    if any(k in col_lower for k in ["cost", "amount", "spend"]):
+        return "amount-col"
+    if "hour" in col_lower:
+        return "hours-col"
+    if "date" in col_lower:
+        return "date-col"
+    return ""
+
+
+# ============================
+# HTML TABLE BUILDER
+# ============================
+
 def build_html_table(ir: AnalyticsIR) -> str:
     """
     Build a deterministic HTML table from IR.rows.
@@ -104,18 +142,39 @@ def build_html_table(ir: AnalyticsIR) -> str:
 
     columns: List[str] = list(rows[0].keys())
 
-    # Header row
-    header_cells = "".join(f"<th>{_escape_html(col)}</th>" for col in columns)
+    # ---------- HEADER ----------
+    header_cells = "".join(
+        f"<th>{_escape_html(col.replace('_', ' ').title())}</th>"
+        for col in columns
+    )
     thead = f"<thead><tr>{header_cells}</tr></thead>"
 
-    # Body rows
+    # ---------- BODY ----------
     body_rows: List[str] = []
     for row in rows:
         if not isinstance(row, dict):
             continue
-        cells = "".join(
-            f"<td>{_escape_html(row.get(col, ''))}</td>" for col in columns
-        )
+        cell_html_list = []
+        for col in columns:
+            raw = row.get(col, "")
+            display = raw
+
+            # Format numeric
+            if isinstance(raw, float):
+                display = _format_value(raw)
+
+            # Format dates
+            if "date" in col.lower():
+                display = _format_date(raw)
+
+            css_class = _class_for_column(col)
+            class_attr = f' class="{css_class}"' if css_class else ""
+
+            cell_html_list.append(
+                f"<td{class_attr}>{_escape_html(display)}</td>"
+            )
+
+        cells = "".join(cell_html_list)
         body_rows.append(f"<tr>{cells}</tr>")
 
     tbody = f"<tbody>{''.join(body_rows)}</tbody>"
