@@ -204,9 +204,7 @@ function ChatAgent({ districtKey }) {
                 md:max-w-[65%]
                 lg:max-w-[55%]
                 xl:max-w-[50%]
-                px-4 py-3
                 rounded-2xl
-                text-sm
                 overflow-hidden
                 break-words
                 [overflow-wrap:anywhere]
@@ -214,8 +212,22 @@ function ChatAgent({ districtKey }) {
                 min-w-0
                 ${
                   m.role === "user"
-                    ? "bg-amber-500 text-white ml-auto overflow-hidden"
-                    : "bg-slate-100 text-slate-800 mr-auto shadow"
+                    ? `
+                        bg-amber-500 text-white ml-auto
+                        shadow-lg shadow-amber-300/30
+                        rounded-2xl
+                        px-6 py-4
+                        max-w-[85%]
+                        text-[1rem]
+                        leading-relaxed
+                      `
+                    : `
+                        bg-slate-100 text-slate-800 mr-auto
+                        shadow-md
+                        rounded-2xl
+                        px-6 py-4
+                        max-w-[85%]
+                      `
                 }
               `}
             >
