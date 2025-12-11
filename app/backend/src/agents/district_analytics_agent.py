@@ -633,6 +633,15 @@ class Workflow:
 
             if not (isinstance(render_payload, Mapping) and render_payload.get("_rendered")):
                 ir = _payload_to_ir(payload, context.last_rows)
+
+                # Attach router mode to the IR so templates always receive a stable mode
+                try:
+                    if router_decision:
+                        mode = getattr(router_decision, "mode", None)
+                        if mode:
+                            setattr(ir, "mode", mode)
+                except Exception as exc:
+                    LOGGER.warning("attach_mode_to_ir_failed", error=str(exc))
                 render_payload = ir.to_payload()
 
                 insights: list[str] = []

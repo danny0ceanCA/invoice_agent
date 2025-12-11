@@ -7,6 +7,52 @@ from typing import Any, Callable, Iterable, List
 
 from .ir import AnalyticsIR
 
+# Canonical mode aliases: normalize LLM/router naming drift
+MODE_ALIASES: dict[str, str] = {
+    # Student monthly variations
+    "student_monthly": "student_monthly",
+    "student_monthly_spend": "student_monthly",
+    "student_monthly_hours": "student_monthly",
+    "student_monthly_cost": "student_monthly",
+
+    # Provider monthly variations
+    "provider_monthly": "provider_monthly",
+    "provider_monthly_hours": "provider_monthly",
+    "provider_monthly_spend": "provider_monthly",
+
+    # District monthly variations
+    "district_monthly": "district_monthly",
+    "district_monthly_spend": "district_monthly",
+    "district_monthly_hours": "district_monthly",
+
+    # Student → provider breakdown variations
+    "student_provider_breakdown": "student_provider_breakdown",
+    "student_provider_year": "student_provider_breakdown",
+
+    # Invoice detail variations
+    "invoice_details": "invoice_details",
+    "student_invoices": "invoice_details",
+
+    # Service code variations
+    "district_service_code_monthly": "district_service_code_monthly",
+    "student_service_code_monthly": "student_service_code_monthly",
+    "provider_service_code_monthly": "provider_service_code_monthly",
+
+    # Lists
+    "student_list": "student_list",
+    "clinician_list": "clinician_list",
+
+    # Other modes retained for completeness
+    "top_invoices": "top_invoices",
+    "provider_caseload_monthly": "provider_caseload_monthly",
+    "clinician_student_breakdown": "clinician_student_breakdown",
+    "student_daily": "student_daily",
+    "provider_daily": "provider_daily",
+    "district_daily": "district_daily",
+    "student_year_summary": "student_year_summary",
+    "student_service_intensity_monthly": "student_service_intensity_monthly",
+}
+
 
 def _utils():
     from . import thin_ir_rendering as tir
@@ -338,7 +384,14 @@ def select_table_template(ir: AnalyticsIR, mode: str | None) -> str:
     Return HTML string for the table based on router mode.
     """
 
-    template = TEMPLATE_MAP.get(mode) if mode else None
+    # Normalize mode using MODE_ALIASES
+    canonical_mode = MODE_ALIASES.get(mode, mode) if mode else None
+
+    # Store canonical mode back on IR for consistent downstream access
+    if canonical_mode:
+        setattr(ir, "mode", canonical_mode)
+
+    template = TEMPLATE_MAP.get(canonical_mode) if canonical_mode else None
     if template is None:
         return table_generic(ir)
 

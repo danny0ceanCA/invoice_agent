@@ -200,14 +200,8 @@ def run_rendering_model(
         text_value = str(parsed.get("text", "")).strip()
         html_value = parsed.get("html")
 
+        # Router mode should already be attached via district_analytics_agent
         router_mode_from_logic_if_available = getattr(ir, "mode", None)
-        if router_mode_from_logic_if_available is None:
-            select_field = getattr(ir, "select", None)
-            if isinstance(select_field, list):
-                for item in select_field:
-                    if isinstance(item, dict) and item.get("mode"):
-                        router_mode_from_logic_if_available = item.get("mode")
-                        break
 
         # attach router mode for templates
         setattr(ir, "mode", router_mode_from_logic_if_available)
