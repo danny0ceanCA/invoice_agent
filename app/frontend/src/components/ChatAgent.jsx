@@ -197,98 +197,90 @@ function ChatAgent({ districtKey }) {
           return (
             <div
               key={i}
-              className={`relative flex items-end gap-3 chat-fade ${
-                m.role === "user" ? "justify-end" : "justify-start"
-              }`}
+              className={`
+                block
+                w-full
+                sm:max-w-[75%]
+                md:max-w-[65%]
+                lg:max-w-[55%]
+                xl:max-w-[50%]
+                rounded-2xl
+                overflow-hidden
+                break-words
+                [overflow-wrap:anywhere]
+                whitespace-normal
+                min-w-0
+                ${
+                  m.role === "user"
+                    ? `
+                        bg-amber-500 text-white ml-auto
+                        shadow-lg shadow-amber-300/30
+                        rounded-2xl
+                        px-6 py-4
+                        max-w-[85%]
+                        text-[1rem]
+                        leading-relaxed
+                      `
+                    : `
+                        bg-slate-100 text-slate-800 mr-auto
+                        shadow-md
+                        rounded-2xl
+                        px-6 py-4
+                        max-w-[85%]
+                      `
+                }
+              `}
             >
-              {m.role !== "user" && (
-                <div className="w-9 h-9 rounded-full bg-slate-200 flex items-center justify-center shadow">
-                  🤖
-                </div>
-              )}
-
-              <div
-                className={`
-                  relative max-w-[85%] px-6 py-4 rounded-2xl leading-relaxed text-[1rem] shadow-md
-                  whitespace-pre-wrap break-words [overflow-wrap:anywhere]
-                  ${
-                    m.role === "user"
-                      ? "bg-amber-500 text-white shadow-amber-300/30 ml-auto"
-                      : "bg-slate-100 text-slate-800 mr-auto"
-                  }
-                `}
-              >
-                {m.role === "user" ? (
-                  <div className="bubble-tail-user"></div>
-                ) : (
-                  <div className="bubble-tail-ai"></div>
-                )}
-
-                {m.html ? (
-                  <div
-                    className="
-                    max-h-80
-                    w-full
-                    max-w-full
-                    overflow-y-auto
-                    overflow-x-auto
-                    break-words
-                    [overflow-wrap:anywhere]
-                    whitespace-normal
-                    prose
-                    prose-sm
-                    prose-ul:pl-5
-                    prose-li:break-words
-                    [&_li]:break-words
-                    [&_ul]:list-disc
-                    [&_ol]:list-decimal
-                    [&_p]:break-words
-                    [&_p]:[overflow-wrap:anywhere]
-                    [&_span]:break-words
-                    [&_span]:[overflow-wrap:anywhere]
-                    [&_a]:break-words
-                    [&_a]:[overflow-wrap:anywhere]
-                    table-auto
-                    prose-table:table-fixed
-                    [&_table]:block
-                    [&_table]:max-w-full
-                    [&_table]:overflow-y-auto
-                    prose-th:break-words
-                    prose-td:break-words
-                    prose-td:whitespace-normal
-                    prose-pre:whitespace-pre-wrap
-                    prose-pre:break-words
-                    prose-pre:overflow-auto
-                    prose-img:max-w-full
-                    prose-img:h-auto
-                    [&_*]:max-w-full
-                    [&_table]:border-collapse
-                    [&_th]:text-left
-                    [&_th]:align-top
-                    [&_td]:align-top
-                    max-w-full
-                  "
-                    dangerouslySetInnerHTML={{ __html: m.content }}
-                  />
-                ) : (
-                  <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
-                    {m.content}
-                  </p>
-                )}
-
+              {m.html ? (
                 <div
-                  className={`text-xs pt-1 text-right ${
-                    m.role === "user" ? "text-white/70" : "text-slate-400"
-                  }`}
-                >
-                  {new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
-                </div>
-              </div>
-
-              {m.role === "user" && (
-                <div className="w-9 h-9 rounded-full bg-amber-300 flex items-center justify-center shadow">
-                  😊
-                </div>
+                  className="
+                  max-h-80
+                  w-full
+                  max-w-full
+                  overflow-y-auto
+                  overflow-x-auto
+                  break-words
+                  [overflow-wrap:anywhere]
+                  whitespace-normal
+                  prose
+                  prose-sm
+                  prose-ul:pl-5
+                  prose-li:break-words
+                  [&_li]:break-words
+                  [&_ul]:list-disc
+                  [&_ol]:list-decimal
+                  [&_p]:break-words
+                  [&_p]:[overflow-wrap:anywhere]
+                  [&_span]:break-words
+                  [&_span]:[overflow-wrap:anywhere]
+                  [&_a]:break-words
+                  [&_a]:[overflow-wrap:anywhere]
+                  table-auto
+                  prose-table:table-fixed
+                  [&_table]:block
+                  [&_table]:max-w-full
+                  [&_table]:overflow-y-auto
+                  prose-th:break-words
+                  prose-td:break-words
+                  prose-td:whitespace-normal
+                  prose-pre:whitespace-pre-wrap
+                  prose-pre:break-words
+                  prose-pre:overflow-auto
+                  prose-img:max-w-full
+                  prose-img:h-auto
+                  [&_*]:max-w-full
+                  [&_table]:border-collapse
+                  [&_th]:text-left
+                  [&_th]:align-top
+                  [&_td]:align-top
+                  max-w-full
+                "
+                dangerouslySetInnerHTML={{ __html: m.content }}
+                />
+              ) : (
+                <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+                  {m.content}
+                </p>
               )}
             </div>
           );
@@ -338,13 +330,5 @@ function ChatAgent({ districtKey }) {
     </div>
   );
 }
-
-export const TypingIndicator = () => (
-  <div className="typing-indicator ml-2">
-    <div className="dot"></div>
-    <div className="dot"></div>
-    <div className="dot"></div>
-  </div>
-);
 
 export default React.memo(ChatAgent);
