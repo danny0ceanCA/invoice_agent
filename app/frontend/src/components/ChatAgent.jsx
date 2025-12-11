@@ -275,13 +275,26 @@ function ChatAgent({ districtKey }) {
                   [&_td]:align-top
                   max-w-full
                 "
-                dangerouslySetInnerHTML={{ __html: m.content }}
+                  dangerouslySetInnerHTML={{ __html: m.content }}
                 />
               ) : (
-                <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+                <p
+                  className={`
+                    whitespace-pre-wrap break-words [overflow-wrap:anywhere]
+                    ${m.role === "user" ? "font-semibold" : ""}
+                  `}
+                >
                   {m.content}
                 </p>
               )}
+              <div
+                className={`
+                  text-xs pt-1 text-right opacity-70
+                  ${m.role === "user" ? "text-white font-semibold" : "text-slate-500"}
+                `}
+              >
+                {new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+              </div>
             </div>
           );
         })}
