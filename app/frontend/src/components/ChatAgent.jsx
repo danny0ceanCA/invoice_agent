@@ -180,7 +180,7 @@ function ChatAgent({ districtKey }) {
   }
 
   return (
-    <div className="w-full flex flex-col bg-white h-[600px] max-h-[600px] overflow-hidden">
+    <div className="w-full flex flex-col bg-white flex-1 min-h-0 overflow-hidden">
       {/* Scrollable chat area */}
       <div
         ref={scrollRef}
