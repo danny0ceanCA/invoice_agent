@@ -28,8 +28,7 @@ def prefetch_analytics(query: str, context: dict[str, Any] | None = None, queue_
     try:
         run_analytics_agent(
             query=query,
-            context=context,
-            district_key=context.get("district_key"),
+            user_context=context,
         )
         LOGGER.info(
             "prefetch_analytics_completed",
