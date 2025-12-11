@@ -16,7 +16,11 @@ from openai import OpenAI
 
 from .ir import AnalyticsEntities, AnalyticsIR
 from .json_utils import _extract_json_object
-from .thin_ir_rendering import reduce_ir_for_rendering, build_html_table
+from .thin_ir_rendering import (
+    reduce_ir_for_rendering,
+    build_html_table,
+    select_table_template,
+)
 
 LOGGER = structlog.get_logger(__name__)
 
@@ -196,7 +200,19 @@ def run_rendering_model(
         text_value = str(parsed.get("text", "")).strip()
         html_value = parsed.get("html")
 
-        table_html = build_html_table(ir)
+        router_mode_from_logic_if_available = getattr(ir, "mode", None)
+        if router_mode_from_logic_if_available is None:
+            select_field = getattr(ir, "select", None)
+            if isinstance(select_field, list):
+                for item in select_field:
+                    if isinstance(item, dict) and item.get("mode"):
+                        router_mode_from_logic_if_available = item.get("mode")
+                        break
+
+        # attach router mode for templates
+        setattr(ir, "mode", router_mode_from_logic_if_available)
+
+        table_html = select_table_template(ir, getattr(ir, "mode", None))
         final_html: str | None
 
         if not table_html:

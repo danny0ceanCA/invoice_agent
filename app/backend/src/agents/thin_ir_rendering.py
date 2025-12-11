@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Any, Dict, List
 
 from .ir import AnalyticsIR
+from .table_templates import select_table_template
 
 
 def _extract_entities(ir: AnalyticsIR) -> Dict[str, List[str]]:
