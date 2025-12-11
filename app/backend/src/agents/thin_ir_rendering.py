@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Dict, List
 
 from .ir import AnalyticsIR
@@ -105,11 +106,25 @@ def _format_date(value: Any) -> str:
     """Convert timestamp or datetime string to YYYY-MM-DD."""
     if not value:
         return ""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        try:
+            ts_value = float(value)
+            if ts_value > 1e12:
+                ts_value = ts_value / 1000
+            return datetime.utcfromtimestamp(ts_value).strftime("%Y-%m-%d")
+        except (OSError, ValueError, OverflowError):
+            pass
     text = str(value)
     # Remove time if present
     if "T" in text:
         return text.split("T")[0]
     return text.split(" ")[0]
+
+
+def _is_numeric(value: Any) -> bool:
+    """Return True for int/float but not bool."""
+
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 def _class_for_column(col: str) -> str:
@@ -142,6 +157,22 @@ def build_html_table(ir: AnalyticsIR) -> str:
 
     columns: List[str] = list(rows[0].keys())
 
+    # Detect numeric columns and pre-compute totals / maxima
+    numeric_columns = set()
+    col_totals: Dict[str, float] = {}
+    col_max_values: Dict[str, float] = {}
+
+    for col in columns:
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            raw_value = row.get(col)
+            if _is_numeric(raw_value):
+                numeric_columns.add(col)
+                col_totals.setdefault(col, 0.0)
+                col_max_values.setdefault(col, 0.0)
+                break
+
     # ---------- HEADER ----------
     header_cells = "".join(
         f"<th>{_escape_html(col.replace('_', ' ').title())}</th>"
@@ -158,6 +189,7 @@ def build_html_table(ir: AnalyticsIR) -> str:
         for col in columns:
             raw = row.get(col, "")
             display = raw
+            classes = []
 
             # Format numeric
             if isinstance(raw, float):
@@ -167,15 +199,79 @@ def build_html_table(ir: AnalyticsIR) -> str:
             if "date" in col.lower():
                 display = _format_date(raw)
 
-            css_class = _class_for_column(col)
-            class_attr = f' class="{css_class}"' if css_class else ""
+            # Track totals and maxima
+            if col in numeric_columns and _is_numeric(raw):
+                numeric_value = float(raw)
+                col_totals[col] = col_totals.get(col, 0.0) + numeric_value
+                current_max = col_max_values.get(col, 0.0)
+                col_max_values[col] = max(current_max, abs(numeric_value))
 
-            cell_html_list.append(
-                f"<td{class_attr}>{_escape_html(display)}</td>"
-            )
+            base_class = _class_for_column(col)
+            if base_class:
+                classes.append(base_class)
+
+            if col in numeric_columns:
+                classes.append("numeric-col")
+
+            # Cost color coding
+            if base_class == "amount-col" and _is_numeric(raw):
+                numeric_value = float(raw)
+                if numeric_value > 7000:
+                    classes.append("high-cost")
+                elif numeric_value > 4000:
+                    classes.append("med-cost")
+                else:
+                    classes.append("low-cost")
+
+            class_attr = f' class="{" ".join(classes)}"' if classes else ""
+
+            cell_content = _escape_html(display)
+
+            if col in numeric_columns:
+                max_value = col_max_values.get(col, 0.0)
+                percentage = 0.0
+                if max_value > 0 and _is_numeric(raw):
+                    percentage = min(100.0, abs(float(raw)) / max_value * 100)
+                bar_html = (
+                    f'<div class="bar-bg"><div class="bar-fill" style="width: {percentage:.0f}%"></div></div>'
+                )
+                cell_content = (
+                    f'<div class="bar-wrapper">{bar_html}'
+                    f'<span class="bar-value">{_escape_html(display)}</span></div>'
+                )
+
+            cell_html_list.append(f"<td{class_attr}>{cell_content}</td>")
 
         cells = "".join(cell_html_list)
         body_rows.append(f"<tr>{cells}</tr>")
+
+    # ---------- TOTALS ROW ----------
+    if numeric_columns:
+        total_cells: List[str] = []
+        for idx, col in enumerate(columns):
+            classes = []
+            base_class = _class_for_column(col)
+            if base_class:
+                classes.append(base_class)
+            if col in numeric_columns:
+                classes.append("numeric-col")
+
+            class_attr = f' class="{" ".join(classes)}"' if classes else ""
+
+            if idx == 0:
+                total_cells.append(f"<td{class_attr}>Total</td>")
+                continue
+
+            if col in numeric_columns:
+                total_value = col_totals.get(col, 0.0)
+                display = _format_value(float(total_value))
+                total_cells.append(
+                    f"<td{class_attr}>{_escape_html(display)}</td>"
+                )
+            else:
+                total_cells.append(f"<td{class_attr}></td>")
+
+        body_rows.append(f"<tr class=\"total-row\">{''.join(total_cells)}</tr>")
 
     tbody = f"<tbody>{''.join(body_rows)}</tbody>"
 

@@ -22,35 +22,45 @@
 
 /* Header Styling */
 .analytics-table thead th {
-  background-color: #f7f8fa;
-  color: #333;
-  padding: 12px;
+  background: linear-gradient(135deg, #eef2ff, #dbeafe);
+  color: #1f2937;
+  padding: 14px 16px;
   text-align: left;
-  font-weight: 600;
-  border-bottom: 2px solid #e2e6eb;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 700;
+  border-bottom: 2px solid #cbd5e1;
   position: sticky;
   top: 0;
   z-index: 3;
+  box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.04), 0 2px 6px rgba(31, 41, 55, 0.08);
+  border-radius: 6px 6px 0 0;
 }
 
 /* Body Cells */
 .analytics-table td {
-  padding: 12px;
+  padding: 12px 14px;
   border-bottom: 1px solid #ececec;
   vertical-align: middle;
 }
 
 /* Zebra Striping */
 .analytics-table tbody tr:nth-child(even) {
-  background-color: #fafafa;
+  background: linear-gradient(180deg, #f9fbff 0%, #f4f7fb 100%);
 }
 
 /* Row Hover */
 .analytics-table tbody tr:hover {
   background-color: #eef4ff;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
 }
 
 /* Numeric Styling */
+.analytics-table td.numeric-col {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 .analytics-table td.amount-col {
   text-align: right;
   font-weight: 600;
@@ -71,7 +81,55 @@
 /* Total Row */
 .analytics-table tr.total-row td {
   font-weight: bold;
-  background-color: #f0f4ff;
+  background-color: #e0e7ff;
   border-top: 2px solid #cbd5e1;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+
+/* Cost Color Coding */
+.analytics-table td.high-cost {
+  color: #b91c1c;
+  font-weight: 700;
+}
+
+.analytics-table td.med-cost {
+  color: #d97706;
+  font-weight: 700;
+}
+
+.analytics-table td.low-cost {
+  color: #15803d;
+  font-weight: 700;
+}
+
+/* Mini Bar Chart */
+.analytics-table td .bar-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.analytics-table td .bar-bg {
+  position: relative;
+  flex: 0 0 70px;
+  height: 6px;
+  border-radius: 999px;
+  background: #e5e7eb;
+  overflow: hidden;
+}
+
+.analytics-table td .bar-fill {
+  position: absolute;
+  inset: 0;
+  width: 0;
+  background: linear-gradient(90deg, #60a5fa, #2563eb);
+  border-radius: 999px;
+  transition: width 0.3s ease;
+}
+
+.analytics-table td .bar-value {
+  min-width: 72px;
+  text-align: right;
 }
 
