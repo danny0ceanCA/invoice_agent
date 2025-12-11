@@ -278,14 +278,18 @@ function ChatAgent({ districtKey }) {
                   dangerouslySetInnerHTML={{ __html: m.content }}
                 />
               ) : (
-                <p
-                  className={`
-                    whitespace-pre-wrap break-words [overflow-wrap:anywhere]
-                    ${m.role === "user" ? "font-semibold" : ""}
-                  `}
-                >
-                  {m.content}
-                </p>
+                  <p
+                    className={`
+                      whitespace-pre-wrap break-words [overflow-wrap:anywhere]
+                      ${
+                        m.role === "user"
+                          ? "font-semibold text-[1.05rem]"
+                          : ""
+                      }
+                    `}
+                  >
+                    {m.content}
+                  </p>
               )}
               <div
                 className={`
