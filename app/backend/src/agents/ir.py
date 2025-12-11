@@ -30,7 +30,8 @@ class AnalyticsIR(BaseModel):
     entities: AnalyticsEntities | None = None
     rows_field_present: bool = True
 
-    # NEW FIELD: canonical router mode used for selecting MV templates
+    # Canonical router mode (e.g. "student_monthly", "student_list")
+    # Used only by rendering/templates, never for SQL.
     mode: str | None = None
 
     def to_payload(self) -> dict[str, Any]:
