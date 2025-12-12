@@ -82,20 +82,98 @@ def _is_numeric(value: Any) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
-# Minimal schema registry for modes that currently leak redundant columns.
-# This is by *category* (router mode), not by every MV.
+# =============================================================================
+# SCHEMA REGISTRY
+# =============================================================================
+# This registry defines the *user-facing column contract* per router CATEGORY.
+#
+# IMPORTANT:
+# - This is CATEGORY-based (router mode), NOT MV-based
+# - Materialized views may contain additional columns
+# - Only these columns are allowed to reach rendering
+# - Prevents leakage of district_key, IDs, helper fields, etc.
+#
+# This is a correctness and safety boundary.
 SCHEMA_REGISTRY: dict[str, dict[str, List[str]]] = {
-    # Student roster – use mv_student_list but only expose student
+    # -------------------------------------------------------------------------
+    # LISTS
+    # -------------------------------------------------------------------------
     "student_list": {
         "columns": ["student"],
     },
-    # Provider roster – use mv_clinician_list but only expose clinician
     "clinician_list": {
         "columns": ["clinician"],
     },
-    # Top invoices report – hide internal IDs; show only key invoice info
+
+    # -------------------------------------------------------------------------
+    # STUDENT REPORTS
+    # -------------------------------------------------------------------------
+    "student_monthly": {
+        "columns": ["service_month", "total_hours", "total_cost"],
+    },
+    "student_provider_breakdown": {
+        "columns": ["provider", "total_hours", "total_cost"],
+    },
+    "student_year_summary": {
+        "columns": ["service_year", "total_hours", "total_cost"],
+    },
+    "student_daily": {
+        "columns": ["service_date", "hours", "cost"],
+    },
+    "student_service_intensity_monthly": {
+        "columns": ["service_month", "service_code", "total_hours", "total_cost"],
+    },
+    "student_service_code_monthly": {
+        "columns": ["service_code", "service_month", "total_hours", "total_cost"],
+    },
+
+    # -------------------------------------------------------------------------
+    # PROVIDER / CLINICIAN REPORTS
+    # -------------------------------------------------------------------------
+    "provider_monthly": {
+        "columns": ["service_month", "total_hours", "total_cost"],
+    },
+    "provider_caseload_monthly": {
+        "columns": ["service_month", "num_students", "total_hours", "total_cost"],
+    },
+    "clinician_student_breakdown": {
+        "columns": ["student", "service_month", "total_hours", "total_cost"],
+    },
+    "provider_daily": {
+        "columns": ["service_date", "student", "hours", "cost"],
+    },
+    "provider_service_code_monthly": {
+        "columns": ["service_code", "service_month", "total_hours", "total_cost"],
+    },
+
+    # -------------------------------------------------------------------------
+    # DISTRICT REPORTS
+    # -------------------------------------------------------------------------
+    "district_monthly": {
+        "columns": ["service_month", "total_hours", "total_cost"],
+    },
+    "district_daily": {
+        "columns": ["service_date", "total_hours", "total_cost"],
+    },
+    "district_service_code_monthly": {
+        "columns": ["service_code", "service_month", "total_hours", "total_cost"],
+    },
+
+    # -------------------------------------------------------------------------
+    # INVOICES
+    # -------------------------------------------------------------------------
     "top_invoices": {
         "columns": ["invoice_number", "invoice_date", "total_cost"],
+    },
+    "invoice_details": {
+        "columns": [
+            "invoice_number",
+            "service_date",
+            "clinician",
+            "service_code",
+            "hours",
+            "cost",
+        ],
     },
 }
 
