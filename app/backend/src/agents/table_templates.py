@@ -95,9 +95,7 @@ def _is_numeric(value: Any) -> bool:
 #
 # This is a correctness and safety boundary.
 SCHEMA_REGISTRY: dict[str, dict[str, List[str]]] = {
-    # -------------------------------------------------------------------------
-    # LISTS
-    # -------------------------------------------------------------------------
+    # ---------- LIST MODES ----------
     "student_list": {
         "columns": ["student"],
     },
@@ -105,63 +103,48 @@ SCHEMA_REGISTRY: dict[str, dict[str, List[str]]] = {
         "columns": ["clinician"],
     },
 
-    # -------------------------------------------------------------------------
-    # STUDENT REPORTS
-    # -------------------------------------------------------------------------
+    # ---------- STUDENT MODES ----------
     "student_monthly": {
         "columns": ["service_month", "total_hours", "total_cost"],
     },
     "student_provider_breakdown": {
         "columns": ["provider", "total_hours", "total_cost"],
     },
-    "student_year_summary": {
-        "columns": ["service_year", "total_hours", "total_cost"],
-    },
-    "student_daily": {
-        "columns": ["service_date", "hours", "cost"],
-    },
-    "student_service_intensity_monthly": {
-        "columns": ["service_month", "service_code", "total_hours", "total_cost"],
-    },
     "student_service_code_monthly": {
         "columns": ["service_code", "service_month", "total_hours", "total_cost"],
     },
-
-    # -------------------------------------------------------------------------
-    # PROVIDER / CLINICIAN REPORTS
-    # -------------------------------------------------------------------------
-    "provider_monthly": {
-        "columns": ["service_month", "total_hours", "total_cost"],
+    "student_year_summary": {
+        "columns": ["service_year", "total_hours", "total_cost"],
     },
+    "student_service_intensity_monthly": {
+        "columns": ["service_month", "intensity_score", "total_hours"],
+    },
+
+    # ---------- PROVIDER / CLINICIAN MODES ----------
     "provider_caseload_monthly": {
-        "columns": ["service_month", "num_students", "total_hours", "total_cost"],
+        "columns": [
+            "service_month",
+            "num_students",
+            "total_hours",
+            "total_cost",
+        ],
     },
     "clinician_student_breakdown": {
-        "columns": ["student", "service_month", "total_hours", "total_cost"],
-    },
-    "provider_daily": {
-        "columns": ["service_date", "student", "hours", "cost"],
+        "columns": ["student", "total_hours", "total_cost"],
     },
     "provider_service_code_monthly": {
         "columns": ["service_code", "service_month", "total_hours", "total_cost"],
     },
 
-    # -------------------------------------------------------------------------
-    # DISTRICT REPORTS
-    # -------------------------------------------------------------------------
+    # ---------- DISTRICT MODES ----------
     "district_monthly": {
         "columns": ["service_month", "total_hours", "total_cost"],
-    },
-    "district_daily": {
-        "columns": ["service_date", "total_hours", "total_cost"],
     },
     "district_service_code_monthly": {
         "columns": ["service_code", "service_month", "total_hours", "total_cost"],
     },
 
-    # -------------------------------------------------------------------------
-    # INVOICES
-    # -------------------------------------------------------------------------
+    # ---------- INVOICE MODES ----------
     "top_invoices": {
         "columns": ["invoice_number", "invoice_date", "total_cost"],
     },
@@ -169,7 +152,7 @@ SCHEMA_REGISTRY: dict[str, dict[str, List[str]]] = {
         "columns": [
             "invoice_number",
             "service_date",
-            "clinician",
+            "provider",
             "service_code",
             "hours",
             "cost",
