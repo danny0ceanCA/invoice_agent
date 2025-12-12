@@ -155,10 +155,16 @@ export function App() {
         <h2 className="text-2xl font-semibold text-slate-900">
           District-Ready Invoice & Service Analytics
         </h2>
+
         <p className="text-slate-600">
           CareSpend Analytics gives districts and service providers clear,
           student-level visibility into hours, costs, and coverage —
           without spreadsheets or manual reconciliation.
+        </p>
+
+        <p className="text-sm text-slate-500">
+          Designed for school districts managing health, special education,
+          and contracted student services.
         </p>
       </div>
 
@@ -184,7 +190,7 @@ export function App() {
           <h3 className="text-sm font-semibold text-slate-900">Built for Oversight</h3>
           <p className="mt-1 text-sm text-slate-600">
             Designed to support audits, compliance, and leadership
-            reporting across school-based services.
+            reporting across contracted school-based services.
           </p>
         </div>
       </div>
@@ -205,6 +211,7 @@ export function App() {
     </div>
   );
 }
+
  else if (pendingApproval) {
     mainContent = <PendingApproval />;
   } else if (profileLoading && !profile) {
