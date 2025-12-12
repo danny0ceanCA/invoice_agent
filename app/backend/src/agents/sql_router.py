@@ -123,6 +123,15 @@ def route_sql(
     print("[DOMAIN-CONFIG-DEBUG][ROUTER] plan_kind:", plan_kind)
     print("[DOMAIN-CONFIG-DEBUG][ROUTER] plan_kind_mode:", plan_kind_mode)
 
+    # ---------------------------------------------------------
+    # Ambiguity guard:
+    # If the planner implies a single canonical mode via plan_kind,
+    # prefer it over other fuzzy matches.
+    # ---------------------------------------------------------
+    if plan_kind_mode and matched_modes:
+        if plan_kind_mode in matched_modes:
+            matched_modes = [plan_kind_mode]
+
     prioritized_modes = [
         "invoice_details",
         "top_invoices",
