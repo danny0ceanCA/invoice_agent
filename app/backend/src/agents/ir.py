@@ -30,8 +30,8 @@ class AnalyticsIR(BaseModel):
     entities: AnalyticsEntities | None = None
     rows_field_present: bool = True
 
-    # Canonical router mode (e.g. "student_monthly", "student_list")
-    # Used only by rendering/templates, never for SQL.
+    # NEW: attach canonical router mode
+    # (e.g. "student_list", "top_invoices", "invoice_details", etc.)
     mode: str | None = None
 
     def to_payload(self) -> dict[str, Any]:
