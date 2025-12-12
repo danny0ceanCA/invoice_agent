@@ -103,8 +103,8 @@ celery = Celery(
 # Ensure Celery knows about the project task modules. Without this explicit
 # registration the worker starts successfully but never sees the
 # `tasks.process_invoice` task, so uploads remain stuck in the ``queued`` state
-# forever.
-celery.conf.update(include=["tasks.invoice_tasks"])
+# forever. We also register analytics prefetch tasks.
+celery.conf.update(include=["tasks.invoice_tasks", "tasks.prefetch_tasks"])
 
 ssl_options = _build_ssl_options()
 

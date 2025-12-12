@@ -5,8 +5,10 @@ from __future__ import annotations
 import re
 import json
 from dataclasses import dataclass, field
+import hashlib
 from html import escape
 from time import perf_counter
+import time
 from typing import Any, Mapping, Sequence
 
 import structlog
@@ -16,9 +18,15 @@ from sqlalchemy import text as sql_text
 from sqlalchemy.engine import Engine
 
 from app.backend.src.core.config import get_settings
+from app.backend.src.core.redis_cache import RedisAnalyticsCache
 from app.backend.src.core.memory import ConversationMemory, RedisConversationMemory
 from app.backend.src.db import get_engine
+from app.backend.src.services.prefetch_service import enqueue_prefetch_jobs
 from app.backend.src.services.s3 import get_s3_client
+from app.backend.src.services.materialized_report_service import (
+    fetch_materialized_report,
+    persist_materialized_report,
+)
 from .multi_turn_model import MultiTurnConversationManager
 from .business_rule_model import build_business_rule_system_prompt, run_business_rule_model
 from .entity_resolution_model import (
@@ -35,6 +43,11 @@ from .sql_planner_model import build_sql_planner_system_prompt, run_sql_planner_
 from .validator_model import build_validator_system_prompt, run_validator_model
 
 LOGGER = structlog.get_logger(__name__)
+CACHE = RedisAnalyticsCache()
+
+
+def log_timing(stage, start, end):
+    LOGGER.info("latency", stage=stage, duration_ms=(end - start) * 1000)
 
 DEFAULT_MODEL = "gpt-4.1-mini"  # used for all supporting models
 LOGIC_MODEL = "gpt-5.1"  # only for logic_model
@@ -547,6 +560,7 @@ class Workflow:
         #     query = _maybe_apply_active_student_filter(query, active_filters)
 
         start_time = perf_counter()
+        start = time.monotonic()
         # Prefer fused_query for NLV if available; otherwise use the original raw query.
         nlv_query = fused_query or context.query
 
@@ -558,6 +572,7 @@ class Workflow:
             system_prompt=self.nlv_system_prompt,
             temperature=agent.nlv_temperature,
         )
+        log_timing("NLV", start, time.monotonic())
         current_intent = normalized_intent.get("intent") if isinstance(normalized_intent, Mapping) else None
         if agent.multi_turn_manager and session_id:
             try:
@@ -571,9 +586,142 @@ class Workflow:
             normalized_intent=normalized_intent,
         )
 
+        nlv_intent_json = json.dumps(normalized_intent or {}, sort_keys=True)
+        cache_key = hashlib.sha256(nlv_intent_json.encode("utf-8")).hexdigest()
+
+        cached_response = CACHE.get(cache_key)
+        if cached_response:
+            LOGGER.info("cache_hit", key=cache_key)
+            try:
+                return AgentResponse(**cached_response)
+            except Exception as exc:  # pragma: no cover - defensive
+                LOGGER.warning("cache_deserialize_failed", key=cache_key, error=str(exc))
+
+        # ----------------------------
+        # Step 5.2: Postgres Fallback
+        # ----------------------------
+
+        pg_cached = fetch_materialized_report(
+            engine=self.engine,
+            cache_key=cache_key,
+            district_key=context.district_key,
+        )
+
+        if pg_cached:
+            LOGGER.info("pg_cache_hit", key=cache_key)
+            try:
+                # Rehydrate into AgentResponse so UI layer stays consistent
+                return AgentResponse(**pg_cached)
+            except Exception as exc:
+                LOGGER.warning(
+                    "pg_cache_deserialize_failed",
+                    key=cache_key,
+                    error=str(exc),
+                )
+
+        LOGGER.info("cache_miss", key=cache_key)
+
+        def _cache_and_return(payload: Mapping[str, Any]) -> AgentResponse:
+            # router_decision will be populated later in the workflow; we only read it here.
+            nonlocal router_decision
+
+            render_payload: Mapping[str, Any] | None = None
+            ir: AnalyticsIR | None = None
+
+            if isinstance(payload, Mapping):
+                render_payload = dict(payload)
+
+            if not (isinstance(render_payload, Mapping) and render_payload.get("_rendered")):
+                ir = _payload_to_ir(payload, context.last_rows)
+
+                # Attach router mode to the IR so templates always receive a stable mode
+                try:
+                    if router_decision:
+                        mode = getattr(router_decision, "mode", None)
+                        if mode:
+                            setattr(ir, "mode", mode)
+                except Exception as exc:
+                    LOGGER.warning("attach_mode_to_ir_failed", error=str(exc))
+                render_payload = ir.to_payload()
+
+                insights: list[str] = []
+                if ir.rows is not None:
+                    try:
+                        start_time = perf_counter()
+                        start = time.monotonic()
+                        insights_result = run_insight_model(
+                            ir=ir,
+                            client=agent.client,
+                            model=agent.insight_model,
+                            system_prompt=self.insight_system_prompt,
+                            temperature=agent.insight_temperature,
+                        )
+                        log_timing("Insight Model", start, time.monotonic())
+                        _record_stage_duration(context, "insight_model", start_time)
+                        insights = insights_result.get("insights") or []
+                    except Exception as exc:  # pragma: no cover - defensive
+                        LOGGER.warning("insight_model_failed", error=str(exc))
+
+                    if ir.rows is not None:
+                        try:
+                            start_time = perf_counter()
+                            start = time.monotonic()
+                            render_payload = run_rendering_model(
+                                user_query=context.query,
+                                ir=ir,
+                                insights=insights,
+                                client=agent.client,
+                                model=agent.render_model,
+                                system_prompt=self.rendering_system_prompt,
+                                temperature=agent.render_temperature,
+                            )
+                            log_timing("Rendering Model", start, time.monotonic())
+                            _record_stage_duration(context, "rendering_model", start_time)
+                        except Exception as exc:  # pragma: no cover - defensive
+                            LOGGER.warning("rendering_model_failed", error=str(exc))
+                            render_payload = ir.to_payload()
+            if isinstance(render_payload, dict):
+                render_payload.pop("_rendered", None)
+                if "rows" not in render_payload and ir and ir.rows is not None:
+                    render_payload["rows"] = ir.rows
+            else:
+                ir = ir or _payload_to_ir(payload, context.last_rows)
+                render_payload = ir.to_payload()
+
+            response = _finalise_response(render_payload, context)
+
+            # Persist to Redis
+            CACHE.set(cache_key, response.dict())
+            LOGGER.info("cache_write", key=cache_key)
+
+            # Best-effort persistence to Postgres as a materialized report
+            try:
+                persist_materialized_report(
+                    engine=self.engine,
+                    district_key=context.district_key,
+                    cache_key=cache_key,
+                    normalized_intent=normalized_intent,
+                    router_decision=router_decision.to_dict() if router_decision else None,
+                    agent_response=response.dict(),
+                )
+
+                # Best-effort enqueue of prefetch jobs based on the current report.
+                enqueue_prefetch_jobs(
+                    normalized_intent=normalized_intent,
+                    router_decision=router_decision.to_dict() if router_decision else None,
+                    last_rows=context.last_rows,
+                    district_key=context.district_key,
+                    user_id=context.user_context.get("user_id") if isinstance(context.user_context, dict) else None,
+                )
+
+            except Exception as exc:  # pragma: no cover - defensive
+                LOGGER.warning("persist_materialized_report_wrapper_failed", error=str(exc))
+            return response
+
         known_entities = _load_district_entities(self.engine, context.district_key)
 
         start_time = perf_counter()
+        start = time.monotonic()
         entity_result = run_entity_resolution_model(
             user_query=query,
             normalized_intent=normalized_intent,
@@ -584,6 +732,7 @@ class Workflow:
             system_prompt=self.entity_resolution_system_prompt,
             temperature=agent.entity_temperature,
         )
+        log_timing("Entity Resolution", start, time.monotonic())
         _record_stage_duration(context, "entity_resolution_model", start_time)
 
         resolved_intent = entity_result.get("normalized_intent") or normalized_intent
@@ -611,6 +760,7 @@ class Workflow:
             logic_ir = _payload_to_ir(payload, context.last_rows)
 
             start_time = perf_counter()
+            start = time.monotonic()
             br_result = run_business_rule_model(
                 ir=logic_ir,
                 entities=resolved_entities,
@@ -620,11 +770,13 @@ class Workflow:
                 system_prompt=self.business_rule_system_prompt,
                 temperature=agent.business_rule_temperature,
             )
+            log_timing("Business Rule Model", start, time.monotonic())
             _record_stage_duration(context, "business_rule_model", start_time)
             br_ir_dict = br_result.get("ir") if isinstance(br_result.get("ir"), dict) else None
             effective_ir = _payload_to_ir(br_ir_dict, context.last_rows) if br_ir_dict else logic_ir
 
             start_time = perf_counter()
+            start = time.monotonic()
             validator_result = run_validator_model(
                 ir=effective_ir,
                 client=agent.client,
@@ -632,6 +784,7 @@ class Workflow:
                 system_prompt=self.validator_system_prompt,
                 temperature=agent.validator_temperature,
             )
+            log_timing("Validator Model", start, time.monotonic())
             _record_stage_duration(context, "validator_model", start_time)
             is_valid = bool(validator_result.get("valid", True))
 
@@ -647,19 +800,23 @@ class Workflow:
                     entities=None,
                 )
                 start_time = perf_counter()
+                start = time.monotonic()
                 render_payload = run_rendering_model(
-                user_query=context.query,
-                ir=safe_ir,
-                insights=[],
-                client=agent.client,
-                model=agent.render_model,
-                system_prompt=self.rendering_system_prompt,
-                temperature=agent.render_temperature,
+                    user_query=context.query,
+                    ir=safe_ir,
+                    insights=[],
+                    client=agent.client,
+                    model=agent.render_model,
+                    system_prompt=self.rendering_system_prompt,
+                    temperature=agent.render_temperature,
                 )
+                render_payload["_rendered"] = True
+                log_timing("Rendering Model", start, time.monotonic())
                 _record_stage_duration(context, "rendering_model", start_time)
-                return _finalise_response(render_payload, context)
+                return _cache_and_return(render_payload)
 
             start_time = perf_counter()
+            start = time.monotonic()
             insight_result = run_insight_model(
                 ir=effective_ir,
                 client=agent.client,
@@ -667,10 +824,12 @@ class Workflow:
                 system_prompt=self.insight_system_prompt,
                 temperature=agent.insight_temperature,
             )
+            log_timing("Insight Model", start, time.monotonic())
             _record_stage_duration(context, "insight_model", start_time)
             insights = insight_result.get("insights") or []
 
             start_time = perf_counter()
+            start = time.monotonic()
             render_payload = run_rendering_model(
                 user_query=context.query,
                 ir=effective_ir,
@@ -680,10 +839,13 @@ class Workflow:
                 system_prompt=self.rendering_system_prompt,
                 temperature=agent.render_temperature,
             )
+            render_payload["_rendered"] = True
+            log_timing("Rendering Model", start, time.monotonic())
             _record_stage_duration(context, "rendering_model", start_time)
-            return _finalise_response(render_payload, context)
+            return _cache_and_return(render_payload)
 
         start_time = perf_counter()
+        start = time.monotonic()
         sql_plan_result = run_sql_planner_model(
             user_query=query,
             normalized_intent=resolved_intent,
@@ -694,6 +856,7 @@ class Workflow:
             system_prompt=self.sql_planner_system_prompt,
             temperature=agent.sql_planner_temperature,
         )
+        log_timing("SQL Planner", start, time.monotonic())
         _record_stage_duration(context, "sql_planner_model", start_time)
 
         plan = sql_plan_result.get("plan")
@@ -713,6 +876,7 @@ class Workflow:
             logic_ir = _payload_to_ir(payload, context.last_rows)
 
             start_time = perf_counter()
+            start = time.monotonic()
             br_result = run_business_rule_model(
                 ir=logic_ir,
                 entities=resolved_entities,
@@ -722,11 +886,13 @@ class Workflow:
                 system_prompt=self.business_rule_system_prompt,
                 temperature=agent.business_rule_temperature,
             )
+            log_timing("Business Rule Model", start, time.monotonic())
             _record_stage_duration(context, "business_rule_model", start_time)
             br_ir_dict = br_result.get("ir") if isinstance(br_result.get("ir"), dict) else None
             effective_ir = _payload_to_ir(br_ir_dict, context.last_rows) if br_ir_dict else logic_ir
 
             start_time = perf_counter()
+            start = time.monotonic()
             validator_result = run_validator_model(
                 ir=effective_ir,
                 client=agent.client,
@@ -734,6 +900,7 @@ class Workflow:
                 system_prompt=self.validator_system_prompt,
                 temperature=agent.validator_temperature,
             )
+            log_timing("Validator Model", start, time.monotonic())
             _record_stage_duration(context, "validator_model", start_time)
             is_valid = bool(validator_result.get("valid", True))
 
@@ -749,19 +916,23 @@ class Workflow:
                     entities=None,
                 )
                 start_time = perf_counter()
+                start = time.monotonic()
                 render_payload = run_rendering_model(
-                user_query=context.query,
-                ir=safe_ir,
-                insights=[],
-                client=agent.client,
-                model=agent.render_model,
-                system_prompt=self.rendering_system_prompt,
-                temperature=agent.render_temperature,
+                    user_query=context.query,
+                    ir=safe_ir,
+                    insights=[],
+                    client=agent.client,
+                    model=agent.render_model,
+                    system_prompt=self.rendering_system_prompt,
+                    temperature=agent.render_temperature,
                 )
+                render_payload["_rendered"] = True
+                log_timing("Rendering Model", start, time.monotonic())
                 _record_stage_duration(context, "rendering_model", start_time)
-                return _finalise_response(render_payload, context)
+                return _cache_and_return(render_payload)
 
             start_time = perf_counter()
+            start = time.monotonic()
             insight_result = run_insight_model(
                 ir=effective_ir,
                 client=agent.client,
@@ -769,10 +940,12 @@ class Workflow:
                 system_prompt=self.insight_system_prompt,
                 temperature=agent.insight_temperature,
             )
+            log_timing("Insight Model", start, time.monotonic())
             _record_stage_duration(context, "insight_model", start_time)
             insights = insight_result.get("insights") or []
 
             start_time = perf_counter()
+            start = time.monotonic()
             render_payload = run_rendering_model(
                 user_query=context.query,
                 ir=effective_ir,
@@ -782,10 +955,13 @@ class Workflow:
                 system_prompt=self.rendering_system_prompt,
                 temperature=agent.render_temperature,
             )
+            render_payload["_rendered"] = True
+            log_timing("Rendering Model", start, time.monotonic())
             _record_stage_duration(context, "rendering_model", start_time)
-            return _finalise_response(render_payload, context)
+            return _cache_and_return(render_payload)
 
         start_time = perf_counter()
+        start = time.monotonic()
         router_decision = run_sql_router_model(
             user_query=query,
             sql_plan=plan,
@@ -797,6 +973,7 @@ class Workflow:
             system_prompt=self.router_system_prompt,
             temperature=agent.router_temperature,
         )
+        log_timing("SQL Router", start, time.monotonic())
         _record_stage_duration(context, "sql_router_model", start_time)
 
         messages: list[dict[str, Any]] = [
@@ -876,7 +1053,7 @@ class Workflow:
                         else:
                             context.last_rows = rows
                             payload = {"text": "", "rows": rows, "html": None}
-                        return _finalise_response(payload, context)
+                        return _cache_and_return(payload)
 
                 # Otherwise, fall back to invoice-scope provider breakdown using invoice_numbers from the last rows
                 inv_values = {
@@ -927,9 +1104,10 @@ class Workflow:
                             context.last_rows = rows
                             payload = {"text": "", "rows": rows, "html": None}
 
-                        return _finalise_response(payload, context)
+                        return _cache_and_return(payload)
 
             start_time = perf_counter()
+            start = time.monotonic()
             message = run_logic_model(
                 agent.client,
                 model=agent.logic_model,
@@ -938,6 +1116,7 @@ class Workflow:
                 temperature=agent.logic_temperature,
                 router_decision=router_decision.to_dict(),
             )
+            log_timing("Logic Model", start, time.monotonic())
             _record_stage_duration(context, "logic_model", start_time)
             tool_calls = message.tool_calls or []
             assistant_message: dict[str, Any] = {
@@ -991,7 +1170,7 @@ class Workflow:
                                 "rows": None,
                                 "html": _safe_html(error_text),
                             }
-                            return _finalise_response(payload, context)
+                            return _cache_and_return(payload)
                         tool_payload = {"tool": tool.name, "error": str(exc)}
                         tool_result = None
 
@@ -1016,7 +1195,19 @@ class Workflow:
                             "content": tool_message,
                         }
                     )
-                continue
+                # Instead of calling Logic Model again, finalize immediately
+                final_payload = {
+                    "text": "",
+                    "rows": context.last_rows,
+                    "html": None,
+                    "entities": {
+                        "students": resolved_entities.get("students", []),
+                        "providers": resolved_entities.get("providers", []),
+                        "vendors": resolved_entities.get("vendors", []),
+                        "invoices": resolved_entities.get("invoices", []),
+                    },
+                }
+                return _cache_and_return(final_payload)
 
             raw_content = message.content or ""
 
@@ -1024,30 +1215,19 @@ class Workflow:
                 payload = json.loads(raw_content)
             except json.JSONDecodeError:
                 LOGGER.warning("agent_invalid_json", iteration=iteration, content=raw_content)
-
-                # Give the model a chance to correct its format instead of immediately
-                # returning raw text to the user. This tends to occur when the model
-                # answers conversationally without wrapping the response in the required
-                # JSON object, which leaves the UI without tables or numbers. Prompt the
-                # model to retry with the correct structure and, if needed, invoke tools.
-                if iteration < agent.workflow.max_iterations - 1:
-                    messages.append(
-                        {
-                            "role": "system",
-                            "content": (
-                                "The prior assistant message was not valid JSON. "
-                                "Respond again using a single JSON object with keys "
-                                "'text', 'rows', and 'html'. Do not include plain text "
-                                "outside that object. If data is required, call the "
-                                "available tools (run_sql or list_s3) before returning."
-                            ),
-                        }
-                    )
-                    continue
-
-                text = raw_content.strip() or "No response provided."
-                fallback_payload = {"text": text, "rows": context.last_rows, "html": None}
-                return _finalise_response(fallback_payload, context)
+                # Skip logic retries — finalize using last known SQL rows or empty
+                fallback_payload = {
+                    "text": "Invalid JSON from logic model.",
+                    "rows": context.last_rows,
+                    "html": None,
+                    "entities": {
+                        "students": resolved_entities.get("students", []),
+                        "providers": resolved_entities.get("providers", []),
+                        "vendors": resolved_entities.get("vendors", []),
+                        "invoices": resolved_entities.get("invoices", []),
+                    },
+                }
+                return _cache_and_return(fallback_payload)
 
             logic_ir = _payload_to_ir(payload, context.last_rows)
 
@@ -1119,16 +1299,21 @@ class Workflow:
                     html=None,
                     entities=None,
                 )
+                start_time = perf_counter()
+                start = time.monotonic()
                 render_payload = run_rendering_model(
-                user_query=context.query,
-                ir=safe_ir,
-                insights=[],
-                client=agent.client,
-                model=agent.render_model,
-                system_prompt=self.rendering_system_prompt,
-                temperature=agent.render_temperature,
+                    user_query=context.query,
+                    ir=safe_ir,
+                    insights=[],
+                    client=agent.client,
+                    model=agent.render_model,
+                    system_prompt=self.rendering_system_prompt,
+                    temperature=agent.render_temperature,
                 )
-                return _finalise_response(render_payload, context)
+                render_payload["_rendered"] = True
+                log_timing("Rendering Model", start, time.monotonic())
+                _record_stage_duration(context, "rendering_model", start_time)
+                return _cache_and_return(render_payload)
 
             start_time = perf_counter()
             insight_result = run_insight_model(
@@ -1142,6 +1327,7 @@ class Workflow:
             insights = insight_result.get("insights") or []
 
             start_time = perf_counter()
+            start = time.monotonic()
             render_payload = run_rendering_model(
                 user_query=context.query,
                 ir=effective_ir,
@@ -1151,8 +1337,10 @@ class Workflow:
                 system_prompt=self.rendering_system_prompt,
                 temperature=agent.render_temperature,
             )
+            render_payload["_rendered"] = True
+            log_timing("Rendering Model", start, time.monotonic())
             _record_stage_duration(context, "rendering_model", start_time)
-            return _finalise_response(render_payload, context)
+            return _cache_and_return(render_payload)
 
         raise RuntimeError("Agent workflow exceeded iteration limit.")
 

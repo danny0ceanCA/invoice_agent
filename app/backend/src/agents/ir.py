@@ -30,6 +30,10 @@ class AnalyticsIR(BaseModel):
     entities: AnalyticsEntities | None = None
     rows_field_present: bool = True
 
+    # NEW: attach canonical router mode
+    # (e.g. "student_list", "top_invoices", "invoice_details", etc.)
+    mode: str | None = None
+
     def to_payload(self) -> dict[str, Any]:
         """Return a mapping compatible with the existing rendering pipeline."""
 
@@ -40,6 +44,8 @@ class AnalyticsIR(BaseModel):
             payload["rows"] = self.rows
         if self.entities is not None:
             payload["entities"] = self.entities.model_dump()
+        if self.mode is not None:
+            payload["mode"] = self.mode
         return payload
 
 
@@ -64,6 +70,7 @@ def _payload_to_ir(payload: Any, last_rows: list[dict[str, Any]] | None = None) 
         rows_present = "rows" in payload
         text_value = str(payload.get("text") or "").strip()
         html_value = payload.get("html") if isinstance(payload.get("html"), str) else None
+        mode_value = str(payload.get("mode")) if isinstance(payload.get("mode"), str) else None
         rows_value = _coerce_rows(payload.get("rows"))
         return AnalyticsIR(
             text=text_value,
@@ -72,6 +79,7 @@ def _payload_to_ir(payload: Any, last_rows: list[dict[str, Any]] | None = None) 
             html=html_value,
             entities=entities_obj,
             rows_field_present=rows_present,
+            mode=mode_value,
         )
 
     if isinstance(payload, str):

@@ -180,11 +180,11 @@ function ChatAgent({ districtKey }) {
   }
 
   return (
-    <div className="w-full flex flex-col bg-white">
+    <div className="w-full flex flex-col bg-white flex-1 min-h-0 overflow-hidden">
       {/* Scrollable chat area */}
       <div
         ref={scrollRef}
-        className="px-4 py-4 space-y-4"
+        className="flex-1 px-4 py-4 space-y-4 overflow-y-auto"
         onScroll={(e) => {
           const target = e.target;
           const atBottom =
@@ -204,9 +204,7 @@ function ChatAgent({ districtKey }) {
                 md:max-w-[65%]
                 lg:max-w-[55%]
                 xl:max-w-[50%]
-                px-4 py-3
                 rounded-2xl
-                text-sm
                 overflow-hidden
                 break-words
                 [overflow-wrap:anywhere]
@@ -214,8 +212,22 @@ function ChatAgent({ districtKey }) {
                 min-w-0
                 ${
                   m.role === "user"
-                    ? "bg-amber-500 text-white ml-auto overflow-hidden"
-                    : "bg-slate-100 text-slate-800 mr-auto shadow"
+                    ? `
+                        bg-amber-500 text-white ml-auto
+                        shadow-lg shadow-amber-300/30
+                        rounded-2xl
+                        px-6 py-4
+                        max-w-[85%]
+                        text-[1rem]
+                        leading-relaxed
+                      `
+                    : `
+                        bg-slate-100 text-slate-800 mr-auto
+                        shadow-md
+                        rounded-2xl
+                        px-6 py-4
+                        max-w-[85%]
+                      `
                 }
               `}
             >
@@ -263,13 +275,30 @@ function ChatAgent({ districtKey }) {
                   [&_td]:align-top
                   max-w-full
                 "
-                dangerouslySetInnerHTML={{ __html: m.content }}
+                  dangerouslySetInnerHTML={{ __html: m.content }}
                 />
               ) : (
-                <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
-                  {m.content}
-                </p>
+                  <p
+                    className={`
+                      whitespace-pre-wrap break-words [overflow-wrap:anywhere]
+                      ${
+                        m.role === "user"
+                          ? "font-semibold text-[1.05rem]"
+                          : ""
+                      }
+                    `}
+                  >
+                    {m.content}
+                  </p>
               )}
+              <div
+                className={`
+                  text-xs pt-1 text-right opacity-70
+                  ${m.role === "user" ? "text-white font-semibold" : "text-slate-500"}
+                `}
+              >
+                {new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+              </div>
             </div>
           );
         })}
@@ -288,7 +317,7 @@ function ChatAgent({ districtKey }) {
       )}
 
       {/* Input bar with Home button */}
-      <div className="border-t border-slate-200 p-3 bg-white min-w-0">
+      <div className="border-t border-slate-200 p-3 bg-white min-w-0 shrink-0">
         <div className="flex gap-3 items-center">
           <form onSubmit={handleSend} className="flex gap-3 flex-1">
             <input
@@ -299,6 +328,7 @@ function ChatAgent({ districtKey }) {
               onChange={(e) => setInput(e.target.value)}
               disabled={sending}
             />
+
             <button
               type="submit"
               disabled={sending}
@@ -307,6 +337,7 @@ function ChatAgent({ districtKey }) {
               {sending ? "…" : "Send"}
             </button>
           </form>
+
           <Link
             to="/"
             className="inline-flex items-center rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"

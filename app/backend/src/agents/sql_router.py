@@ -113,6 +113,17 @@ def route_sql(
                 if isinstance(trigger, str) and trigger.lower() in q_lower:
                     matched_modes.append(mode_key)
 
+    # Deduplicate while preserving order (triggers can add duplicates)
+    if matched_modes:
+        seen: set[str] = set()
+        deduped: list[str] = []
+        for m in matched_modes:
+            if m in seen:
+                continue
+            seen.add(m)
+            deduped.append(m)
+        matched_modes = deduped
+
     # Prefer a mode derived from the plan kind when available, using
     # PLAN_KIND_TO_MODE as the authoritative mapping from plan_kinds
     # to router modes. This lets domain_config.json lead routing when
@@ -122,6 +133,18 @@ def route_sql(
     plan_kind_mode = PLAN_KIND_TO_MODE.get(plan_kind) if isinstance(plan_kind, str) else None
     print("[DOMAIN-CONFIG-DEBUG][ROUTER] plan_kind:", plan_kind)
     print("[DOMAIN-CONFIG-DEBUG][ROUTER] plan_kind_mode:", plan_kind_mode)
+
+    # ---------------------------------------------------------
+    # Ambiguity guard:
+    # If the planner implies a single canonical mode via plan_kind,
+    # prefer it over other fuzzy matches.
+    # ---------------------------------------------------------
+    if plan_kind_mode and matched_modes:
+        if plan_kind_mode in matched_modes:
+            matched_modes = [plan_kind_mode]
+    # If triggers found nothing, but plan_kind implies a mode, use it.
+    elif plan_kind_mode and not matched_modes:
+        matched_modes = [plan_kind_mode]
 
     prioritized_modes = [
         "invoice_details",

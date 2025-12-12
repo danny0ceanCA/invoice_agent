@@ -5,6 +5,7 @@ from __future__ import annotations
 from html import escape
 import asyncio
 import json
+import time
 from typing import Any, Iterable, Mapping
 
 import boto3
@@ -29,6 +30,28 @@ _SQL_ENGINE: Engine | None = None
 _OPENAI_CLIENT: OpenAI | None = None
 _OPENAI_API_KEY: str | None = None
 _S3_CLIENT: Any | None = None
+
+
+# Lightweight wrapper so rendering_model is not executed at runtime
+def safe_render_adapter(final_output):
+    """
+    We have a full rendering_model implementation in rendering_model.py,
+    but this server-side analytics pipeline must *never* call the actual
+    OpenAI rendering model here.
+
+    The adapter extracts any existing fields and returns them without
+    modification. This preserves compatibility with the existing UI.
+    """
+    try:
+        if isinstance(final_output, dict):
+            return {
+                "text": final_output.get("text"),
+                "html": final_output.get("html"),
+                "rows": final_output.get("rows"),
+            }
+    except Exception:
+        pass
+    return final_output
 
 
 def _build_context(user: User | None, request_context: Any) -> dict[str, Any]:
@@ -96,7 +119,9 @@ def run_sql(query: str) -> list[dict[str, Any]]:
 
     rows: list[dict[str, Any]] = []
     with engine.connect() as connection:
+        start = time.monotonic()
         result = connection.execute(sql_text(query))
+        LOGGER.info("latency", stage="SQL Execution", duration_ms=(time.monotonic() - start) * 1000)
         for row in result:
             rows.append(dict(row._mapping))
     return rows
@@ -517,6 +542,11 @@ async def run_agent(request: dict, user: User = Depends(get_current_user)) -> di
         ) from exc
 
     final_output = _extract_final_output(response)
+    # Optional rendering adapter
+    try:
+        final_output = safe_render_adapter(final_output)
+    except Exception as e:
+        LOGGER.warning("safe_render_adapter_failed", error=str(e))
     text, html = _format_final_output(final_output)
 
     response_payload: dict[str, Any] = {"text": text, "html": html}

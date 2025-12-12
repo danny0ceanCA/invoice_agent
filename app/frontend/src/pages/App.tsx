@@ -10,6 +10,7 @@ import DistrictDashboard from "./DistrictDashboard.jsx";
 import AdminDashboard from "./AdminDashboard.jsx";
 import AdminUserDashboard from "./AdminUserDashboard.jsx";
 import AdminCreateDistrict from "./AdminCreateDistrict.jsx";
+import AdminAnalyticsDashboard from "./AdminAnalyticsDashboard.jsx";
 import VendorDistrictKeys from "./VendorDistrictKeys.jsx";
 import VendorInvoiceForm from "./VendorInvoiceForm.jsx";
 import Analytics from "./Analytics.jsx";
@@ -118,6 +119,12 @@ export function App() {
         element={profile?.role === "admin" ? <AdminCreateDistrict /> : <Navigate to="/" replace />}
       />
       <Route
+        path="/admin/analytics"
+        element={
+          profile?.role === "admin" ? <AdminAnalyticsDashboard /> : <Navigate to="/" replace />
+        }
+      />
+      <Route
         path="/vendor/district-keys"
         element={
           profile?.role === "vendor" ? <VendorDistrictKeys /> : <Navigate to="/" replace />
@@ -141,19 +148,71 @@ export function App() {
   if (isLoading) {
     mainContent = <div className="text-sm text-slate-600">Checking session…</div>;
   } else if (!isAuthenticated) {
-    mainContent = (
-      <div className="space-y-3 text-sm text-slate-600">
-        <p>Please log in to access the invoice automation portal.</p>
+  mainContent = (
+    <div className="space-y-6">
+      {/* Hero */}
+      <div className="space-y-2">
+        <h2 className="text-2xl font-semibold text-slate-900">
+          District-Ready Invoice & Service Analytics
+        </h2>
+
+        <p className="text-slate-600">
+          CareSpend Analytics gives districts and service providers clear,
+          student-level visibility into hours, costs, and coverage —
+          without spreadsheets or manual reconciliation.
+        </p>
+
+        <p className="text-sm text-slate-500">
+          Designed for school districts managing health, special education,
+          and contracted student services.
+        </p>
+      </div>
+
+      {/* Value props */}
+      <div className="grid gap-4 sm:grid-cols-3">
+        <div className="rounded border bg-slate-50 p-4">
+          <h3 className="text-sm font-semibold text-slate-900">For Districts</h3>
+          <p className="mt-1 text-sm text-slate-600">
+            Track student services, monitor spend trends, and understand
+            where resources are actually going.
+          </p>
+        </div>
+
+        <div className="rounded border bg-slate-50 p-4">
+          <h3 className="text-sm font-semibold text-slate-900">For Vendors</h3>
+          <p className="mt-1 text-sm text-slate-600">
+            Generate invoices, manage district access, and validate
+            submitted hours with confidence.
+          </p>
+        </div>
+
+        <div className="rounded border bg-slate-50 p-4">
+          <h3 className="text-sm font-semibold text-slate-900">Built for Oversight</h3>
+          <p className="mt-1 text-sm text-slate-600">
+            Designed to support audits, compliance, and leadership
+            reporting across contracted school-based services.
+          </p>
+        </div>
+      </div>
+
+      {/* CTA */}
+      <div className="flex items-center gap-4">
         <button
           type="button"
-          className="rounded bg-amber-500 px-3 py-2 text-sm font-semibold text-white shadow transition hover:bg-amber-600"
+          className="rounded bg-amber-500 px-4 py-2 text-sm font-semibold text-white shadow transition hover:bg-amber-600"
           onClick={() => loginWithRedirect()}
         >
           Log in
         </button>
+        <span className="text-sm text-slate-500">
+          Authorized users only
+        </span>
       </div>
-    );
-  } else if (pendingApproval) {
+    </div>
+  );
+}
+
+ else if (pendingApproval) {
     mainContent = <PendingApproval />;
   } else if (profileLoading && !profile) {
     mainContent = <div className="text-sm text-slate-600">Loading your workspace…</div>;

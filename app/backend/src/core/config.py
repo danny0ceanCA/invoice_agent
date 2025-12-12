@@ -41,6 +41,18 @@ class Settings(BaseSettings):
     local_storage_path: str = Field(
         default="/tmp/invoice-agent", alias="LOCAL_STORAGE_PATH"
     )
+    # Prefetch throttling
+    prefetch_enabled: bool = Field(default=True, alias="PREFETCH_ENABLED")
+    prefetch_max_queue: int = Field(default=3, alias="PREFETCH_MAX_QUEUE")
+    prefetch_min_interval_sec: int = Field(
+        default=10, alias="PREFETCH_MIN_INTERVAL_SEC"
+    )
+    prefetch_max_redis_keys: int = Field(
+        default=5000, alias="PREFETCH_MAX_REDIS_KEYS"
+    )
+    prefetch_skip_expensive: bool = Field(
+        default=True, alias="PREFETCH_SKIP_EXPENSIVE"
+    )
     auth0_domain: str | None = Field(default=None, alias="AUTH0_DOMAIN")
     auth0_audience: str | None = Field(default=None, alias="AUTH0_AUDIENCE")
     analytics_default_model: str = Field(
