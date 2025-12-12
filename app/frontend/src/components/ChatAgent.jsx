@@ -180,11 +180,11 @@ function ChatAgent({ districtKey }) {
   }
 
   return (
-    <div className="w-full flex flex-col bg-white">
+    <div className="w-full flex flex-col bg-white flex-1 min-h-0 overflow-hidden">
       {/* Scrollable chat area */}
       <div
         ref={scrollRef}
-        className="px-4 py-4 space-y-4"
+        className="flex-1 px-4 py-4 space-y-4 overflow-y-auto"
         onScroll={(e) => {
           const target = e.target;
           const atBottom =
@@ -317,7 +317,7 @@ function ChatAgent({ districtKey }) {
       )}
 
       {/* Input bar with Home button */}
-      <div className="border-t border-slate-200 p-3 bg-white min-w-0">
+      <div className="border-t border-slate-200 p-3 bg-white min-w-0 shrink-0">
         <div className="flex gap-3 items-center">
           <form onSubmit={handleSend} className="flex gap-3 flex-1">
             <input
