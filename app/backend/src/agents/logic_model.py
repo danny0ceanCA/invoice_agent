@@ -629,6 +629,8 @@ def build_logic_system_prompt() -> str:
         "- For service_code breakdowns, group line items by service_code and SUM(cost) per code.\n"
         "- In all of these breakdowns, invoice-level totals from invoices.total_cost must never be duplicated per provider.\n"
         "\n"
+        "SERVICE CODE MONTHLY SELECT CLAUSE:\n"
+        "- When building the AnalyticsIR for district_service_code_monthly, set select to [\"service_code\", \"service_month\", \"total_hours\", \"total_cost\"].\n\n"
         "\n"
 
         ####################################################################

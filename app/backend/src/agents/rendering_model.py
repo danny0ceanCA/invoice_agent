@@ -135,6 +135,11 @@ def run_rendering_model(
         has_analysis_hint = has_rows or single_target or bool(ir.select)
         return (not list_like) and has_analysis_hint and (not ambiguous)
 
+    thin_ir = reduce_ir_for_rendering(ir, insights)
+    select_columns = [col for col in (ir.select or []) if isinstance(col, str)]
+    if select_columns:
+        thin_ir["columns"] = select_columns
+
     messages = [
         {"role": "system", "content": system_prompt},
         {
@@ -143,7 +148,7 @@ def run_rendering_model(
                 "User query:\n"
                 f"{user_query}\n\n"
                 "Thin analytics summary (JSON):\n"
-                f"{json.dumps(reduce_ir_for_rendering(ir, insights), default=str)}\n\n"
+                f"{json.dumps(thin_ir, default=str)}\n\n"
                 "Rendering instructions:\n"
                 "- You do NOT see the full table rows.\n"
                 "- The system will inject the actual <table> HTML separately.\n"

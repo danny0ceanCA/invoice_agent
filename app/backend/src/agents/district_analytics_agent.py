@@ -588,6 +588,8 @@ class Workflow:
 
         nlv_intent_json = json.dumps(normalized_intent or {}, sort_keys=True)
         cache_key = hashlib.sha256(nlv_intent_json.encode("utf-8")).hexdigest()
+        plan: dict[str, Any] | None = None
+        router_decision: Any | None = None
 
         cached_response = CACHE.get(cache_key)
         if cached_response:
@@ -624,6 +626,7 @@ class Workflow:
         def _cache_and_return(payload: Mapping[str, Any]) -> AgentResponse:
             # router_decision will be populated later in the workflow; we only read it here.
             nonlocal router_decision
+            nonlocal plan
 
             render_payload: Mapping[str, Any] | None = None
             ir: AnalyticsIR | None = None
@@ -696,19 +699,58 @@ class Workflow:
 
             # Best-effort persistence to Postgres as a materialized report
             try:
+                router_payload: dict[str, Any] | None = None
+                if router_decision:
+                    router_payload = (
+                        router_decision.to_dict()
+                        if hasattr(router_decision, "to_dict")
+                        else dict(router_decision)
+                    )
+                else:
+                    plan_kind = (plan or {}).get("kind") or "district_summary"
+                    entity_key = None
+                    primary_entities = getattr(ir.entities, "primary_entities", None) if ir else None
+                    if isinstance(primary_entities, list) and primary_entities:
+                        entity_key = primary_entities[0]
+                    elif ir and ir.entities:
+                        for bucket in [
+                            getattr(ir.entities, "students", []),
+                            getattr(ir.entities, "providers", []),
+                            getattr(ir.entities, "vendors", []),
+                        ]:
+                            if bucket:
+                                entity_key = bucket[0]
+                                break
+
+                    month_value = None
+                    if ir and ir.rows:
+                        first_row = ir.rows[0]
+                        if isinstance(first_row, dict):
+                            month_value = (
+                                first_row.get("service_month")
+                                or first_row.get("month")
+                                or first_row.get("service_date")
+                            )
+
+                    router_payload = {
+                        "mode": plan_kind,
+                        "primary_entities": [entity_key] if entity_key else [],
+                        "month_names": [month_value] if month_value else [],
+                    }
+
                 persist_materialized_report(
                     engine=self.engine,
                     district_key=context.district_key,
                     cache_key=cache_key,
                     normalized_intent=normalized_intent,
-                    router_decision=router_decision.to_dict() if router_decision else None,
+                    router_decision=router_payload,
                     agent_response=response.dict(),
                 )
 
                 # Best-effort enqueue of prefetch jobs based on the current report.
                 enqueue_prefetch_jobs(
                     normalized_intent=normalized_intent,
-                    router_decision=router_decision.to_dict() if router_decision else None,
+                    router_decision=router_payload,
                     last_rows=context.last_rows,
                     district_key=context.district_key,
                     user_id=context.user_context.get("user_id") if isinstance(context.user_context, dict) else None,

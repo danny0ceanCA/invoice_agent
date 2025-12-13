@@ -490,7 +490,7 @@ def table_service_code_monthly(ir: AnalyticsIR) -> str:
     return _build_table(
         headers,
         body,
-        caption="Total district cost by service code per month",
+        caption="District cost by service code per month",
     )
 
 
