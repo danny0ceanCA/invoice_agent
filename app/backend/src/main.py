@@ -3,21 +3,16 @@
 import os
 from dotenv import load_dotenv
 
-# Explicitly point to the project root .env
-import os
-from dotenv import load_dotenv
-
-# Explicitly load the .env file located in app/backend/
+# Load .env locally only (Render injects env vars)
 env_path = os.path.join(os.path.dirname(__file__), "../.env")
-load_dotenv(dotenv_path=os.path.abspath(env_path))
-print("DEBUG: OpenAI key loaded (hidden)")
-
+if os.path.exists(env_path):
+    load_dotenv(dotenv_path=os.path.abspath(env_path))
+    print("DEBUG: .env loaded for local dev")
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .api import (
-    admin,
     admin_users,
     admin_districts,
     agents,
@@ -32,13 +27,12 @@ from .api import (
     uploads,
     users,
 )
-from app.api import analytics_agent
-from app.backend.src.api.admin.analytics import router as admin_analytics_router
+from .api import analytics_agent
+from .api.admin.analytics import router as admin_analytics_router
 from .core.logging import configure_logging
 
 
 def create_app() -> FastAPI:
-    """Create the FastAPI application and register routers."""
     configure_logging()
     app = FastAPI(title="CareSpend Analytics", version="0.1.0")
 
@@ -59,7 +53,6 @@ def create_app() -> FastAPI:
     app.include_router(analytics.router, prefix="/api")
     app.include_router(analytics_agent.router, prefix="/api")
     app.include_router(agents.router, prefix="/api")
-    app.include_router(admin.router, prefix="/api")
     app.include_router(admin_users.router, prefix="/api")
     app.include_router(admin_districts.router, prefix="/api")
     app.include_router(admin_analytics_router, prefix="/api")
