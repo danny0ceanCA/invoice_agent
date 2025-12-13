@@ -277,14 +277,15 @@ def _render_cell(col: str, raw: Any, *, max_cost: float | None = None, allow_cos
     return f"<td{class_attr}>{_escape_html(str(display))}</td>"
 
 
-def _build_table(headers: list[str], body_rows: Iterable[str]) -> str:
+def _build_table(headers: list[str], body_rows: Iterable[str], *, caption: str | None = None) -> str:
     header_html = "".join(f"<th>{_escape_html(h)}</th>" for h in headers)
+    caption_html = f"<caption>{_escape_html(caption)}</caption>" if caption else ""
     thead = f"<thead><tr>{header_html}</tr></thead>"
     tbody = f"<tbody>{''.join(body_rows)}</tbody>"
     return (
         '<div class="table-wrapper">'
         '<table class="analytics-table">'
-        f"{thead}{tbody}"
+        f"{caption_html}{thead}{tbody}"
         "</table>"
         "</div>"
     )
@@ -452,32 +453,30 @@ def table_service_code_monthly(ir: AnalyticsIR) -> str:
         return ""
 
     headers = ["Service Code", "Month", "Hours", "Cost"]
-    grouped: dict[str, list[dict[str, Any]]] = {}
-    for row in rows:
-        code = str(row.get("service_code", ""))
-        grouped.setdefault(code, []).append(row)
+    ordered_rows = sorted(
+        rows,
+        key=lambda r: (
+            _month_sort_key(r.get("service_month")),
+            -(_numeric_value(r.get("total_cost")) or 0.0),
+        ),
+    )
 
     body: List[str] = []
     total_hours = 0.0
     total_cost = 0.0
 
-    for code in sorted(grouped.keys()):
-        group_rows = sorted(grouped[code], key=lambda r: _month_sort_key(r.get("service_month")))
-        body.append(
-            f'<tr class="group-row"><td colspan="4">{_escape_html(code or "Service Code")}</td></tr>'
-        )
-        for row in group_rows:
-            hours_val = row.get("total_hours", "")
-            cost_val = row.get("total_cost", "")
-            total_hours += _numeric_value(hours_val) or 0.0
-            total_cost += _numeric_value(cost_val) or 0.0
-            cells = [
-                _render_cell("service_code", code),
-                _render_cell("service_month", _format_month(row.get("service_month"))),
-                _render_cell("total_hours", hours_val),
-                _render_cell("total_cost", cost_val),
-            ]
-            body.append(f"<tr>{''.join(cells)}</tr>")
+    for row in ordered_rows:
+        hours_val = row.get("total_hours", "")
+        cost_val = row.get("total_cost", "")
+        total_hours += _numeric_value(hours_val) or 0.0
+        total_cost += _numeric_value(cost_val) or 0.0
+        cells = [
+            _render_cell("service_code", row.get("service_code", "")),
+            _render_cell("service_month", _format_month(row.get("service_month"))),
+            _render_cell("total_hours", hours_val),
+            _render_cell("total_cost", cost_val),
+        ]
+        body.append(f"<tr>{''.join(cells)}</tr>")
 
     if body:
         total_cells = [
@@ -488,7 +487,11 @@ def table_service_code_monthly(ir: AnalyticsIR) -> str:
         ]
         body.append(f"<tr class=\"total-row\">{''.join(total_cells)}</tr>")
 
-    return _build_table(headers, body)
+    return _build_table(
+        headers,
+        body,
+        caption="Total district cost by service code per month",
+    )
 
 
 def table_generic(ir: AnalyticsIR) -> str:

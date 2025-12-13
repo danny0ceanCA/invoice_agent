@@ -229,6 +229,7 @@ def run_rendering_model(
             "text": text_value,
             "html": final_html,
             "rows": ir.rows,
+            "select": ir.select,
         }
     except Exception as exc:
         LOGGER.warning("rendering_model_failed", error=str(exc))
@@ -237,4 +238,5 @@ def run_rendering_model(
             "text": "Here is an updated summary.",
             "html": table_html or None,
             "rows": ir.rows,
+            "select": ir.select,
         }
